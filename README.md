@@ -105,7 +105,7 @@ go run ./cmd/mail-auto bootstrap show
 make build
 make check
 # 可选漏洞扫描
-go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 ```
 
 直接运行源码时默认监听 `127.0.0.1:8080`，使用 `./data`、`./keys`，不读取环境变量。Go 二进制与内置前端单进程运行，无 Node 构建依赖。启动参数必须放在子命令前：
