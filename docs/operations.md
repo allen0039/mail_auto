@@ -1,0 +1,101 @@
+# 运维、备份与恢复
+
+在保存 `compose.yaml` 的 Docker 主机上定义辅助函数：
+
+```bash
+ma() { docker compose "$@"; }
+```
+
+本页使用默认项目名 `mail-auto`；若通过 `-p` 自定义项目名，请保持运维命令使用同一项目。
+
+## 运行与访问
+
+执行 `ma pull`、`ma up -d --no-build`，访问 <http://127.0.0.1:8080>。远程访问可通过 SSH 转发；公网部署使用 HTTPS 反向代理。镜像运行 UID/GID 65532，无 shell、非 root、只读根文件系统，使用独立数据与密钥卷；内置健康检查通过二进制本身执行。审计存 UTC Unix 时间。
+
+查看 `ma ps`、`ma logs --tail 100 app`。日志不记录请求正文、授权码或登录令牌。`/healthz` 仅返回服务状态和版本，不包含邮箱数据。MCP 默认关闭，启用方式见 [MCP 接入指南](mcp-setup.md)。
+
+HTTPS 代理需配置 `public_url: https://mail.example.com` 与 `secure_cookie: true`，代理保留 Host。基础 Compose 仅绑定服务器回环地址。服务不信任任意 X-Forwarded-* 标头；登录限流按直接对端 IP 计，代理后的管理员共享限流。Origin 必须精确匹配 public_url；不提供通配 CORS。HTTPS 设置后，HTTP 下的浏览器不会发送会话 Cookie。
+
+## 管理员恢复
+
+```bash
+ma exec app mail-auto bootstrap recover
+ma exec app mail-auto bootstrap show
+```
+
+第一条命令立即撤销全部会话、使旧密码失效并生成新临时凭据；第二条主动显示它。成功使用一次后不可再次查看；若在设置前丢失会话，再执行恢复。恢复只通过宿主机 CLI，不提供匿名 HTTP 重置入口。恢复不改动加密主密钥、邮箱连接或元数据。
+
+临时密码过期和会话过期以持久化绝对时间计算，重启不会延长。正常会话绝对有效 12 小时，设置会话 30 分钟。正式登录后，进入「系统设置 → 登录账号与密码」，验证当前密码后修改用户名或密码。新密码留空则只修改用户名；填写新密码须至少 12 个字符、最多 256 字节，且不能与当前密码相同。保存后立即撤销所有设备会话并重新登录。忘记当前密码时仍使用上述宿主机恢复流程。账号修改接口每 5 分钟最多尝试 5 次，并受同源、CSRF 和密码哈希并发限制保护。
+
+## 一致性备份
+
+应用使用 SQLite WAL，运行中不要只复制主 `.db` 文件。使用 VACUUM INTO 创建一致性快照：
+
+```bash
+mkdir -p backups
+ma exec app mail-auto backup /var/lib/mail-auto/data/backup-01.db
+ma cp app:/var/lib/mail-auto/data/backup-01.db ./backups/backup-01.db
+# 将主密钥单独放在另一个受保护的备份位置
+mkdir -m 700 -p /your/separate-key-backup
+ma cp app:/var/lib/mail-auto/keys/master.key /your/separate-key-backup/master.key
+chmod 600 ./backups/backup-01.db /your/separate-key-backup/master.key
+```
+
+目标快照文件必须不存在。数据卷内的快照导出后可通过挂载卷的维护工具删除；镜像不带 shell。备份本身包含敏感索引、会话与配置，离机保存时使用用户自己的加密备份设施，数据库与密钥分开管理。外部 secret 原文件另行备份。本版不提供备份加密器或定时备份。
+
+## 联合恢复
+
+先保留现有卷的备份。停止 app，向一个新的/干净的数据卷放入快照并命名 `mail-auto.db`，向配套密钥卷恢复原始 `master.key`。不要把旧 WAL/SHM 文件与恢复的数据库混用。
+
+以下命令示例创建恢复用 Compose 项目（需当前目录已有配置及已拉取的镜像），不会修改默认项目卷：
+
+```bash
+docker volume create mail-auto-restored_mail-data
+docker volume create mail-auto-restored_mail-keys
+# 将绝对备份目录中的文件复制进新卷；alpine 是一次性维护容器。
+docker run --rm --user 0 \
+  -v mail-auto-restored_mail-data:/restore \
+  -v "$PWD/backups:/backup:ro" alpine:3.23 \
+  sh -c 'cp /backup/backup-01.db /restore/mail-auto.db && chown -R 65532:65532 /restore && chmod 700 /restore && chmod 600 /restore/mail-auto.db'
+docker run --rm --user 0 \
+  -v mail-auto-restored_mail-keys:/restore \
+  -v /your/separate-key-backup:/backup:ro alpine:3.23 \
+  sh -c 'cp /backup/master.key /restore/master.key && chown -R 65532:65532 /restore && chmod 700 /restore && chmod 600 /restore/master.key'
+# 先停止默认实例，释放同一宿主端口
+ma stop app
+docker compose -p mail-auto-restored -f compose.yaml up -d --no-build
+# 撤销备份内可能仍有效的旧会话，并重新设置管理员
+docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstrap recover
+docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstrap show
+```
+
+保留两套卷直到确认恢复成功。数据库有初始化记录但密钥缺失、错误或权限过宽时，服务停止启动；它不会静默更换密钥。密钥不可恢复时，加密的邮箱授权码与临时引导记录不可解密。仅丢失管理员记录也不会自动创建新账号，应恢复有效数据库备份。
+
+在服务器直接运行 Go 二进制时，恢复也遵循相同规则：停止进程，恢复数据库及密钥到所选目录，保证权限，再运行服务和恢复命令。SQLite 备份不备份服务商侧原始邮件。
+
+## 升级与回退
+
+升级前记录镜像 ID/标签，执行一致性数据库备份并单独备份主密钥及外部 secrets；保留旧镜像。保存升级前 `compose.yaml`、自定义覆盖文件和 YAML 配置。更新 Compose 中的镜像版本后执行 `ma pull`、`ma up -d --no-build`，检查健康状态和版本。
+
+不能假定更换旧镜像即可回退数据库迁移。若新版本迁移不向后兼容，停止服务，使用升级前数据库快照、匹配密钥和旧镜像在单独项目卷中恢复后验证。全历史同步更新后的 0.1.0 schema 为 2（新增暂存索引和同步任务表）；发现比自己更新的 schema 会拒绝打开。当前迁移不提供 down。
+
+`ma down` 保留命名卷；`ma down -v` 明确删除数据和密钥，仅在决定清空实例时使用。
+
+
+## 全历史同步升级
+
+升级前必须备份数据库和独立密钥。schema 1 → 2 会把已有连接的文件夹范围切换为全部可读取文件夹，保留账号、授权码、管理员、会话及现有索引。更新后点击「同步邮箱」补齐历史元数据；系统不会在升级时自动连接邮箱。
+
+每个文件夹同步失败时保留其旧索引；任务状态会显示错误并允许重试。服务重启不会自动重新执行任务，页面显示「同步中断，可重试」。回退旧镜像需恢复升级前数据库，不能用 schema 1 二进制直接打开 schema 2。
+
+
+## 删除索引后的空间回收
+
+服务自动分批回收 SQLite 空闲整页并尝试截断 WAL，每分钟补查；无需每次删除后手动 VACUUM。旧库首次升级会执行一次格式转换与压缩，保留账号、凭据和邮件引用。数据库基本结构和页内少量余量仍占空间。升级快照和历史日志独立保留，删除在线索引不会改写旧备份。
+
+
+## 0.2.1 原邮箱分类升级
+
+schema 4→5 新增持久化 MCP 设置，不重置邮箱映射、逐账号写入开关或会话。页面 MCP 设置优先于旧启动参数的 MCP 初值，公开地址可留空关闭。更换域名会撤销客户端授权；已有旧版 OAuth 授权需重新登录。备份与回退须保留数据库和配套主密钥，旧版拒绝打开 schema 5。
+
+回退前先停止服务，恢复升级前的配套快照与主密钥，避免混用升级后 WAL。恢复快照会放弃升级后的本地变更；数据库回退不会撤销原邮箱已完成的移动。

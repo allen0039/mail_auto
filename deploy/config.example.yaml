@@ -1,0 +1,19 @@
+# 可选：不需要 .env。内置默认值 → YAML → 显式启动参数。
+listen: "0.0.0.0:8080"
+data_dir: /var/lib/mail-auto/data
+key_dir: /var/lib/mail-auto/keys
+secret_dir: /run/secrets
+# 通过 HTTPS 代理访问时，设置精确的浏览器访问 Origin（不含路径）。
+# public_url: "https://mail.example.com"
+# secure_cookie: true
+session_hours: 12
+# Legacy compatibility only; metadata now always covers all history.
+retention_days: 0
+
+# Automatic reconciliation; wait after each completed full folder pass.
+automatic_sync: true
+sync_interval_seconds: 30
+
+# 可暂不配置域名；MCP 关闭时不影响 Web 管理和邮箱同步。
+mcp_enabled: false
+# 启用 MCP 需要精确的 HTTPS public_url；更改后重启服务。

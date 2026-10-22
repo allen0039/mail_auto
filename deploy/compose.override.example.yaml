@@ -1,0 +1,12 @@
+# 复制到项目根目录 compose.override.yaml 后按需调整。
+services:
+  app:
+    command: ["--config", "/etc/mail-auto/config.yaml", "serve"]
+    volumes:
+      - ./deploy/config.yaml:/etc/mail-auto/config.yaml:ro
+    # 如需外部授权码，取消下面两行注释，并准备仅宿主机可读的 secret 文件。
+    # secrets:
+    #   - qq_password
+# secrets:
+#   qq_password:
+#     file: ./secrets/qq_password
