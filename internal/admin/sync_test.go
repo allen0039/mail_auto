@@ -65,7 +65,9 @@ func TestHTTPAsyncHistorySync(t *testing.T) {
 		t.Fatal("progress unavailable", w.Code)
 	}
 	close(release)
-	deadline := time.Now().Add(10 * time.Second)
+	// Race instrumentation and slow CI storage can delay committing 5,002 rows.
+	// The HTTP 202 assertion above checks asynchronous acceptance, not throughput.
+	deadline := time.Now().Add(60 * time.Second)
 	for {
 		jobs, e := svc.SyncJobs()
 		if e != nil {
