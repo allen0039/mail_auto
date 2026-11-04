@@ -1,0 +1,14 @@
+<evaluation>
+  <!-- Read-only questions against the disposable 0.4.0 browser fixture AFTER browser.py.
+       Not against a real mailbox. Use the same scoped QA client; never run mutation tools. -->
+  <qa_pair><question>列出虚构原邮箱的任务并读取外部 AI 观察任务详情，再与账号能力对照。该任务的 trigger_mode 是什么？只返回枚举值。</question><answer>external</answer></qa_pair>
+  <qa_pair><question>从虚构原邮箱的任务列表找到外部 AI 观察任务，读取详情及账号授权。任务当前运行模式是什么？只返回 mode。</question><answer>observe</answer></qa_pair>
+  <qa_pair><question>查看虚构原邮箱的任务列表、定时账单任务详情及外部 AI 任务详情。定时账单任务是否已暂停？只返回 true 或 false。</question><answer>true</answer></qa_pair>
+  <qa_pair><question>在虚构原邮箱找到外部 AI 观察任务，读取详情并检查最近运行记录。最近一轮的状态是什么？只返回状态枚举。</question><answer>observed</answer></qa_pair>
+  <qa_pair><question>查看虚构原邮箱能力和任务列表，读取外部 AI 观察任务详情。其 max_batch 数值是多少？只返回数字。</question><answer>20</answer></qa_pair>
+  <qa_pair><question>读取虚构原邮箱能力及整理授权，结合任务详情判断服务端是否内置调用模型。只返回 server_ai 的布尔值。</question><answer>false</answer></qa_pair>
+  <qa_pair><question>读取虚构原邮箱能力和启用规则，确定其分类结果使用哪种存储方式。只返回 classification 枚举。</question><answer>provider_folders</answer></qa_pair>
+  <qa_pair><question>读取虚构原邮箱能力及文件夹信息。原生标签的验证状态是什么？只返回 native_labels.status。</question><answer>not_verified</answer></qa_pair>
+  <qa_pair><question>查看虚构原邮箱任务列表、外部 AI 任务详情和授权，确定任务的判断引擎。只返回 engine 枚举。</question><answer>ai</answer></qa_pair>
+  <qa_pair><question>查看虚构原邮箱任务列表和外部 AI 任务详情，再读取最近运行详情。该任务的通知策略是否继承全局设置？只返回 notify 枚举。</question><answer>inherit</answer></qa_pair>
+</evaluation>

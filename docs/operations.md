@@ -12,7 +12,7 @@ ma() { docker compose "$@"; }
 
 执行 `ma pull`、`ma up -d --no-build`，访问 <http://127.0.0.1:8080>。远程访问可通过 SSH 转发；公网部署使用 HTTPS 反向代理。镜像运行 UID/GID 65532，无 shell、非 root、只读根文件系统，使用独立数据与密钥卷；内置健康检查通过二进制本身执行。审计存 UTC Unix 时间。
 
-查看 `ma ps`、`ma logs --tail 100 app`。日志不记录请求正文、授权码或登录令牌。`/healthz` 仅返回服务状态和版本，不包含邮箱数据。MCP 默认关闭，启用方式见 [MCP 接入指南](mcp-setup.md)。
+查看 `ma ps`、`ma logs --tail 100 app`。日志不记录请求正文、授权码或登录令牌。`/healthz` 仅返回进程状态和版本；`/readyz` 额外检查 SQLite 和主密钥是否可用，两者都不包含邮箱数据。Compose 健康检查使用 `/readyz`。MCP 默认关闭，启用方式见 [MCP 接入指南](mcp-setup.md)。
 
 HTTPS 代理需配置 `public_url: https://mail.example.com` 与 `secure_cookie: true`，代理保留 Host。基础 Compose 仅绑定服务器回环地址。服务不信任任意 X-Forwarded-* 标头；登录限流按直接对端 IP 计，代理后的管理员共享限流。Origin 必须精确匹配 public_url；不提供通配 CORS。HTTPS 设置后，HTTP 下的浏览器不会发送会话 Cookie。
 
@@ -97,5 +97,9 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 ## 0.2.1 原邮箱分类升级
 
 schema 4→5 新增持久化 MCP 设置，不重置邮箱映射、逐账号写入开关或会话。页面 MCP 设置优先于旧启动参数的 MCP 初值，公开地址可留空关闭。更换域名会撤销客户端授权；已有旧版 OAuth 授权需重新登录。备份与回退须保留数据库和配套主密钥，旧版拒绝打开 schema 5。
+
+## 0.3.0 规则与外部批次升级
+
+schema 5→6 增加规则及授权、批次、领取和额度，新增收信日期与星标等元数据，由后台同步补齐。升级不创建规则/授权、不开放原邮箱写入，自动化默认关闭。旧二进制拒绝打开 schema 6，回退必须停服务后恢复升级前数据库、配套密钥、Compose 和旧镜像。本轮隔离验证与回退注意事项见[验收记录](acceptance-0.3.0.md)。真实外部任务单独在支持 MCP 的客户端创建；页面说明不能替代任务创建。
 
 回退前先停止服务，恢复升级前的配套快照与主密钥，避免混用升级后 WAL。恢复快照会放弃升级后的本地变更；数据库回退不会撤销原邮箱已完成的移动。

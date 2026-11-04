@@ -20,18 +20,23 @@ type Account struct {
 	Secret           []byte   `json:"-"`
 }
 type Message struct {
-	Ref         string  `json:"ref"`
-	AccountID   string  `json:"account_id"`
-	Folder      string  `json:"folder"`
-	FolderLabel string  `json:"folder_label"`
-	UIDValidity uint32  `json:"-"`
-	UID         uint32  `json:"-"`
-	Subject     string  `json:"subject"`
-	Sender      string  `json:"sender"`
-	SentAt      int64   `json:"sent_at"`
-	Unread      bool    `json:"unread"`
-	Size        uint32  `json:"size"`
-	Labels      []Label `json:"labels,omitempty"`
+	Ref             string  `json:"ref"`
+	AccountID       string  `json:"account_id"`
+	Folder          string  `json:"folder"`
+	FolderLabel     string  `json:"folder_label"`
+	UIDValidity     uint32  `json:"-"`
+	UID             uint32  `json:"-"`
+	Subject         string  `json:"subject"`
+	Sender          string  `json:"sender"`
+	SentAt          int64   `json:"sent_at"`
+	ReceivedAt      int64   `json:"received_at"`
+	Flagged         bool    `json:"flagged"`
+	FlagsKnown      bool    `json:"flags_known"`
+	ChangedAt       int64   `json:"changed_at"`
+	MetadataVersion int     `json:"-"`
+	Unread          bool    `json:"unread"`
+	Size            uint32  `json:"size"`
+	Labels          []Label `json:"labels,omitempty"`
 }
 type Label struct {
 	ID        string `json:"id"`
@@ -68,6 +73,7 @@ type Inventory struct {
 	Total       uint32 // Server EXISTS count, including messages marked deleted.
 	UIDs        []uint32
 	Unread      map[uint32]bool
+	Flagged     map[uint32]bool
 }
 
 type AutomaticRemote interface {

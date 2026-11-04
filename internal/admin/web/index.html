@@ -12,6 +12,8 @@
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
     <script src="/organizer.js" defer></script>
+    <script src="/rules.js" defer></script>
+    <script src="/tasks.js" defer></script>
   </head>
   <body>
     <div id="notice" role="status" aria-live="polite" hidden></div>
@@ -19,7 +21,7 @@
       <section class="auth-story">
         <a class="wordmark" href="/"
           ><span class="envelope" aria-hidden="true"></span> MAIL AUTO
-          <span class="version">0.2.1</span></a
+          <span class="version">0.4.0</span></a
         >
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -29,7 +31,7 @@
           </p>
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE MAIL</span><strong>自托管</strong
-            ><span>MAIL ORGANIZER · V0.2.1</span>
+            ><span>MAIL ORGANIZER · V0.4.0</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储</p>
@@ -117,9 +119,12 @@
         <a class="wordmark" href="/"
           ><span class="envelope" aria-hidden="true"></span> MAIL AUTO</a
         >
-        <div class="workspace-label">个人邮件工作台 <span>v0.2.1</span></div>
+        <div class="workspace-label">个人邮件工作台 <span>v0.4.0</span></div>
         <nav aria-label="主导航">
           <button data-view="organizer" class="nav-button">整理与 MCP</button>
+          <button data-view="rules" class="nav-button">整理规则</button>
+          <button data-view="tasks" class="nav-button">定时与任务</button>
+          <button data-view="notifications" class="nav-button">TG 通知</button>
           <button data-view="inbox" class="nav-button active">
             <span aria-hidden="true">▤</span> 邮件索引
             <span id="nav-count" class="nav-count">0</span></button
@@ -299,6 +304,52 @@
   </article>
  </div>
 </section>
+<section id="rules-pane" hidden>
+ <div class="organizer-stack">
+  <div class="rules-path"><span>配置原邮箱规则</span><span aria-hidden="true">→</span><span>选择任务触发方式</span><span aria-hidden="true">→</span><span>整理原邮箱</span></div>
+  <div class="panel organizer-card"><div class="panel-heading"><label>选择邮箱<select id="rules-account" aria-label="规则邮箱"></select></label><button id="refresh-rules" class="secondary" type="button">刷新规则与记录</button></div><p id="rules-capability" class="muted"></p></div>
+  <article class="panel organizer-card"><div class="panel-heading"><div><h2>自定义整理规则</h2><p class="muted">先沿用原邮箱分类，再设置保留和归档条件。规则试运行只查看命中，不移动邮件。</p></div><button id="new-rule" class="primary" type="button">＋ 新建规则</button></div><div id="rules-list"></div></article>
+  <article class="panel organizer-card"><h2>任务整理授权</h2><p class="muted">所有任务共用以下范围。内置定时需单独允许；修改授权会使旧批次失效。</p>
+   <form id="automation-policy-form" class="rules-form">
+    <div class="rules-grid"><div><label class="checkbox-label"><input id="policy-enabled" type="checkbox" />允许任务领取邮件</label><label class="checkbox-label"><input id="policy-internal" type="checkbox" />允许内置定时执行固定规则</label></div><label>运行方式<select id="policy-mode"><option value="observe">只观察：记录建议，不移动邮件</option><option value="execute">执行：在授权范围内整理原邮箱</option></select></label></div>
+    <div class="rules-grid"><fieldset><legend>允许读取的源目录</legend><div id="policy-sources" class="rules-folder-options"></div></fieldset><fieldset><legend>允许分类移入的目标目录</legend><div id="policy-destinations" class="rules-folder-options"></div></fieldset></div>
+    <fieldset><legend>允许动作</legend><div class="organizer-inline"><label class="checkbox-label"><input type="checkbox" name="policy-action" value="move" />移到选定目录</label><label class="checkbox-label"><input type="checkbox" name="policy-action" value="archive" />移入账号归档目录</label><label class="checkbox-label"><input type="checkbox" name="policy-action" value="trash" />移入账号回收站</label></div><p class="muted small">归档和回收站目录在「整理与 MCP」配置；额度按北京时间分别累计领取及写入入队数，失败或取消不退还；跨日未执行计划需重新评估。按类别归档请选“移到选定目录”，保留目录分类。</p></fieldset>
+    <div class="rules-grid"><label class="checkbox-label"><input id="policy-protect-unread" type="checkbox" checked />保留未读邮件</label><label class="checkbox-label"><input id="policy-protect-flagged" type="checkbox" checked />保留星标邮件</label><label class="checkbox-label"><input id="policy-body" type="checkbox" />允许必要时读取正文片段</label><label class="checkbox-label"><input id="policy-history" type="checkbox" />包括历史邮件</label></div>
+    <div class="rules-grid"><label>保护联系人（每行一个邮箱地址）<textarea id="policy-protected-senders" rows="3" placeholder="person@example.com"></textarea></label><label>历史起始日（留空表示全部历史）<input id="policy-since" type="date" disabled /><small>未勾选历史时，从首次启用范围时开始处理新邮件。</small></label></div>
+    <div class="rules-grid rules-grid-four"><label>每批最多邮件数<input id="policy-max-batch" type="number" min="1" max="50" required /></label><label>每日领取 / 入队上限<input id="policy-daily-limit" type="number" min="1" max="500" required /></label><label>状态稳定等待（分钟）<input id="policy-stable" type="number" min="0" max="60" step="1" required /></label><label>授权截止日（北京时间）<input id="policy-expires" type="date" required /></label></div>
+    <p id="policy-status" class="muted" role="status"></p><button class="primary" type="submit">保存整理授权</button>
+   </form>
+  </article>
+  <article class="panel organizer-card"><h2>外部定时任务指引</h2><p class="muted">先在「整理与 MCP」完成连接，再将任务说明交给支持 MCP 调用的客户端创建定时任务。此处生成说明，不会创建外部任务。</p>
+   <div class="organizer-inline"><label>建议周期<select id="task-frequency"><option value="每天 02:00">每天凌晨 2 点</option><option value="每小时">每小时</option><option value="每周日 02:00">每周日凌晨 2 点</option></select></label><button id="generate-ai-task" class="secondary" type="button">生成任务说明</button><button id="copy-ai-task" class="text-button" type="button">复制说明</button></div>
+   <label>任务说明<textarea id="ai-task-prompt" readonly rows="9" placeholder="选择邮箱并生成说明"></textarea></label><p class="muted small">时区 Asia/Shanghai。首次使用只观察模式；外部任务能否无人值守执行，取决于客户端运行条件和确认要求。</p>
+  </article>
+  <article class="panel organizer-card"><div class="panel-heading"><h2>AI 批次记录</h2><button id="refresh-ai-runs" class="secondary" type="button">刷新记录</button></div><div id="ai-runs"></div></article>
+ </div>
+</section>
+<section id="tasks-pane" hidden>
+ <div class="organizer-stack">
+  <div class="info-strip">每项任务选择一种自动触发方式，也可随时手动运行。分类与归档写回原邮箱，通知按你的设置发送。</div>
+  <div class="panel organizer-card"><div class="panel-heading"><label>选择邮箱<select id="tasks-account" aria-label="任务邮箱"></select></label><div class="organizer-inline"><button id="refresh-tasks" class="secondary" type="button">刷新</button><button id="new-task" class="primary" type="button">＋ 新建任务</button></div></div><p id="tasks-policy-note" class="muted"></p></div>
+  <div id="tasks-list" class="organizer-stack"></div>
+  <article class="panel organizer-card"><div class="panel-heading"><div><h2 id="task-runs-title">运行记录</h2><p class="muted small">任务结果与通知投递分开记录；外部任务的配置说明不代表已建立客户端定时任务。</p></div><button id="refresh-task-runs" class="secondary" type="button">刷新记录</button></div><div id="task-runs-list"><p class="muted">选择一项任务查看最近运行。</p></div></article>
+ </div>
+</section>
+<section id="notifications-pane" hidden>
+ <div class="organizer-stack">
+  <article class="panel organizer-card"><h2>Telegram 通知</h2><p class="muted">推荐仅推送失败。通知只包含任务名称、处理数量和错误摘要，默认不包含邮件主题、正文或发件地址。</p>
+   <form id="telegram-form" class="rules-form">
+    <label class="checkbox-label"><input id="telegram-enabled" type="checkbox" />启用 Telegram 通知</label>
+    <div class="rules-grid"><label>Bot Token<input id="telegram-token" type="password" autocomplete="new-password" maxlength="150" placeholder="由 BotFather 提供；保存后不回显" /><small id="telegram-token-note">凭据加密保存。</small></label><label>Chat ID<input id="telegram-chat" type="text" maxlength="21" placeholder="例如 123456789 或 -1001234567890" /><small>私聊需先向 Bot 发送 /start；群组需先加入 Bot。</small></label></div>
+    <div class="rules-grid"><label>默认通知策略<select id="telegram-policy"><option value="failures">仅失败（推荐）</option><option value="changes">有实际变更或失败</option><option value="all">每次运行结束</option><option value="off">关闭</option></select></label><div><label class="checkbox-label"><input id="telegram-recovery" type="checkbox" />待核验恢复后再通知</label><label class="checkbox-label"><input id="telegram-clear" type="checkbox" />删除已保存的 Bot Token 并关闭通知</label></div></div>
+    <div class="organizer-inline"><button type="submit" class="primary">保存通知设置</button><button id="telegram-check" type="button" class="secondary">验证机器人</button><button id="telegram-test" type="button" class="secondary">发送测试通知</button></div>
+    <p id="telegram-status" class="muted" role="status"></p><p class="muted small">保存不会发送消息；测试会向已保存的 Chat ID 发送一条通知。任务可单独选择通知策略；同类故障 6 小时内合并提醒。</p>
+   </form>
+   <details class="organizer-item"><summary>如何获取 Bot Token 和 Chat ID</summary><p>在 Telegram 中通过 BotFather 的 /newbot 创建机器人并取得 Token，向新 Bot 发送 /start。你可以使用 Telegram Bot API 的 getUpdates 查看对应消息中的 chat.id；请在自己可信的环境操作，避免把 Token 交给第三方查询网站。群组的 Chat ID 通常为负数。</p></details>
+  </article>
+  <article class="panel organizer-card"><div class="panel-heading"><h2>最近通知投递</h2><button id="refresh-deliveries" type="button" class="secondary">刷新记录</button></div><div id="notification-deliveries"></div></article>
+ </div>
+</section>
 <section id="accounts-pane" hidden>
           <div class="info-strip">
             凭据加密保存于本地，连接始终使用 TLS。默认同步全部可读取文件夹和全部历史邮件。
@@ -373,7 +424,7 @@
               <h2>从可靠的读取开始。</h2>
               <p>
                 Mail Auto
-                <strong>0.2.1</strong>
+                <strong>0.4.0</strong>
                 是计划书的初始工程版本。支持管理员安全初始化、多邮箱连接、自动同步与本地搜索。
               </p>
               <dl>
@@ -563,5 +614,32 @@
     </dialog>
   <dialog id="plan-dialog"><div class="dialog-head"><h2>操作预览</h2><button type="button" id="close-plan">关闭</button></div><p id="plan-summary"></p><div id="plan-items" class="organizer-scroll"></div><button id="execute-plan" class="primary" type="button">执行此计划</button></dialog>
 <dialog id="oauth-dialog"><h2>授权 MCP 客户端</h2><p id="oauth-client"></p><p>只勾选允许访问的邮箱和动作。邮件内容可能由所连接的客户端读取。</p><form id="oauth-consent"><fieldset id="oauth-accounts"><legend>邮箱范围</legend></fieldset><fieldset id="oauth-actions"><legend>允许动作</legend><label class="checkbox-label"><input type="checkbox" value="read" checked disabled />读取邮件</label></fieldset><button class="primary" type="submit">同意授权</button><button id="oauth-deny" class="secondary" type="button">拒绝</button></form></dialog>
+<dialog id="rule-editor-dialog" class="rule-dialog"><div class="dialog-head"><h2 id="rule-editor-title">新建规则</h2><button id="close-rule-editor" type="button">关闭</button></div>
+ <form id="rule-editor" class="rules-form">
+  <div class="organizer-inline"><label>快速模板<select id="rule-template"><option value="custom">自定义</option><option value="subscription">已读订阅保留 30 天</option><option value="bills">账单主题分类</option><option value="semantic">交给 AI 判断</option><option value="protect">保护指定发件人</option></select></label><button id="apply-rule-template" type="button" class="secondary">填入模板</button></div>
+  <div class="rules-grid"><label>规则名称<input id="rule-name" maxlength="120" required /></label><label>优先级（数字越小越先匹配）<input id="rule-priority" type="number" min="0" max="10000" value="100" required /></label></div>
+  <fieldset><legend>原邮箱源目录</legend><div id="rule-sources" class="rules-folder-options"></div></fieldset>
+  <div id="rule-conditions"></div>
+  <div class="rules-grid"><label>命中后动作<select id="rule-action"><option value="move">移到原邮箱指定目录</option><option value="archive">移入账号归档目录</option><option value="trash">移入账号回收站</option><option value="keep">保留原位，停止后续规则</option><option value="ai">由 AI 在授权范围内判断</option></select></label><label id="rule-destination-label">目标目录<select id="rule-destination"></select></label></div>
+  <label id="rule-instructions-label" hidden>AI 分类说明<textarea id="rule-instructions" rows="3" maxlength="2000" placeholder="例如：区分账单、订阅和工作邮件；无法判断时保留。"></textarea></label>
+  <label class="checkbox-label"><input id="rule-enabled" type="checkbox" />启用此规则（由任务调用，不会立即执行）</label>
+  <p class="muted small">同一邮件按优先级选择一个最终移动目标。收信天数以邮箱服务器收信时间计算；标记尚未同步的保护条件会跳过。</p><button class="primary" type="submit">保存规则</button>
+ </form>
+</dialog>
+<dialog id="rule-preview-dialog" class="rule-dialog"><div class="dialog-head"><h2>规则试运行</h2><button id="close-rule-preview" type="button">关闭</button></div><p id="rule-preview-summary" role="status"></p><div id="rule-preview-items" class="organizer-scroll"></div><button id="rule-preview-more" type="button" class="secondary" hidden>继续查看</button></dialog>
+<dialog id="rule-history-dialog" class="rule-dialog"><div class="dialog-head"><h2>规则版本</h2><button id="close-rule-history" type="button">关闭</button></div><div id="rule-history-items" class="organizer-scroll"></div></dialog>
+<dialog id="task-editor-dialog" class="rule-dialog"><div class="dialog-head"><h2 id="task-editor-title">新建整理任务</h2><button id="close-task-editor" type="button">关闭</button></div>
+ <form id="task-editor" class="rules-form">
+  <fieldset><legend>整理范围</legend><label>任务名称<input id="task-name" maxlength="120" required placeholder="例如：已读订阅归档" /></label><div id="task-sources" class="rules-folder-options"></div><label class="checkbox-label"><input id="task-rules-all" type="checkbox" checked />跟随账号全部启用规则</label><div id="task-rules" class="rules-folder-options"></div><p class="muted small">默认使用账号全部启用规则。取消勾选后可绑定指定规则版本；系统会阻止跳过源目录内更高优先级规则。</p></fieldset>
+  <fieldset><legend>触发与判断</legend><div class="rules-grid"><label>触发方式<select id="task-trigger"><option value="manual">仅手动</option><option value="internal">内置定时</option><option value="external">外部 AI / MCP</option></select></label><label>判断方式<select id="task-engine"><option value="rules">固定规则（无需 AI）</option><option value="ai">由外部 AI 判断</option></select></label></div>
+   <div id="task-schedule-fields" hidden><div class="rules-grid"><label>运行周期<select id="task-frequency-select"><option value="daily">每天</option><option value="hourly">每小时</option><option value="weekly">每周</option></select></label><label>时区<input id="task-timezone" value="Asia/Shanghai" maxlength="80" /></label></div><div class="rules-grid rules-grid-four"><label id="task-hour-label">小时<input id="task-hour" type="number" min="0" max="23" value="2" /></label><label>分钟<input id="task-minute" type="number" min="0" max="59" value="0" /></label><label id="task-weekday-label">星期<select id="task-weekday"><option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="0">周日</option></select></label></div><p class="muted small">保存后可查看未来 5 次运行时间。每日账号额度仍按北京时间计算；漏跑只合并一轮。</p></div>
+   <label id="task-expected-label" hidden>外部调用逾期提醒<select id="task-expected"><option value="0">关闭，不监测外部周期</option><option value="3600">预期每小时</option><option value="86400">预期每天</option><option value="604800">预期每周</option></select><small>留出至少 5 分钟宽限，仅记录逾期并按失败策略通知，不会触发邮件整理。</small></label>
+   <p id="task-trigger-note" class="muted small"></p><p id="task-ai-warning" class="task-warning" hidden>当前源目录有 AI 判断规则。固定规则任务会保留这些邮件并记录“需外部 AI”，不会套用后面的规则移动。</p>
+  </fieldset>
+  <fieldset><legend>运行与通知</legend><div class="rules-grid"><label>运行模式<select id="task-mode"><option value="observe">只观察：记录建议</option><option value="execute">执行：整理原邮箱</option></select></label><label>每次最多领取<input id="task-limit" type="number" min="1" max="50" value="20" required /></label><label>额外历史起点（可选）<input id="task-since" type="date" /><small>留空继承管理员范围；不能扩大到更早历史。</small></label><label>通知策略<select id="task-notify"><option value="inherit">继承 TG 默认策略</option><option value="off">关闭</option><option value="failures">仅失败</option><option value="changes">有实际变更或失败</option><option value="all">每次运行结束</option></select></label></div><div class="organizer-inline"><label class="checkbox-label"><input id="task-protect-unread" type="checkbox" checked />保留未读</label><label class="checkbox-label"><input id="task-protect-flagged" type="checkbox" checked />保留星标</label></div><p class="muted small">任务只能收紧管理员授权。一次运行最多 10 分钟、扫描 500 条候选；有剩余时下次触发续扫。TG 未启用时不发送。</p></fieldset>
+  <p id="task-editor-error" class="form-error" role="alert"></p><button id="save-task" type="submit" class="primary">保存为暂停任务</button>
+ </form>
+</dialog>
+<dialog id="task-detail-dialog" class="rule-dialog"><div class="dialog-head"><h2 id="task-detail-title">任务详情</h2><button id="close-task-detail" type="button">关闭</button></div><div id="task-detail-content"></div></dialog>
 </body>
 </html>

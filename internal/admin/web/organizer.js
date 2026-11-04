@@ -3,7 +3,7 @@
   const selected = new Map();
   const folders = new Map();
   let currentPlan = null, pendingPlans = [], oauthID = "", mcpVersion = 0;
-  const actionNames = {read: "读取", folder_manage: "在原邮箱创建文件夹", archive: "归档", move: "分类到文件夹", trash: "移入回收站", restore: "恢复"};
+  const actionNames = {read: "读取", folder_manage: "在原邮箱创建文件夹", archive: "归档", move: "分类到文件夹", trash: "移入回收站", restore: "恢复", rule_manage: "创建和调整自定义规则", task_manage: "配置和启停整理任务", automation: "定时任务批次（受自动整理授权约束）"};
   const statusNames = {queued: "排队", running: "执行中", completed: "完成", partial: "部分完成", failed: "失败", needs_verification: "待核验", cancelled: "已停止", skipped: "已跳过"};
   const run = fn => async e => {
     if (e) e.preventDefault();

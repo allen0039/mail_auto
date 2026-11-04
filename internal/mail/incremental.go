@@ -18,7 +18,7 @@ func (s *Service) folderState(ctx context.Context, id, folder string) (FolderSta
 	if e != nil && !errors.Is(e, sql.ErrNoRows) {
 		return state, syncStep("读取文件夹状态", e)
 	}
-	rows, e := s.Store.DB.QueryContext(ctx, "SELECT uid,unread FROM messages WHERE account_id=? AND folder=? AND uidvalidity=?", id, folder, state.UIDValidity)
+	rows, e := s.Store.DB.QueryContext(ctx, "SELECT uid,unread FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND metadata_version=1", id, folder, state.UIDValidity)
 	if e != nil {
 		return state, syncStep("读取邮件索引状态", e)
 	}
@@ -100,7 +100,7 @@ func (s *Service) incrementalFolder(ctx context.Context, session AutomaticSessio
 				return syncStep("校验增量邮件标识", errors.New("invalid UID"))
 			}
 			staged[m.UID] = true
-			if _, e = tx.ExecContext(ctx, "INSERT INTO sync_stage VALUES(?,?,?,?,?,?,?,?,?,?,?)", token, credentials.Random(24), a.ID, folder, validity, m.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size); e != nil {
+			if _, e = tx.ExecContext(ctx, "INSERT INTO sync_stage VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", token, credentials.Random(24), a.ID, folder, validity, m.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size, m.ReceivedAt, m.Flagged, m.FlagsKnown, time.Now().Unix(), 1); e != nil {
 				return syncStep("暂存增量邮件", e)
 			}
 		}
@@ -175,12 +175,21 @@ func (s *Service) incrementalFolder(ctx context.Context, session AutomaticSessio
 		unread bool
 	}{{seen, false}, {unseen, true}} {
 		for _, uid := range group.uids {
-			if _, e = tx.ExecContext(ctx, "UPDATE messages SET unread=? WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?", group.unread, a.ID, folder, validity, uid); e != nil {
+			if _, e = tx.ExecContext(ctx, "UPDATE messages SET unread=?,changed_at=? WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?", group.unread, time.Now().Unix(), a.ID, folder, validity, uid); e != nil {
 				return syncStep("校正邮件已读状态", e)
 			}
 		}
 	}
-	result, e := tx.ExecContext(ctx, `INSERT INTO messages SELECT ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size FROM sync_stage WHERE token=? ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET subject=excluded.subject,sender=excluded.sender,sent_at=excluded.sent_at,unread=excluded.unread,size=excluded.size`, token)
+	flagChanges := 0
+	for uid, flagged := range inventory.Flagged {
+		result, err := tx.ExecContext(ctx, "UPDATE messages SET flagged=?,flags_known=1,changed_at=? WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=? AND (flagged<>? OR flags_known=0)", flagged, time.Now().Unix(), a.ID, folder, validity, uid, flagged)
+		if err != nil {
+			return err
+		}
+		n, _ := result.RowsAffected()
+		flagChanges += int(n)
+	}
+	result, e := tx.ExecContext(ctx, `INSERT INTO messages SELECT ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version FROM sync_stage WHERE token=? ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET changed_at=CASE WHEN messages.subject<>excluded.subject OR messages.sender<>excluded.sender OR messages.unread<>excluded.unread OR messages.flagged<>excluded.flagged OR messages.flags_known<>excluded.flags_known OR messages.received_at<>excluded.received_at THEN excluded.changed_at ELSE messages.changed_at END,subject=excluded.subject,sender=excluded.sender,sent_at=excluded.sent_at,unread=excluded.unread,size=excluded.size,received_at=excluded.received_at,flagged=excluded.flagged,flags_known=excluded.flags_known,metadata_version=excluded.metadata_version`, token)
 	if e != nil {
 		return syncStep("发布增量邮件索引", e)
 	}
@@ -191,7 +200,7 @@ func (s *Service) incrementalFolder(ctx context.Context, session AutomaticSessio
 	if e = tx.Commit(); e != nil {
 		return syncStep("提交自动同步索引", e)
 	}
-	if added > 0 || len(remove)+len(seen)+len(unseen) > 0 {
+	if added > 0 || len(remove)+len(seen)+len(unseen)+flagChanges > 0 {
 		s.revision.Add(1)
 	}
 	if len(remove) > 0 {

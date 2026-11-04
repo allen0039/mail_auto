@@ -12,7 +12,7 @@ func TestOrganizerV2MigrationAndIndependentLabelLifecycle(t *testing.T) {
 		t.Fatal(e)
 	}
 	_, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','fixture','qq','a@qq.com','imap.qq.com',993,'["INBOX"]',X'010203','',1);
- INSERT INTO messages VALUES('stable','a','INBOX',7,42,'fixture','sender',123,1,20);
+ INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES('stable','a','INBOX',7,42,'fixture','sender',123,1,20);
  DROP TRIGGER message_entry_insert; DROP TRIGGER message_entry_delete;
  DROP TABLE message_labels; DROP TABLE mail_entries; DROP TABLE labels;
  PRAGMA user_version=2;`)
@@ -37,7 +37,7 @@ func TestOrganizerV2MigrationAndIndependentLabelLifecycle(t *testing.T) {
 		t.Fatal(ref, e)
 	}
 	s.DB.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 5 {
+	if version != 7 {
 		t.Fatal(version)
 	}
 	if _, e = s.DB.Exec(`INSERT INTO labels VALUES('l','fixture','',1); INSERT INTO message_labels VALUES('stable','l'); DELETE FROM messages WHERE ref='stable';`); e != nil {
@@ -48,7 +48,7 @@ func TestOrganizerV2MigrationAndIndependentLabelLifecycle(t *testing.T) {
 	if n != 1 {
 		t.Fatal("detached labels lost")
 	}
-	if _, e = s.DB.Exec(`INSERT INTO messages VALUES('stable','a','Trash',7,99,'fixture','sender',123,1,20)`); e != nil {
+	if _, e = s.DB.Exec(`INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES('stable','a','Trash',7,99,'fixture','sender',123,1,20)`); e != nil {
 		t.Fatal(e)
 	}
 	var detached int
@@ -82,7 +82,7 @@ func TestProviderFoldersV4ToV5PreservesState(t *testing.T) {
 		t.Fatal(e)
 	}
 	_, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','fixture','qq','a@qq.com','imap.qq.com',993,'[]',X'010203','',1);
- INSERT INTO messages VALUES('stable','a','INBOX',7,42,'fixture','sender',123,1,20);
+ INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES('stable','a','INBOX',7,42,'fixture','sender',123,1,20);
  INSERT INTO folder_settings(account_id,archive_folder,trash_folder,writes_enabled,version) VALUES('a','','Trash',1,8);
  DROP TABLE mcp_settings; PRAGMA user_version=4;`)
 	if e != nil {
@@ -96,7 +96,7 @@ func TestProviderFoldersV4ToV5PreservesState(t *testing.T) {
 	defer s.Close()
 	var version, n, enabled, settingsVersion int
 	var secret, trash string
-	if e = s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 5 {
+	if e = s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 7 {
 		t.Fatal(version, e)
 	}
 	s.DB.QueryRow("SELECT count(*) FROM messages WHERE ref='stable'").Scan(&n)

@@ -12,6 +12,31 @@ import (
 	"mail-auto/internal/mail"
 )
 
+func (a Adapter) RuleState(ctx context.Context, account mail.Account, password string, original mail.Message) (mail.Message, error) {
+	conn, e := a.open(ctx, account, password)
+	if e != nil {
+		return mail.Message{}, e
+	}
+	defer conn.close()
+	status, e := conn.c.Select(original.Folder, true)
+	if e != nil {
+		return mail.Message{}, remoteFailure(conn, "复核整理邮件", e)
+	}
+	if status.UidValidity != original.UIDValidity {
+		return mail.Message{}, mail.ErrConflict
+	}
+	set := new(protocol.SeqSet)
+	set.AddNum(original.UID)
+	batch, e := fetchBatch(conn, account.ID, original.Folder, status.UidValidity, set)
+	if e != nil {
+		return mail.Message{}, e
+	}
+	if len(batch.Messages) != 1 || batch.Messages[0].UID != original.UID {
+		return mail.Message{}, mail.ErrConflict
+	}
+	return batch.Messages[0], nil
+}
+
 func (a Adapter) Capabilities(ctx context.Context, account mail.Account, password string) (mail.Capabilities, error) {
 	conn, e := a.open(ctx, account, password)
 	if e != nil {

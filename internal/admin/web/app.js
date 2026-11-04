@@ -101,6 +101,7 @@ async function checkSession() {
   resetCredentials();
   await refresh();
   await showView(state.view);
+  if (location.hash.startsWith("#task-run=") && window.openTaskRun) await window.openTaskRun(decodeURIComponent(location.hash.slice(10)));
   if (window.checkOAuthConsent) await window.checkOAuthConsent();
 }
 async function refresh() {
@@ -199,6 +200,9 @@ function updateFolderFilter() {
   if (folders.includes(old)) $("#folder-filter").value = old;
 }
 const views = {
+  rules: ["MAIL RULES", "整理规则", "配置原邮箱的分类规则与任务授权范围。"],
+  tasks: ["MAIL TASKS", "定时与任务", "选择内置定时或外部 MCP 触发，统一查看原邮箱整理结果。"],
+  notifications: ["TASK NOTIFICATIONS", "TG 通知", "按需接收任务结果，成功时可以保持安静。"],
   organizer: ["MAIL ORGANIZER", "整理与 MCP", "配置原邮箱文件夹分类、整理任务和 MCP 连接。"],
   inbox: ["MAIL INDEX", "邮件索引", "在一个地方，查看不同邮箱的来信。"],
   accounts: [
@@ -229,6 +233,9 @@ async function showView(view) {
   if (view === "inbox") await search();
   if (view === "audit") await loadAudits();
   if (view === "organizer" && window.loadOrganizer) await window.loadOrganizer();
+  if (view === "rules" && window.loadRules) await window.loadRules();
+  if (view === "tasks" && window.loadTasks) await window.loadTasks();
+  if (view === "notifications" && window.loadNotifications) await window.loadNotifications();
 }
 function empty(title, description, action) {
   return `<div class="empty-state"><div class="empty-envelope" aria-hidden="true">✉</div><h3>${esc(title)}</h3><p>${esc(description)}</p>${action ? `<button class="primary" data-empty-action="${esc(action)}">${action === "add" ? "＋ 添加第一个邮箱" : "↻ 同步邮箱"}</button>` : ""}</div>`;
@@ -624,3 +631,5 @@ $("#refresh-audit").addEventListener("click", () =>
 checkSession().catch((e) => {
   $("#loading").textContent = `无法连接服务：${e.message}。请刷新页面重试。`;
 });
+
+window.addEventListener("hashchange",()=>{if(state.session&&location.hash.startsWith("#task-run=")&&window.openTaskRun)window.openTaskRun(decodeURIComponent(location.hash.slice(10))).catch(e=>notify(e.message,true));});

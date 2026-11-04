@@ -58,3 +58,13 @@ codex mcp login mail-auto
 ## 验证边界
 
 独立 Linux 环境的隔离测试覆盖协议、SDK、权限、OAuth、持久化和模拟原邮箱端到端操作。浏览器测试直接核对模拟提供商中的文件夹与邮件位置。真实服务商的写入、文件夹写权限、手机同步、公网 HTTPS 和真实 Codex / ChatGPT 登录须在域名准备好后用专用测试邮件验收；目前没有对真实邮件执行写入测试。详见 [0.2.1 验收](acceptance-0.2.1.md)。
+
+## 0.3.0 规则与外部定时任务
+
+新增规则管理和自动化批次授权。自动化客户端先通过 `mail_ai_claim` 领取，再提交建议、检查计划及执行；原始 search/get/plan 不能绕过管理员的批次范围及正文权限。MCP 不能扩大自动化授权。规则编辑、观察模式、额度和任务说明见 [使用指南](automation-guide.md)。原生标签仍未验证，分类继续使用原邮箱文件夹。保存任务说明不会创建 Codex/ChatGPT 定时任务。部署环境由管理员自行配置；真实客户端定时执行仍需单独验证。
+
+## 0.4.0 可选定时与统一任务
+
+增加 `mail_task_*` 任务管理/运行/记录工具。读取与执行至少需要 `read`、`automation`，配置任务另需 `task_manage`；账号授权仍由管理员配置，MCP 不提供 TG 凭据管理。新任务暂停观察，内置定时还需管理员允许，外部日程在实际客户端建立。
+
+外部 AI 顺序：`mail_task_get` → `mail_task_run(task_id,version,run_key)` → `mail_ai_claim(account_id,run_id,run_key)` → 翻页读取全部条目 → 提交决定 → 查看计划 → `mail_ai_execute` → 查询任务/操作结果。任务默认使用账号全部启用规则，也可在 `mail_task_upsert` 中传 `rule_ids` 和对应 `rule_versions` 绑定规则版本；服务端会拒绝跳过源目录内更高优先级规则，绑定规则版本变化会使旧运行失效。固定规则任务运行后直接查询结果。单次手动 MCP 调用显式传 `manual=true`，不创建周期任务。每轮一个有界批次，下一周期续扫；同次重试复用键。详细步骤与 TG 说明见 [使用指南](automation-guide.md)。

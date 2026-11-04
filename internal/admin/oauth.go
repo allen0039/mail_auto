@@ -190,7 +190,7 @@ func (s *Server) oauthRequest(w http.ResponseWriter, r *http.Request, session Se
 			if action == "read" {
 				continue
 			}
-			if !writeAllowed || !slices.Contains([]string{"folder_manage", "archive", "move", "trash", "restore"}, action) {
+			if !writeAllowed || !slices.Contains([]string{"folder_manage", "archive", "move", "trash", "restore", "rule_manage", "task_manage", "automation"}, action) {
 				oauthError(w, 400, "invalid_scope")
 				return
 			}

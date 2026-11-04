@@ -1,11 +1,24 @@
 name: mail-auto
 services:
   app:
-    image: allen0039/mail-auto:0.2.1
+    image: allen0039/mail-auto:0.4.0
     build:
       context: .
     restart: unless-stopped
+    # 使用 HTTPS 域名反向代理时，取消下方 command 整段注释，并替换为实际访问域名。
+    # public-url 必须与浏览器访问的 Origin 完全一致（协议、域名及非默认端口），不含路径。
+    # 未配置或不匹配可能导致登录提示“页面验证已过期，请刷新后重试”。
+    # secure-cookie 让登录 Cookie 仅通过 HTTPS 发送；直接通过 HTTP 访问时请保持本段注释。
+    # 参数必须放在 serve 前；更换域名后执行 docker compose up -d --no-build 生效。
+    # command:
+    #   - --listen
+    #   - 0.0.0.0:8080
+    #   - --public-url
+    #   - https://mail.example.com
+    #   - --secure-cookie
+    #   - serve
     ports:
+      # 反向代理目标：http://127.0.0.1:8080；修改宿主机端口时同步修改代理目标。
       - "127.0.0.1:8080:8080"
     volumes:
       - mail-data:/var/lib/mail-auto/data

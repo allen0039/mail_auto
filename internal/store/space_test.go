@@ -16,7 +16,7 @@ func TestLegacyDatabaseEnablesReclaimWithoutChangingRecords(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','account','qq','fixture@example.com','imap.qq.com',993,'["Archive"]',X'010203','',1); INSERT INTO messages VALUES('stable-ref','a','Archive',7,1,'keep','fixture',1,0,50); PRAGMA auto_vacuum=NONE; VACUUM;`)
+	_, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','account','qq','fixture@example.com','imap.qq.com',993,'["Archive"]',X'010203','',1); INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES('stable-ref','a','Archive',7,1,'keep','fixture',1,0,50); PRAGMA auto_vacuum=NONE; VACUUM;`)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -50,14 +50,14 @@ func TestReclamationReturnsDiskSpaceAndMaintainsLiveRecords(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Close()
-	if _, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','account','qq','fixture@example.com','imap.qq.com',993,'[]',NULL,'',1); INSERT INTO messages VALUES('keep','a','INBOX',1,1,'retained','fixture',1,0,20)`); e != nil {
+	if _, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','account','qq','fixture@example.com','imap.qq.com',993,'[]',NULL,'',1); INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES('keep','a','INBOX',1,1,'retained','fixture',1,0,20)`); e != nil {
 		t.Fatal(e)
 	}
 	tx, e := s.DB.Begin()
 	if e != nil {
 		t.Fatal(e)
 	}
-	stmt, e := tx.Prepare("INSERT INTO messages VALUES(?,'a','INBOX',1,?,?, 'fixture',1,0,4096)")
+	stmt, e := tx.Prepare("INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES(?,'a','INBOX',1,?,?, 'fixture',1,0,4096)")
 	if e != nil {
 		t.Fatal(e)
 	}

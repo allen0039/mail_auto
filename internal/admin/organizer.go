@@ -8,6 +8,12 @@ import (
 
 func (s *Server) organizerAPI(w http.ResponseWriter, r *http.Request, session Session) bool {
 	path := r.URL.Path
+	if s.tasksAPI(w, r) {
+		return true
+	}
+	if s.rulesAPI(w, r) {
+		return true
+	}
 	if path == "/api/mcp/settings" || path == "/api/mcp/settings/check" {
 		s.mcpSettingsAPI(w, r)
 		return true

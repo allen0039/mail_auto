@@ -1,22 +1,22 @@
-# Mail Auto · 0.2.1
+# Mail Auto · 0.4.0
 
 Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用，不接入 AI API。
 
 MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存公开 HTTPS 地址和开关、检测连接并复制 Codex / ChatGPT 配置，无需修改启动参数。分类会把邮件移动到**原邮箱中的真实文件夹**，邮箱网页和手机端同步后可见。支持在原邮箱创建文件夹；归档与回收站独立可选。
 
-远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.2.1 验收记录](docs/acceptance-0.2.1.md)。
+新增「整理规则」「定时与任务」「TG 通知」：可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。AI 由外部 MCP 客户端触发，服务端不接入模型 API。[使用说明](docs/automation-guide.md)。
+
+远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.4.0 验收记录](docs/acceptance-0.4.0.md)。
 
 支持 QQ、网易（163 / 126 / yeah.net）、iCloud 的 IMAPS 接入；此前已验证单个网易账号 13 个文件夹、1,730 条元数据只读同步。QQ、iCloud 和真实远端写入仍待专用测试邮件验证。
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，提供 `0.2.1` 和 `latest` 标签，支持 Linux amd64 / arm64。建议固定版本标签，标准部署无需 `.env`。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，已发布版本包含 `0.4.0` 和 `latest`。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。
 
-在运行 Docker 的主机上执行：
+在运行 Docker 的主机执行：
 
 ```bash
-mkdir mail-auto && cd mail-auto
-curl -fsSL https://raw.githubusercontent.com/allen0039/mail_auto/main/compose.yaml -o compose.yaml
 docker compose pull
 docker compose up -d --no-build
 docker compose exec app mail-auto bootstrap show
@@ -50,10 +50,14 @@ ssh -L 8080:127.0.0.1:8080 user@server
 | 搜索 | 本地元数据：账号、文件夹、主题/发件人、发件人、接收日期（北京时间）、未读、分页 |
 | 正文 | 按需读取；原始邮件不超过 4 MiB；中文解码、纯文本优先、HTML 转文本；输出不超过 64 KiB |
 | 附件 | 只显示名称、MIME 类型与编码体积；不下载和解析附件内容 |
-| 运维 | 健康检查、脱敏审计、一致性 SQLite 备份、密钥匹配检查、优雅退出 |
+| 运维 | `/healthz`/`/readyz` 健康检查、脱敏审计、一致性 SQLite 备份、密钥匹配检查、优雅退出 |
 | 整理 | 在原邮箱创建文件夹及分类移动，冻结预览、异步任务、幂等、逐项结果、停止剩余项、核验未知结果、恢复与补偿撤销 |
 | MCP | 官方 Go SDK、Streamable HTTP、OAuth/PKCE、邮箱/文件夹/动作权限、令牌撤销，可视化连接配置；默认关闭 |
-| 待后续实现 | CONDSTORE/QRESYNC、确定性规则、报告、在线密钥轮换 |
+| 自定义规则 | 嵌套条件、优先级、版本、启停、模板、试运行；直接指向原邮箱文件夹 |
+| 外部 AI 任务 | MCP 批次、租约去重、观察/执行、保护和限额、建议与冻结计划、记录；不内置模型；可选外部触发，使用统一任务记录 |
+| 可选定时 | 每小时/每天/每周及时区、未来 5 次预览、持久化日程、漏跑合并；内置定时只运行固定规则，默认暂停观察 |
+| Telegram | 加密 Bot Token、可视化检测/测试、按任务选择通知策略、独立投递队列与重试、相同故障 6 小时冷却 |
+| 待后续实现 | CONDSTORE/QRESYNC、客户端私有规则导入、报告、在线密钥轮换 |
 
 同步覆盖已添加邮箱的全部历史邮件元数据，默认自动发现全部可读取文件夹。已有实例升级时会切换为全部文件夹；新建连接时可选填写指定范围。点击「同步邮箱」会为所有已添加账号提交后台任务，最多两个账号同时处理，页面可查看进度；刷新或关闭页面不会取消任务。
 
@@ -121,7 +125,10 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 - [配置与邮箱接入](docs/configuration.md)
 - [备份、恢复、远程访问与升级](docs/operations.md)
-- [当前版本范围、验证结果与已知限制](docs/acceptance-0.2.1.md)
+- [当前版本范围、验证结果与已知限制](docs/acceptance-0.4.0.md)
+- [规则与外部 AI 定时任务使用指南](docs/automation-guide.md)
+- [可选定时任务与 Telegram 通知优化计划（未实施）](docs/optional-scheduling-telegram-plan.md)
+- [0.5.0 后续功能与优化方案](docs/optimization-plan-0.5.0.md)
 - [MCP 接入与邮件整理](docs/mcp-setup.md)
 - [架构与后续扩展](docs/architecture.md)
 - [依赖与许可证](docs/dependencies.md)

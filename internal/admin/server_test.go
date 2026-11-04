@@ -47,6 +47,11 @@ func TestHTTPAccessBoundary(t *testing.T) {
 	cfg := config.Config{SessionHours: 12}
 	svc := &mail.Service{Store: auth.Store, Vault: auth.Vault}
 	server := New(auth, svc, cfg)
+	ready := httptest.NewRecorder()
+	server.Handler().ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "http://mail.test/readyz", nil))
+	if ready.Code != http.StatusOK || !bytes.Contains(ready.Body.Bytes(), []byte(`"status":"ready"`)) {
+		t.Fatalf("readyz: %d %s", ready.Code, ready.Body)
+	}
 	b := &browser{t: t, h: server.Handler(), cookies: map[string]*http.Cookie{}}
 	w := b.request("GET", "/api/accounts", "", false)
 	if w.Code != 401 {
@@ -102,6 +107,9 @@ func TestHTTPAccessBoundary(t *testing.T) {
 	for _, path := range []string{"/api/status", "/api/accounts", "/api/audits", "/api/messages"} {
 		if w = b.request("GET", path, "", false); w.Code != 200 {
 			t.Fatalf("%s %d %s", path, w.Code, w.Body)
+		}
+		if path == "/api/status" && !bytes.Contains(w.Body.Bytes(), []byte(`"automation"`)) {
+			t.Fatal("automation metrics missing from status")
 		}
 	}
 	if w = b.request("POST", "/api/accounts", `{"name":"test","provider":"qq","username":"a@qq.com","password":"secret-test"}`, true); w.Code != 201 {

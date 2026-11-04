@@ -65,7 +65,7 @@ func (s *automaticSession) Folders(ctx context.Context) ([]string, error) {
 }
 
 func (s *automaticSession) Refresh(ctx context.Context, folder string, previous mail.FolderState, emit func(mail.Snapshot) error) (mail.Inventory, error) {
-	out := mail.Inventory{Unread: map[uint32]bool{}}
+	out := mail.Inventory{Unread: map[uint32]bool{}, Flagged: map[uint32]bool{}}
 	if e := ctx.Err(); e != nil {
 		return out, e
 	}
@@ -129,6 +129,7 @@ func (s *automaticSession) Refresh(ctx context.Context, folder string, previous 
 				continue
 			}
 			out.Unread[m.Uid] = isUnread(m.Flags)
+			out.Flagged[m.Uid] = hasFlag(m.Flags, protocol.FlaggedFlag)
 			out.UIDs = append(out.UIDs, m.Uid)
 		}
 		if e = <-done; e != nil {
@@ -157,6 +158,9 @@ func (s *automaticSession) Refresh(ctx context.Context, folder string, previous 
 				return out, remoteProblem("读取邮件元数据", "服务器返回重复的 UID")
 			}
 			out.Unread[m.UID] = m.Unread
+			if m.FlagsKnown {
+				out.Flagged[m.UID] = m.Flagged
+			}
 			out.UIDs = append(out.UIDs, m.UID)
 		}
 		if e = emit(batch); e != nil {

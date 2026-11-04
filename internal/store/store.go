@@ -69,7 +69,7 @@ func (s *Store) migrate() error {
 	if e := s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil {
 		return e
 	}
-	if version > 5 {
+	if version > 7 {
 		return errors.New("database schema is newer than this binary")
 	}
 	tx, e := s.DB.Begin()
@@ -109,10 +109,29 @@ func (s *Store) migrate() error {
 	if e = migrateOrganizer(tx, current); e != nil {
 		return e
 	}
-	if _, e = tx.Exec("PRAGMA user_version=5"); e != nil {
+	if e = migrateAutomation(tx, current); e != nil {
+		return e
+	}
+	if e = createSearchIndexes(tx); e != nil {
+		return e
+	}
+	if e = migrateTasks(tx); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("PRAGMA user_version=7"); e != nil {
 		return e
 	}
 	return tx.Commit()
+}
+
+func createSearchIndexes(tx *sql.Tx) error {
+	_, e := tx.Exec(`
+ CREATE INDEX IF NOT EXISTS messages_recent ON messages(sent_at DESC,ref);
+ CREATE INDEX IF NOT EXISTS messages_account_recent ON messages(account_id,sent_at DESC,ref);
+ CREATE INDEX IF NOT EXISTS messages_folder_recent ON messages(account_id,folder,sent_at DESC,ref);
+ CREATE INDEX IF NOT EXISTS messages_account_unread_recent ON messages(account_id,unread,sent_at DESC,ref);
+ CREATE INDEX IF NOT EXISTS messages_account_flagged_recent ON messages(account_id,flagged,sent_at DESC,ref);`)
+	return e
 }
 func (s *Store) Fingerprint() (string, error) {
 	var fp string
@@ -144,6 +163,13 @@ func (s *Store) Cleanup(ctx context.Context) {
 	_, _ = s.DB.ExecContext(ctx, "DELETE FROM operation_plans WHERE expires<? AND id NOT IN (SELECT plan_id FROM operations)", now)
 	_, _ = s.DB.ExecContext(ctx, "DELETE FROM mail_entries WHERE detached_at>0 AND detached_at<? AND id NOT IN (SELECT ref FROM operation_items)", cutoff)
 
+	// Keep active or unresolved operations and their batches for reconciliation.
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM notification_outbox WHERE created_at<? AND state IN ('sent','failed','suppressed')", cutoff)
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM task_runs WHERE updated_at<? AND state IN ('completed','noop','observed','failed','partial','cancelled','interrupted','limited','requires_ai') AND id NOT IN (SELECT run_id FROM notification_outbox WHERE state IN ('pending','retry','sending')) AND id NOT IN (SELECT rb.run_id FROM task_run_batches rb JOIN automation_claims c ON c.batch_id=rb.batch_id JOIN operations o ON o.plan_id=c.plan_id WHERE o.state IN ('queued','running','needs_verification'))", cutoff)
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM notification_cooldown WHERE last_sent<?", cutoff)
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM automation_batches WHERE created_at<? AND id NOT IN (SELECT c.batch_id FROM automation_claims c JOIN operations o ON o.plan_id=c.plan_id WHERE o.state IN ('queued','running','needs_verification'))", cutoff)
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM automation_daily WHERE day<?", time.Now().AddDate(0, 0, -90).Format("2006-01-02"))
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM mail_rule_versions WHERE updated_at<? AND version NOT IN (SELECT version FROM mail_rules WHERE id=rule_id)", cutoff)
 	_, _ = s.DB.ExecContext(ctx, "DELETE FROM sessions WHERE expires < ?", time.Now().Unix())
 	_, _ = s.DB.ExecContext(ctx, "DELETE FROM audits WHERE at < ?", time.Now().AddDate(0, 0, -90).Unix())
 }

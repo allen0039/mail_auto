@@ -43,7 +43,7 @@ func run(args []string) error {
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "127.0.0.1"
 		}
-		resp, e := client.Get("http://" + net.JoinHostPort(host, port) + "/healthz")
+		resp, e := client.Get("http://" + net.JoinHostPort(host, port) + "/readyz")
 		if e != nil {
 			return e
 		}
@@ -106,12 +106,15 @@ func run(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	service := &mail.Service{Store: st, Vault: vault, Remote: remote.Adapter{}, SecretDir: c.SecretDir, Context: ctx}
+	service := &mail.Service{Store: st, Vault: vault, Remote: remote.Adapter{}, SecretDir: c.SecretDir, Context: ctx, NotificationPublicURL: c.PublicURL}
 	if e = service.RecoverSync(ctx); e != nil {
 		return e
 	}
 	defer service.Stop()
 	if e = service.StartOperations(); e != nil {
+		return e
+	}
+	if e = service.StartTaskAutomation(); e != nil {
 		return e
 	}
 	if c.AutomaticSync {

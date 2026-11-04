@@ -19,18 +19,20 @@ var ErrInput = errors.New("invalid_input")
 var ErrConflict = errors.New("state_conflict")
 
 type Access struct {
-	Owner    string              `json:"owner"`
-	Version  int                 `json:"version"`
-	Accounts []string            `json:"accounts"`
-	Folders  map[string][]string `json:"folders"`
-	Actions  []string            `json:"actions"`
+	automation bool
+	Owner      string              `json:"owner"`
+	Version    int                 `json:"version"`
+	Accounts   []string            `json:"accounts"`
+	Folders    map[string][]string `json:"folders"`
+	Actions    []string            `json:"actions"`
 }
 
 func (a Access) Allows(account, folder, action string) bool {
 	if a.Owner == "admin" {
 		return true
 	}
-	if !slices.Contains(a.Actions, action) || !slices.Contains(a.Accounts, account) {
+	allowedAction := slices.Contains(a.Actions, action) || (a.automation && slices.Contains(a.Actions, "automation") && slices.Contains([]string{"move", "archive", "trash"}, action))
+	if !allowedAction || !slices.Contains(a.Accounts, account) {
 		return false
 	}
 	allowed, ok := a.Folders[account]
@@ -72,6 +74,9 @@ func (s *Service) CheckAccess(a Access) (Access, error) {
 	}
 	if a.Owner == "admin" {
 		return admin, nil
+	}
+	if strings.HasPrefix(a.Owner, "svc:") {
+		return s.taskServiceAccess(a)
 	}
 	var rawAccounts, rawFolders, rawActions string
 	var expires int64
@@ -135,7 +140,7 @@ func (s *Service) CreateToken(in TokenInput) (Token, string, error) {
 		in.Folders[id] = fs
 	}
 	for _, action := range in.Actions {
-		if !slices.Contains([]string{"read", "folder_manage", "archive", "move", "trash", "restore"}, action) {
+		if !slices.Contains([]string{"read", "folder_manage", "archive", "move", "trash", "restore", "rule_manage", "task_manage", "automation"}, action) {
 			return Token{}, "", ErrInput
 		}
 	}

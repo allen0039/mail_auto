@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/mcpserver"
 	"mail-auto/internal/store"
 )
 
@@ -25,6 +28,29 @@ type provider struct {
 	mu    sync.Mutex
 	boxes map[string]map[uint32]mail.Message
 	next  uint32
+}
+
+// All Telegram requests in this disposable fixture are intercepted in memory.
+// No real network request or message delivery is possible through this client.
+type telegramFixture struct {
+	mu    sync.Mutex
+	calls []map[string]any
+}
+
+func (f *telegramFixture) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Host != "api.telegram.org" {
+		return nil, errors.New("unexpected fixture host")
+	}
+	var data map[string]any
+	_ = json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&data)
+	method := "getMe"
+	if strings.HasSuffix(r.URL.Path, "sendMessage") {
+		method = "sendMessage"
+	}
+	f.mu.Lock()
+	f.calls = append(f.calls, map[string]any{"method": method, "data": data})
+	f.mu.Unlock()
+	return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"username":"mail_auto_fixture_bot","message_id":1}}`))}, nil
 }
 
 func (p *provider) Folders(context.Context, mail.Account, string) ([]string, error) {
@@ -59,6 +85,18 @@ func (p *provider) Capabilities(ctx context.Context, a mail.Account, pw string) 
 		}
 		out.Folders = append(out.Folders, mail.FolderInfo{Name: name, Label: mail.FolderLabel(name), Role: role})
 	}
+	return out, nil
+}
+func (p *provider) RuleState(_ context.Context, _ mail.Account, _ string, m mail.Message) (mail.Message, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out, ok := p.boxes[m.Folder][m.UID]
+	if !ok {
+		return out, mail.ErrConflict
+	}
+	out.AccountID = m.AccountID
+	out.Folder = m.Folder
+	out.UIDValidity = 7
 	return out, nil
 }
 func (p *provider) CreateFolder(_ context.Context, _ mail.Account, _ string, name string) error {
@@ -125,11 +163,12 @@ func main() {
 			log.Fatal(e)
 		}
 	}
-	p := &provider{boxes: map[string]map[uint32]mail.Message{"INBOX": {}, "已删除": {}}, next: 100}
+	p := &provider{boxes: map[string]map[uint32]mail.Message{"INBOX": {}, "已删除": {}, "分类/账单": {}}, next: 100}
 	for i := uint32(1); i <= 3; i++ {
-		p.boxes["INBOX"][i] = mail.Message{UID: i, Subject: fmt.Sprint("测试账单 <script> ", i), Sender: "billing@example.test", SentAt: time.Now().Unix() - int64(i), Unread: true, Size: 120}
+		p.boxes["INBOX"][i] = mail.Message{UID: i, Subject: fmt.Sprint("测试账单 <script> ", i), Sender: "billing@example.test", SentAt: time.Now().Unix() - int64(i), ReceivedAt: time.Now().Unix() - 60*86400, FlagsKnown: true, Unread: i == 3, Size: 120}
 	}
-	svc := &mail.Service{Store: st, Vault: vault, Remote: p}
+	telegram := &telegramFixture{calls: []map[string]any{}}
+	svc := &mail.Service{Store: st, Vault: vault, Remote: p, NotificationHTTP: &http.Client{Transport: telegram}}
 	defer svc.Stop()
 	accounts, e := svc.Accounts()
 	if e != nil {
@@ -147,12 +186,26 @@ func main() {
 	if e = svc.StartOperations(); e != nil {
 		log.Fatal(e)
 	}
+	if e = svc.StartTaskAutomation(); e != nil {
+		log.Fatal(e)
+	}
+	fixtureMCP := mcpserver.Handler(svc, "http://127.0.0.1:18082")
 	handler := admin.New(auth, svc, config.Config{PublicURL: "http://127.0.0.1:18082"}).Handler()
 	log.Fatal(http.ListenAndServe("127.0.0.1:18082", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			fixtureMCP.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/fixture/provider" {
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			json.NewEncoder(w).Encode(p.boxes)
+			return
+		}
+		if r.URL.Path == "/fixture/telegram" {
+			telegram.mu.Lock()
+			defer telegram.mu.Unlock()
+			json.NewEncoder(w).Encode(telegram.calls)
 			return
 		}
 		handler.ServeHTTP(w, r)

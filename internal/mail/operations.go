@@ -30,14 +30,15 @@ type PlanItem struct {
 	Skip            string  `json:"skip,omitempty"`
 }
 type Plan struct {
-	ID        string     `json:"id"`
-	Owner     string     `json:"owner"`
-	Version   int        `json:"version"`
-	Action    string     `json:"action"`
-	Labels    []string   `json:"labels,omitempty"`
-	Items     []PlanItem `json:"items"`
-	CreatedAt int64      `json:"created_at"`
-	Expires   int64      `json:"expires"`
+	ID         string           `json:"id"`
+	Owner      string           `json:"owner"`
+	Version    int              `json:"version"`
+	Action     string           `json:"action"`
+	Labels     []string         `json:"labels,omitempty"`
+	Automation *AutomationGuard `json:"automation,omitempty"`
+	Items      []PlanItem       `json:"items"`
+	CreatedAt  int64            `json:"created_at"`
+	Expires    int64            `json:"expires"`
 }
 
 // Message deliberately hides IMAP identifiers in ordinary API responses. A frozen
@@ -93,6 +94,9 @@ func (s *Service) NewPlan(ctx context.Context, access Access, in PlanInput) (Pla
 	access, e := s.CheckAccess(access)
 	if e != nil {
 		return Plan{}, e
+	}
+	if access.Owner != "admin" && slices.Contains(access.Actions, "automation") && !access.automation {
+		return Plan{}, ErrDenied
 	}
 	if in.Search != nil {
 		if len(in.Refs) > 0 {
@@ -239,6 +243,8 @@ func (s *Service) GetPlan(a Access, id string) (Plan, error) {
 	return p, e
 }
 func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
+	s.automationMu.Lock()
+	defer s.automationMu.Unlock()
 	a, e := s.CheckAccess(a)
 	if e != nil {
 		return Operation{}, e
@@ -264,6 +270,20 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 	if p.Owner != a.Owner || p.Version != a.Version || p.Expires <= time.Now().Unix() {
 		return Operation{}, ErrConflict
 	}
+	var automationPolicy AutomationPolicy
+	if p.Automation != nil {
+		if len(p.Items) != 1 {
+			return Operation{}, ErrConflict
+		}
+		m, err := s.AllowedMessage(a, p.Items[0].Message.Ref, "read")
+		if err != nil {
+			return Operation{}, err
+		}
+		a, automationPolicy, e = s.validateAutomationPlan(a, p, m)
+		if e != nil {
+			return Operation{}, e
+		}
+	}
 	now := time.Now().Unix()
 	opID := credentials.Random(24)
 	tx, e := s.Store.DB.Begin()
@@ -271,6 +291,47 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 		return Operation{}, e
 	}
 	defer tx.Rollback()
+	var planUses int
+	if e = tx.QueryRow("SELECT count(*) FROM operations WHERE plan_id=?", p.ID).Scan(&planUses); e != nil {
+		return Operation{}, e
+	}
+	if planUses > 0 {
+		return Operation{}, ErrConflict
+	}
+	if p.Automation != nil {
+		day := time.Now().In(automationLocation).Format("2006-01-02")
+		if _, e = tx.Exec("INSERT OR IGNORE INTO automation_daily(account_id,day,count,claimed) VALUES(?,?,0,0)", automationPolicy.AccountID, day); e != nil {
+			return Operation{}, e
+		}
+		result, err := tx.Exec("UPDATE automation_daily SET count=count+? WHERE account_id=? AND day=? AND count+?<=?", len(p.Items), automationPolicy.AccountID, day, len(p.Items), automationPolicy.DailyLimit)
+		if err != nil {
+			return Operation{}, err
+		}
+		n, _ := result.RowsAffected()
+		if n != 1 {
+			return Operation{}, ErrDailyLimit
+		}
+	}
+	for _, item := range p.Items {
+		if item.Skip != "" {
+			continue
+		}
+		var n int
+		if e = tx.QueryRow("SELECT count(*) FROM operation_items WHERE ref=? AND state IN ('queued','running','needs_verification')", item.Message.Ref).Scan(&n); e != nil {
+			return Operation{}, e
+		}
+		if n > 0 {
+			return Operation{}, ErrBusy
+		}
+		if p.Automation == nil {
+			if e = tx.QueryRow("SELECT count(*) FROM automation_claims WHERE account_id=? AND ref=? AND state IN ('claimed','planned') AND expires>? AND (plan_id='' OR plan_id NOT IN (SELECT plan_id FROM operations WHERE state IN ('completed','failed','partial','cancelled')))", item.Message.AccountID, item.Message.Ref, now).Scan(&n); e != nil {
+				return Operation{}, e
+			}
+			if n > 0 {
+				return Operation{}, ErrBusy
+			}
+		}
+	}
 	_, e = tx.Exec("INSERT INTO operations(id,plan_id,owner,idempotency_key,state,created_at,updated_at) VALUES(?,?,?,?,'queued',?,?)", opID, id, a.Owner, key, now, now)
 	if e != nil {
 		tx.Rollback()
@@ -373,6 +434,8 @@ func (s *Service) Operations(a Access) ([]Operation, error) {
 }
 func errorCode(e error) string {
 	switch {
+	case errors.Is(e, ErrDailyLimit):
+		return "daily_limit_reached"
 	case errors.Is(e, ErrDenied):
 		return "permission_denied"
 	case errors.Is(e, ErrBusy):
@@ -524,6 +587,11 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 	_ = tx.Commit()
 }
 func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, item PlanItem, access Access) error {
+	s.automationMu.Lock()
+	defer s.automationMu.Unlock()
+	if p.Automation != nil {
+		access.automation = true
+	}
 	release, e := s.acquire(item.Message.AccountID)
 	if e != nil {
 		return e
@@ -535,6 +603,12 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	}
 	if m.Folder != item.Message.Folder || m.UID != item.Message.UID || m.UIDValidity != item.Message.UIDValidity {
 		return ErrConflict
+	}
+	if p.Automation != nil {
+		access, _, e = s.validateAutomationPlan(access, p, m)
+		if e != nil {
+			return e
+		}
 	}
 	account, e := s.Account(m.AccountID)
 	if e != nil {
@@ -575,6 +649,31 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	if e != nil {
 		return e
 	}
+	if p.Automation != nil {
+		var queuedAt int64
+		if err := s.Store.DB.QueryRow("SELECT created_at FROM operations WHERE id=?", id).Scan(&queuedAt); err != nil {
+			return err
+		}
+		if time.Unix(queuedAt, 0).In(automationLocation).Format("2006-01-02") != time.Now().In(automationLocation).Format("2006-01-02") {
+			return ErrConflict
+		}
+		freshRemote, ok := s.Remote.(RuleStateRemote)
+		if !ok {
+			return ErrCapability
+		}
+		fresh, err := freshRemote.RuleState(ctx, account, pw, m)
+		if err != nil {
+			return err
+		}
+		fresh.Ref = m.Ref
+		fresh.ChangedAt = m.ChangedAt
+		if messageSignature(fresh) != p.Automation.Signature {
+			return ErrConflict
+		}
+		if _, _, err = s.validateAutomationPlan(access, p, fresh); err != nil {
+			return err
+		}
+	}
 	result, e := remote.Move(ctx, account, pw, m, item.Destination, func(r MoveResult) error {
 		_, e := s.Store.DB.Exec("UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?", r.UIDValidity, r.UID, id, pos)
 		return e
@@ -598,7 +697,7 @@ func (s *Service) publishMove(id string, pos int, m Message, r MoveResult) error
 	if _, e = tx.Exec("DELETE FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=? AND ref<>?", m.AccountID, r.Folder, r.UIDValidity, r.UID, m.Ref); e != nil {
 		return ErrUncertain
 	}
-	_, e = tx.Exec(`INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET folder=excluded.folder,uidvalidity=excluded.uidvalidity,uid=excluded.uid`, m.Ref, m.AccountID, r.Folder, r.UIDValidity, r.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size)
+	_, e = tx.Exec(`INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET folder=excluded.folder,uidvalidity=excluded.uidvalidity,uid=excluded.uid,changed_at=excluded.changed_at`, m.Ref, m.AccountID, r.Folder, r.UIDValidity, r.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size, m.ReceivedAt, m.Flagged, m.FlagsKnown, time.Now().Unix(), m.MetadataVersion)
 	if e != nil {
 		return ErrUncertain
 	}

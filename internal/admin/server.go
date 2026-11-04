@@ -24,7 +24,7 @@ import (
 //go:embed web/*
 var web embed.FS
 
-const Version = "0.2.1"
+const Version = "0.4.0"
 const sessionCookie = "mail_auto_session"
 const csrfCookie = "mail_auto_csrf"
 
@@ -162,6 +162,10 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, 200, map[string]string{"status": "ok", "version": Version})
 			return
 		}
+		if r.URL.Path == "/readyz" {
+			s.readyz(w, r)
+			return
+		}
 		if r.URL.Path == "/mcp" || strings.HasPrefix(r.URL.Path, "/mcp/") {
 			if s.requestMCP(r).handler != nil {
 				if !s.mcpHost(r) {
@@ -186,12 +190,41 @@ func (s *Server) Handler() http.Handler {
 			fail(w, 405, "method not allowed")
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/style.css" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/style.css" {
 			http.NotFound(w, r)
 			return
 		}
 		static.ServeHTTP(w, r)
 	})
+}
+
+// readyz distinguishes a live HTTP process from a process whose database or
+// encryption key is not ready to serve mailbox operations. It intentionally
+// returns only coarse state so it can be used by a container health probe.
+func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		fail(w, 405, "method not allowed")
+		return
+	}
+	if s.Auth == nil || s.Auth.Store == nil || s.Auth.Vault == nil {
+		fail(w, 503, "not ready")
+		return
+	}
+	if e := s.Auth.Store.DB.PingContext(r.Context()); e != nil {
+		fail(w, 503, "not ready")
+		return
+	}
+	fingerprint, e := s.Auth.Store.Fingerprint()
+	if e != nil || fingerprint == "" || fingerprint != s.Auth.Vault.Fingerprint {
+		fail(w, 503, "not ready")
+		return
+	}
+	var schema int
+	if e = s.Auth.Store.DB.QueryRowContext(r.Context(), "PRAGMA user_version").Scan(&schema); e != nil || schema < 7 {
+		fail(w, 503, "not ready")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": "ready", "version": Version, "schema": schema})
 }
 func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/session" && r.Method == http.MethodGet {
@@ -383,7 +416,9 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func operationError(w http.ResponseWriter, e error) {
-	if errors.Is(e, mail.ErrInput) || errors.Is(e, mail.ErrLabelInput) {
+	if errors.Is(e, mail.ErrDailyLimit) {
+		fail(w, 429, "已达到今天的自动整理上限，请明天继续或由管理员调整额度")
+	} else if errors.Is(e, mail.ErrInput) || errors.Is(e, mail.ErrLabelInput) {
 		fail(w, 400, "参数无效，请检查邮件和原邮箱目的文件夹")
 	} else if errors.Is(e, mail.ErrDenied) {
 		fail(w, 403, "当前操作未授权，或写入已停用")
@@ -528,7 +563,12 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	automatic := s.Mail.AutomaticStatus()
-	writeJSON(w, 200, map[string]any{"sync_jobs": jobs, "version": Version, "accounts": accounts, "messages": messages, "unread": unread, "last_sync": last.Int64, "retention_days": 0, "all_history": true, "read_only": false, "remote_writes_default": false, "mcp_enabled": s.currentMCP().Enabled, "ai_enabled": false, "automatic_sync": automatic.Enabled, "automatic": automatic, "index_revision": s.Mail.IndexRevision()})
+	metrics, e := s.Mail.AutomationMetrics(r.Context())
+	if e != nil {
+		fail(w, 500, "自动化状态读取失败")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"sync_jobs": jobs, "version": Version, "accounts": accounts, "messages": messages, "unread": unread, "last_sync": last.Int64, "retention_days": 0, "all_history": true, "read_only": false, "remote_writes_default": false, "mcp_enabled": s.currentMCP().Enabled, "ai_enabled": false, "automatic_sync": automatic.Enabled, "automatic": automatic, "automation": metrics, "index_revision": s.Mail.IndexRevision()})
 }
 func (s *Server) audits(w http.ResponseWriter, r *http.Request) {
 	rows, e := s.Auth.Store.DB.QueryContext(r.Context(), "SELECT at,action,target,outcome FROM audits ORDER BY id DESC LIMIT 100")

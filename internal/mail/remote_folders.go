@@ -24,6 +24,9 @@ func (s *Service) CreateRemoteFolder(ctx context.Context, access Access, id, nam
 	if e != nil {
 		return FolderInfo{}, e
 	}
+	if access.Owner != "admin" && slices.Contains(access.Actions, "automation") {
+		return FolderInfo{}, ErrDenied
+	}
 	if !ValidFolderName(name) {
 		return FolderInfo{}, ErrInput
 	}

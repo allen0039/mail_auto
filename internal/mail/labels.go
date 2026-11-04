@@ -121,18 +121,43 @@ func (s *Service) DeleteLabel(id string) error {
 }
 
 func (s *Service) messageLabels(ref string) ([]Label, error) {
-	rows, e := s.Store.DB.Query("SELECT l.id,l.name,l.color,l.created_at FROM labels l JOIN message_labels ml ON ml.label_id=l.id WHERE ml.message_ref=? ORDER BY l.name,l.id", ref)
+	labels, e := s.messageLabelsForRefs([]string{ref})
+	if e != nil {
+		return nil, e
+	}
+	return labels[ref], nil
+}
+
+// messageLabelsForRefs loads labels for a page in one query. Search results
+// are bounded to 100 messages, so the generated IN clause stays well below
+// SQLite's variable limit while avoiding one query per message.
+func (s *Service) messageLabelsForRefs(refs []string) (map[string][]Label, error) {
+	out := make(map[string][]Label, len(refs))
+	if len(refs) == 0 {
+		return out, nil
+	}
+	marks := make([]string, len(refs))
+	args := make([]any, len(refs))
+	for i, ref := range refs {
+		if ref == "" {
+			return nil, ErrInput
+		}
+		marks[i] = "?"
+		args[i] = ref
+		out[ref] = []Label{}
+	}
+	rows, e := s.Store.DB.Query("SELECT ml.message_ref,l.id,l.name,l.color,l.created_at FROM message_labels ml JOIN labels l ON ml.label_id=l.id WHERE ml.message_ref IN ("+strings.Join(marks, ",")+") ORDER BY ml.message_ref,l.name,l.id", args...)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
-	out := []Label{}
 	for rows.Next() {
+		var ref string
 		var l Label
-		if e = rows.Scan(&l.ID, &l.Name, &l.Color, &l.CreatedAt); e != nil {
+		if e = rows.Scan(&ref, &l.ID, &l.Name, &l.Color, &l.CreatedAt); e != nil {
 			return nil, e
 		}
-		out = append(out, l)
+		out[ref] = append(out[ref], l)
 	}
 	return out, rows.Err()
 }

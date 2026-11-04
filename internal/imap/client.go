@@ -310,7 +310,12 @@ func fetchBatch(conn *connection, accountID, folder string, validity uint32, set
 		}
 		subject, _ := mailmime.Truncate(strings.ToValidUTF8(m.Envelope.Subject, "�"), 4096)
 		from, _ := mailmime.Truncate(strings.ToValidUTF8(strings.Join(sender, ", "), "�"), 2048)
-		batch.Messages = append(batch.Messages, mail.Message{AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size})
+		received := int64(0)
+		if !m.InternalDate.IsZero() {
+			received = m.InternalDate.Unix()
+		}
+		_, flagsKnown := m.Items[protocol.FetchFlags]
+		batch.Messages = append(batch.Messages, mail.Message{ReceivedAt: received, Flagged: hasFlag(m.Flags, protocol.FlaggedFlag), FlagsKnown: flagsKnown, MetadataVersion: 1, AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size})
 	}
 	if e := <-done; e != nil {
 		return mail.Snapshot{}, remoteFailure(conn, "读取邮件元数据", e)

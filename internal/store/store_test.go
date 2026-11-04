@@ -50,6 +50,23 @@ func TestConsistentBackupAndSchemaGuard(t *testing.T) {
 	}
 }
 
+func TestMessageSearchIndexesExist(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, name := range []string{"messages_recent", "messages_account_recent", "messages_folder_recent", "messages_account_unread_recent", "messages_account_flagged_recent"} {
+		var count int
+		if err = s.DB.QueryRow("SELECT count(*) FROM pragma_index_list('messages') WHERE name=?", name).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("missing message index %s", name)
+		}
+	}
+}
+
 func TestUpgradePreservesHistoryAndExpandsFolders(t *testing.T) {
 	dir := t.TempDir()
 	s, e := Open(dir)
@@ -57,7 +74,7 @@ func TestUpgradePreservesHistoryAndExpandsFolders(t *testing.T) {
 		t.Fatal(e)
 	}
 	_, e = s.DB.Exec(`INSERT INTO accounts VALUES('a','account','qq','a@qq.com','imap.qq.com',993,'["INBOX"]',NULL,'',1);
- INSERT INTO messages VALUES('ref','a','INBOX',1,1,'old','sender',946684800,1,20);
+ INSERT INTO messages(ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size) VALUES('ref','a','INBOX',1,1,'old','sender',946684800,1,20);
  PRAGMA user_version=1;`)
 	if e != nil {
 		t.Fatal(e)

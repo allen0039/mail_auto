@@ -273,7 +273,7 @@ func (s *Service) scanFolder(ctx context.Context, a Account, pw, folder string, 
 			if m.UID == 0 {
 				return errors.New("服务器返回无效 UID")
 			}
-			if _, e = tx.ExecContext(ctx, "INSERT INTO sync_stage VALUES(?,?,?,?,?,?,?,?,?,?,?)", token, credentials.Random(24), a.ID, folder, validity, m.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size); e != nil {
+			if _, e = tx.ExecContext(ctx, "INSERT INTO sync_stage VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", token, credentials.Random(24), a.ID, folder, validity, m.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size, m.ReceivedAt, m.Flagged, m.FlagsKnown, time.Now().Unix(), 1); e != nil {
 				return syncStep("写入邮件暂存区", e)
 			}
 		}
@@ -304,7 +304,7 @@ func (s *Service) scanFolder(ctx context.Context, a Account, pw, folder string, 
 	if _, e = tx.ExecContext(ctx, `DELETE FROM messages WHERE account_id=? AND folder=? AND (uidvalidity<>? OR uid NOT IN (SELECT uid FROM sync_stage WHERE token=?))`, a.ID, folder, validity, token); e != nil {
 		return count, syncStep("校正文件夹索引", e)
 	}
-	if _, e = tx.ExecContext(ctx, `INSERT INTO messages SELECT ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size FROM sync_stage WHERE token=? ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET subject=excluded.subject,sender=excluded.sender,sent_at=excluded.sent_at,unread=excluded.unread,size=excluded.size`, token); e != nil {
+	if _, e = tx.ExecContext(ctx, `INSERT INTO messages SELECT ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version FROM sync_stage WHERE token=? ON CONFLICT(account_id,folder,uidvalidity,uid) DO UPDATE SET changed_at=CASE WHEN messages.subject<>excluded.subject OR messages.sender<>excluded.sender OR messages.unread<>excluded.unread OR messages.flagged<>excluded.flagged OR messages.flags_known<>excluded.flags_known OR messages.received_at<>excluded.received_at THEN excluded.changed_at ELSE messages.changed_at END,subject=excluded.subject,sender=excluded.sender,sent_at=excluded.sent_at,unread=excluded.unread,size=excluded.size,received_at=excluded.received_at,flagged=excluded.flagged,flags_known=excluded.flags_known,metadata_version=excluded.metadata_version`, token); e != nil {
 		return count, syncStep("发布文件夹索引", e)
 	}
 	if _, e = tx.ExecContext(ctx, `INSERT INTO mailboxes VALUES(?,?,?,?) ON CONFLICT(account_id,name) DO UPDATE SET uidvalidity=excluded.uidvalidity,synced_at=excluded.synced_at`, a.ID, folder, validity, time.Now().Unix()); e != nil {

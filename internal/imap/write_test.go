@@ -333,3 +333,34 @@ func TestCreateFolderRequiresRemoteConfirmation(t *testing.T) {
 		})
 	}
 }
+
+func TestAutomationRuleStateReadsFreshMetadataWithoutBodyOrFlagsWrites(t *testing.T) {
+	adapter, trace, box := noUIDNextAdapter(t, 1, false)
+	account := mail.Account{ID: "fixture", Provider: "qq"}
+	var original mail.Message
+	if e := adapter.Scan(context.Background(), account, "", "INBOX", func(b mail.Snapshot) error {
+		if len(b.Messages) > 0 {
+			original = b.Messages[0]
+		}
+		return nil
+	}); e != nil {
+		t.Fatal(e)
+	}
+	if !original.FlagsKnown || original.ReceivedAt <= 0 {
+		t.Fatal("metadata incomplete", original)
+	}
+	box.Messages[0].Flags = []string{protocol.SeenFlag, protocol.FlaggedFlag}
+	fresh, e := adapter.RuleState(context.Background(), account, "", original)
+	if e != nil || !fresh.Flagged || fresh.Unread || !fresh.FlagsKnown || fresh.ReceivedAt != original.ReceivedAt {
+		t.Fatal(fresh, e)
+	}
+	changed := original
+	changed.UIDValidity++
+	if _, e = adapter.RuleState(context.Background(), account, "", changed); !errors.Is(e, mail.ErrConflict) {
+		t.Fatal("stale UIDVALIDITY", e)
+	}
+	traffic := strings.ToUpper(trace.String())
+	if !strings.Contains(traffic, " EXAMINE ") || strings.Contains(traffic, "BODY[") || strings.Contains(traffic, "BODY.PEEK") || strings.Contains(traffic, " STORE ") || strings.Contains(traffic, " EXPUNGE ") {
+		t.Fatal("unexpected metadata read commands")
+	}
+}
