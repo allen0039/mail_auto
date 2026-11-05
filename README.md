@@ -1,4 +1,4 @@
-# Mail Auto · 0.4.0
+# Mail Auto · 0.4.1
 
 Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用，不接入 AI API。
 
@@ -6,13 +6,13 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 新增「整理规则」「定时与任务」「TG 通知」：可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。AI 由外部 MCP 客户端触发，服务端不接入模型 API。[使用说明](docs/automation-guide.md)。
 
-远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.4.0 验收记录](docs/acceptance-0.4.0.md)。
+远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.4.1 验收记录](docs/acceptance-0.4.1.md)。
 
 支持 QQ、网易（163 / 126 / yeah.net）、iCloud 的 IMAPS 接入；此前已验证单个网易账号 13 个文件夹、1,730 条元数据只读同步。QQ、iCloud 和真实远端写入仍待专用测试邮件验证。
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，已发布版本包含 `0.4.0` 和 `latest`。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，已发布版本包含 `0.4.1` 和 `latest`。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。 发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。
 
 在运行 Docker 的主机执行：
 
@@ -125,7 +125,7 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 - [配置与邮箱接入](docs/configuration.md)
 - [备份、恢复、远程访问与升级](docs/operations.md)
-- [当前版本范围、验证结果与已知限制](docs/acceptance-0.4.0.md)
+- [当前版本范围、验证结果与已知限制](docs/acceptance-0.4.1.md)
 - [规则与外部 AI 定时任务使用指南](docs/automation-guide.md)
 - [可选定时任务与 Telegram 通知优化计划（未实施）](docs/optional-scheduling-telegram-plan.md)
 - [0.5.0 后续功能与优化方案](docs/optimization-plan-0.5.0.md)
