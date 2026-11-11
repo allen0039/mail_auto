@@ -154,13 +154,19 @@ func (s *Service) recordTaskScheduleFailure(t Task, scheduled int64, cause error
 	}
 }
 func (s *Service) ensureTaskIndex(ctx context.Context, p AutomationPolicy) error {
+	automatic := s.AutomaticStatus().Enabled
 	for _, f := range p.SourceFolders {
 		var at int64
 		e := s.Store.DB.QueryRow("SELECT synced_at FROM mailboxes WHERE account_id=? AND name=?", p.AccountID, f).Scan(&at)
 		if e != nil && e != sql.ErrNoRows {
 			return e
 		}
-		if e == sql.ErrNoRows || time.Now().Unix()-at > 120 {
+		// Automatic sync owns index freshness. A scheduled task must not launch a
+		// full multi-folder sync: under provider latency that can consume the whole
+		// task deadline before the first candidate is scanned. Every automation
+		// write is checked against fresh remote state before execution.
+		staleManualIndex := !automatic && time.Now().Unix()-at > 120
+		if e == sql.ErrNoRows || at == 0 || staleManualIndex {
 			_, e = s.Sync(ctx, p.AccountID)
 			if e != nil {
 				return e

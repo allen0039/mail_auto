@@ -13,29 +13,34 @@ import (
 )
 
 func (a Adapter) RuleState(ctx context.Context, account mail.Account, password string, original mail.Message) (mail.Message, error) {
-	conn, e := a.open(ctx, account, password)
-	if e != nil {
-		return mail.Message{}, e
-	}
-	defer conn.close()
-	conn.resetBudget()
-	status, e := conn.c.Select(original.Folder, true)
-	if e != nil {
-		return mail.Message{}, remoteFailure(conn, "复核整理邮件", e)
-	}
-	if status.UidValidity != original.UIDValidity {
-		return mail.Message{}, mail.ErrConflict
-	}
-	set := new(protocol.SeqSet)
-	set.AddNum(original.UID)
-	batch, e := fetchBatch(conn, account.ID, original.Folder, status.UidValidity, set)
-	if e != nil {
-		return mail.Message{}, e
-	}
-	if len(batch.Messages) != 1 || batch.Messages[0].UID != original.UID {
-		return mail.Message{}, mail.ErrConflict
-	}
-	return batch.Messages[0], nil
+	var out mail.Message
+	err := retryRemote(ctx, func() error {
+		conn, err := a.open(ctx, account, password)
+		if err != nil {
+			return err
+		}
+		defer conn.close()
+		conn.resetBudget()
+		status, err := conn.c.Select(original.Folder, true)
+		if err != nil {
+			return remoteFailure(conn, "复核整理邮件", err)
+		}
+		if status.UidValidity != original.UIDValidity {
+			return mail.ErrConflict
+		}
+		set := new(protocol.SeqSet)
+		set.AddNum(original.UID)
+		batch, err := fetchBatch(conn, account.ID, original.Folder, status.UidValidity, set)
+		if err != nil {
+			return err
+		}
+		if len(batch.Messages) != 1 || batch.Messages[0].UID != original.UID {
+			return mail.ErrConflict
+		}
+		out = batch.Messages[0]
+		return nil
+	})
+	return out, err
 }
 
 func (a Adapter) Capabilities(ctx context.Context, account mail.Account, password string) (mail.Capabilities, error) {
@@ -109,7 +114,7 @@ func copyUID(status *protocol.StatusResp, source uint32, dest string) (mail.Move
 // Prefer native UID MOVE; UIDPLUS fallback expunges only the confirmed source UID.
 // Never use Client.UidMove, which can fall back to a global EXPUNGE.
 func (a Adapter) Move(ctx context.Context, account mail.Account, password string, m mail.Message, dest string, record func(mail.MoveResult) error) (mail.MoveResult, error) {
-	conn, e := a.open(ctx, account, password)
+	conn, e := a.openRetry(ctx, account, password)
 	if e != nil {
 		return mail.MoveResult{}, e
 	}
@@ -219,12 +224,14 @@ func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password 
 	if result.UID == 0 || result.UIDValidity == 0 || result.Folder == "" {
 		return mail.ErrUncertain
 	}
-	conn, e := a.open(ctx, account, password)
-	if e != nil {
-		return fmt.Errorf("%w: %w", mail.ErrUncertain, e)
-	}
-	defer conn.close()
-	return verifyMove(conn, m, result)
+	return retryRemote(ctx, func() error {
+		conn, err := a.open(ctx, account, password)
+		if err != nil {
+			return fmt.Errorf("%w: %w", mail.ErrUncertain, err)
+		}
+		defer conn.close()
+		return verifyMove(conn, m, result)
+	})
 }
 
 func verifyMove(conn *connection, m mail.Message, result mail.MoveResult) error {

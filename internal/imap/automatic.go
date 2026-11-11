@@ -21,19 +21,28 @@ type automaticSession struct {
 }
 
 func (a Adapter) OpenAutomatic(ctx context.Context, account mail.Account, password string) (mail.AutomaticSession, error) {
-	conn, e := a.open(ctx, account, password)
-	if e != nil {
-		return nil, e
+	var session *automaticSession
+	err := retryRemote(ctx, func() error {
+		conn, err := a.open(ctx, account, password)
+		if err != nil {
+			return err
+		}
+		s := &automaticSession{conn: conn, account: account, known: map[string]mail.Inventory{}}
+		s.stop = context.AfterFunc(ctx, conn.close)
+		conn.resetBudget()
+		push, err := conn.c.Support("IDLE")
+		if err != nil {
+			s.Close()
+			return remoteFailure(conn, "查询推送能力", err)
+		}
+		s.push = push
+		session = s
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	s := &automaticSession{conn: conn, account: account, known: map[string]mail.Inventory{}}
-	s.stop = context.AfterFunc(ctx, conn.close)
-	conn.resetBudget()
-	s.push, e = conn.c.Support("IDLE")
-	if e != nil {
-		s.Close()
-		return nil, remoteFailure(conn, "查询推送能力", e)
-	}
-	return s, nil
+	return session, nil
 }
 func (s *automaticSession) Close()              { s.stop(); s.conn.close() }
 func (s *automaticSession) PushSupported() bool { return s.push }

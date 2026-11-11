@@ -41,6 +41,18 @@ func (a Adapter) open(ctx context.Context, account mail.Account, password string
 	return dial(ctx, account, password)
 }
 
+// openRetry only retries before any mailbox command is sent. This is safe even
+// for writable sessions because a failed TLS/login handshake cannot move mail.
+func (a Adapter) openRetry(ctx context.Context, account mail.Account, password string) (*connection, error) {
+	var conn *connection
+	err := retryRemote(ctx, func() error {
+		var err error
+		conn, err = a.open(ctx, account, password)
+		return err
+	})
+	return conn, err
+}
+
 // Each connection has an absolute deadline and read budget, including protocol metadata.
 type boundedConn struct {
 	net.Conn

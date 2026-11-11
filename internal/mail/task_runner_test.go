@@ -1,0 +1,30 @@
+package mail
+
+import (
+	"context"
+	"testing"
+
+	"mail-auto/internal/store"
+)
+
+func TestTaskIndexDoesNotRunFullSyncWhenAutomaticSyncOwnsFreshness(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const accountID = "account"
+	if _, err = st.DB.Exec("INSERT INTO accounts(id,name,provider,username,host,port,folders,created_at) VALUES(?,?,?,?,?,?,?,?)", accountID, "163", "netease", "user@163.com", "imap.163.com", 993, "[]", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.DB.Exec("INSERT INTO mailboxes(account_id,name,uidvalidity,synced_at) VALUES(?,?,?,?)", accountID, "INBOX", 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Service{Store: st}
+	s.automatic = &automaticRunner{interval: 300}
+	if err = s.ensureTaskIndex(context.Background(), AutomationPolicy{AccountID: accountID, SourceFolders: []string{"INBOX"}}); err != nil {
+		t.Fatalf("stale automatic-owned index was accepted: %v", err)
+	}
+}
