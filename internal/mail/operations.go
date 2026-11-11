@@ -405,7 +405,7 @@ func (s *Service) Operations(a Access) ([]Operation, error) {
 	if e != nil {
 		return nil, e
 	}
-	rows, e := s.Store.DB.Query("SELECT id FROM operations WHERE owner=? OR ?='admin' ORDER BY created_at DESC,id DESC LIMIT 20", a.Owner, a.Owner)
+	rows, e := s.Store.DB.Query(`SELECT id FROM operations WHERE owner=? OR ?='admin' ORDER BY CASE WHEN state IN ('queued','running','needs_verification') THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 100`, a.Owner, a.Owner)
 	if e != nil {
 		return nil, e
 	}
