@@ -1,4 +1,4 @@
-# Mail Auto · 0.4.5
+# Mail Auto · 0.4.6
 
 Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用，不接入 AI API。
 
@@ -12,7 +12,7 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，已发布版本包含 `0.4.5` 和 `latest`。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。 发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，已发布版本包含 `0.4.6` 和 `latest`。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。 发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。
 
 在运行 Docker 的主机执行：
 

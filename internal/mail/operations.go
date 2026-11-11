@@ -512,6 +512,20 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 	if json.Unmarshal([]byte(raw), &p) != nil {
 		return
 	}
+	if len(p.Items) == 0 {
+		return
+	}
+	accountID := p.Items[0].Message.AccountID
+	for _, item := range p.Items[1:] {
+		if item.Message.AccountID != accountID {
+			return
+		}
+	}
+	release, e := s.acquire(accountID)
+	if e != nil {
+		return
+	}
+	defer release()
 	claim, e := s.Store.DB.Exec("UPDATE operations SET state='running',updated_at=? WHERE id=? AND state='queued'", time.Now().Unix(), id)
 	if e == nil {
 		n, err := claim.RowsAffected()
@@ -598,11 +612,6 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	if p.Automation != nil {
 		access.automation = true
 	}
-	release, e := s.acquire(item.Message.AccountID)
-	if e != nil {
-		return e
-	}
-	defer release()
 	m, e := s.AllowedMessage(access, item.Message.Ref, p.Action)
 	if e != nil {
 		return e
