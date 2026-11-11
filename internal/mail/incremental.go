@@ -40,7 +40,7 @@ func (s *Service) automaticTx(ctx context.Context, a Account, epoch uint64) (*sq
 	if s.stopping || ctx.Err() != nil {
 		return nil, context.Canceled
 	}
-	if s.active[a.ID] || s.pending[a.ID] || s.epoch[a.ID] != epoch {
+	if s.active[a.ID] || s.pending[a.ID] || s.automaticHolds[a.ID] > 0 || s.epoch[a.ID] != epoch {
 		return nil, ErrBusy
 	}
 	tx, e := s.Store.DB.BeginTx(ctx, nil)
@@ -85,7 +85,7 @@ func (s *Service) incrementalFolder(ctx context.Context, session AutomaticSessio
 			return nil
 		}
 		s.mu.Lock()
-		stale := s.active[a.ID] || s.pending[a.ID] || s.epoch[a.ID] != epoch
+		stale := s.active[a.ID] || s.pending[a.ID] || s.automaticHolds[a.ID] > 0 || s.epoch[a.ID] != epoch
 		s.mu.Unlock()
 		if stale {
 			return ErrBusy

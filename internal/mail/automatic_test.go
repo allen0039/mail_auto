@@ -271,6 +271,36 @@ func TestAutomaticLifecyclePushConfigDeleteAndManualPriority(t *testing.T) {
 	}
 }
 
+func TestAutomaticSyncWaitsForWholeTaskBatch(t *testing.T) {
+	s, r, a := newAutomaticFixture(t)
+	if e := s.StartAutomaticSync(50 * time.Millisecond); e != nil {
+		t.Fatal(e)
+	}
+	awaitAutomatic(t, func() bool {
+		_, n, _ := s.Search(Search{})
+		return n == 2
+	})
+	awaitAutomatic(t, func() bool {
+		status := s.AutomaticStatus()
+		return len(status.Accounts) == 1 && status.Accounts[0].State == "watching"
+	})
+	release := s.holdAutomatic(a.ID)
+	r.lock.Lock()
+	r.boxes["INBOX"] = Snapshot{UIDValidity: 7, Messages: []Message{{UID: 3}}}
+	r.lock.Unlock()
+	r.changed <- struct{}{}
+	awaitAutomatic(t, func() bool { return s.AutomaticStatus().Accounts[0].State == "waiting" })
+	_, n, _ := s.Search(Search{})
+	if n != 2 {
+		t.Fatal("automatic sync changed the index while a task batch held the account")
+	}
+	release()
+	awaitAutomatic(t, func() bool {
+		rows, n, _ := s.Search(Search{})
+		return n == 1 && rows[0].UID == 3
+	})
+}
+
 func TestAutomaticReconnectPreservesLastIndex(t *testing.T) {
 	s, r, _ := newAutomaticFixture(t)
 	if e := s.StartAutomaticSync(time.Hour); e != nil {

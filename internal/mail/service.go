@@ -44,6 +44,7 @@ type Service struct {
 	NotificationPublicURL string
 	notificationMu        sync.Mutex
 	active                map[string]bool
+	automaticHolds        map[string]int
 	running               int
 	epoch                 map[string]uint64
 	automatic             *automaticRunner
@@ -106,6 +107,31 @@ func (s *Service) acquireLocked(id string) (func(), error) {
 	}
 	s.epoch[id]++
 	return func() { s.mu.Lock(); delete(s.active, id); s.running--; s.mu.Unlock() }, nil
+}
+
+// holdAutomatic keeps the background sync session from connecting between the
+// one-message operations that make up a task batch. Individual operations still
+// use acquire/release for their normal foreground protection.
+func (s *Service) holdAutomatic(id string) func() {
+	s.mu.Lock()
+	if s.automaticHolds == nil {
+		s.automaticHolds = map[string]int{}
+	}
+	if s.epoch == nil {
+		s.epoch = map[string]uint64{}
+	}
+	s.automaticHolds[id]++
+	s.epoch[id]++
+	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		if s.automaticHolds[id] <= 1 {
+			delete(s.automaticHolds, id)
+		} else {
+			s.automaticHolds[id]--
+		}
+		s.mu.Unlock()
+	}
 }
 func ValidateAccount(a *AccountInput) error {
 	return validateAccount(a, false)

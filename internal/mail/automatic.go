@@ -183,7 +183,7 @@ func (s *Service) automaticRead(ctx context.Context, w *automaticWorker, mode, f
 			return e
 		}
 		s.mu.Lock()
-		busy := s.stopping || s.active[w.account.ID] || s.pending[w.account.ID] || s.running >= 2
+		busy := s.stopping || s.active[w.account.ID] || s.pending[w.account.ID] || s.automaticHolds[w.account.ID] > 0 || s.running >= 2
 		epoch := s.epoch[w.account.ID]
 		if !busy {
 			s.running++

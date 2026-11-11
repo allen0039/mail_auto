@@ -36,6 +36,23 @@ func TestCopyUIDRequiresExactSingleMapping(t *testing.T) {
 	}
 }
 
+func TestSameMoveMetadataRequiresStableIdentityFields(t *testing.T) {
+	base := mail.Message{Subject: "fixture", Sender: "sender@example.com", SentAt: 123, Size: 456}
+	if !sameMoveMetadata(base, base) {
+		t.Fatal("identical message metadata did not match")
+	}
+	for _, changed := range []mail.Message{
+		{Subject: "other", Sender: base.Sender, SentAt: base.SentAt, Size: base.Size},
+		{Subject: base.Subject, Sender: "other@example.com", SentAt: base.SentAt, Size: base.Size},
+		{Subject: base.Subject, Sender: base.Sender, SentAt: 124, Size: base.Size},
+		{Subject: base.Subject, Sender: base.Sender, SentAt: base.SentAt, Size: 457},
+	} {
+		if sameMoveMetadata(base, changed) {
+			t.Fatal("incomplete metadata matched", changed)
+		}
+	}
+}
+
 func TestNativeMoveProtocolAndUncertainMapping(t *testing.T) {
 	for _, uncertain := range []bool{false, true} {
 		t.Run(fmt.Sprint(uncertain), func(t *testing.T) {

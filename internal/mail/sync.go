@@ -70,7 +70,7 @@ func (s *Service) StartSync(id string) (SyncJob, error) {
 		s.mu.Unlock()
 		return SyncJob{AccountID: id, State: "queued"}, nil
 	}
-	if s.active[id] {
+	if s.active[id] || s.automaticHolds[id] > 0 {
 		s.mu.Unlock()
 		return SyncJob{}, ErrBusy
 	}

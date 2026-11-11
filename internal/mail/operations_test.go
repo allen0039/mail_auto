@@ -31,8 +31,11 @@ func TestOperationProviderCodePreservesUncertaintyAndRedaction(t *testing.T) {
 
 type organizerRemote struct {
 	fakeRemote
-	moves     int
-	uncertain bool
+	moves            int
+	uncertain        bool
+	omitMapping      bool
+	inspectEvidence  MoveEvidence
+	inspectCallCount int
 }
 
 func (f *organizerRemote) Capabilities(context.Context, Account, string) (Capabilities, error) {
@@ -41,8 +44,13 @@ func (f *organizerRemote) Capabilities(context.Context, Account, string) (Capabi
 func (f *organizerRemote) Move(_ context.Context, _ Account, _ string, m Message, dest string, record func(MoveResult) error) (MoveResult, error) {
 	f.moves++
 	r := MoveResult{Folder: dest, UIDValidity: 7, UID: uint32(100 + f.moves)}
-	if e := record(r); e != nil {
-		return r, e
+	if f.omitMapping {
+		r = MoveResult{Folder: dest}
+	}
+	if r.UID != 0 {
+		if e := record(r); e != nil {
+			return r, e
+		}
 	}
 	if f.uncertain {
 		return r, ErrUncertain
@@ -51,6 +59,10 @@ func (f *organizerRemote) Move(_ context.Context, _ Account, _ string, m Message
 }
 func (f *organizerRemote) VerifyMove(context.Context, Account, string, Message, MoveResult) error {
 	return nil
+}
+func (f *organizerRemote) InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error) {
+	f.inspectCallCount++
+	return f.inspectEvidence, nil
 }
 func organizerFixture(t *testing.T) (*Service, *organizerRemote, Access, Message) {
 	t.Helper()
@@ -161,6 +173,50 @@ func TestOrganizerUncertainReconcileNeverRetriesMove(t *testing.T) {
 	if _, e = s.Reconcile(context.Background(), a, o.ID); e != nil || r.moves != 1 {
 		t.Fatal("reissued MOVE", e, r.moves)
 	}
+}
+func TestOrganizerMissingMappingReconcileUsesLiveEvidence(t *testing.T) {
+	t.Run("source_still_present_marks_failed", func(t *testing.T) {
+		s, r, a, m := organizerFixture(t)
+		r.omitMapping = true
+		r.uncertain = true
+		r.inspectEvidence = MoveEvidence{SourcePresent: true}
+		o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+		if o.State != "needs_verification" {
+			t.Fatal(o)
+		}
+		o, e := s.Reconcile(context.Background(), a, o.ID)
+		if e != nil || o.State != "failed" || o.Items[0].State != "failed" || o.Items[0].Error != "move_not_applied" {
+			t.Fatal(o, e)
+		}
+		if r.moves != 1 || r.inspectCallCount != 1 {
+			t.Fatal("reconcile reissued MOVE", r.moves, r.inspectCallCount)
+		}
+	})
+
+	t.Run("unique_destination_match_completes", func(t *testing.T) {
+		s, r, a, m := organizerFixture(t)
+		r.omitMapping = true
+		r.uncertain = true
+		r.inspectEvidence = MoveEvidence{
+			DestinationPresent: true,
+			Destination:        MoveResult{Folder: "Archive", UIDValidity: 7, UID: 99},
+		}
+		o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+		if o.State != "needs_verification" {
+			t.Fatal(o)
+		}
+		o, e := s.Reconcile(context.Background(), a, o.ID)
+		if e != nil || o.State != "completed" || o.Items[0].State != "completed" {
+			t.Fatal(o, e)
+		}
+		moved, e := s.Message(m.Ref)
+		if e != nil || moved.Folder != "Archive" || moved.UID != 99 {
+			t.Fatal(moved, e)
+		}
+		if r.moves != 1 {
+			t.Fatal("reconcile reissued MOVE", r.moves)
+		}
+	})
 }
 func TestOrganizerFrozenStateAndUndoConflict(t *testing.T) {
 	s, _, a, m := organizerFixture(t)

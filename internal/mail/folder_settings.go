@@ -24,10 +24,18 @@ type MoveResult struct {
 	UIDValidity uint32 `json:"uidvalidity"`
 	UID         uint32 `json:"uid"`
 }
+type MoveEvidence struct {
+	SourcePresent      bool
+	DestinationPresent bool
+	Destination        MoveResult
+}
 type WritableRemote interface {
 	Capabilities(context.Context, Account, string) (Capabilities, error)
 	Move(context.Context, Account, string, Message, string, func(MoveResult) error) (MoveResult, error)
 	VerifyMove(context.Context, Account, string, Message, MoveResult) error
+}
+type MoveReconciler interface {
+	InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error)
 }
 type FolderSettings struct {
 	AccountID     string `json:"account_id"`

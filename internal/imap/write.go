@@ -266,6 +266,86 @@ func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password 
 	})
 }
 
+// InspectMove resolves an interrupted MOVE that did not return COPYUID. It is
+// read-only: a source message still present under the original UID plus no
+// unique destination match proves the write was not applied. Ambiguous or
+// incomplete evidence stays unresolved so callers cannot replay MOVE.
+func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password string, m mail.Message, destination string) (mail.MoveEvidence, error) {
+	var out mail.MoveEvidence
+	if m.Folder == "" || m.UID == 0 || m.UIDValidity == 0 || destination == "" || strings.EqualFold(m.Folder, destination) {
+		return out, mail.ErrUncertain
+	}
+	err := retryRemote(ctx, func() error {
+		conn, err := a.open(ctx, account, password)
+		if err != nil {
+			return err
+		}
+		defer conn.close()
+		conn.resetBudget()
+		source, err := conn.c.Select(m.Folder, true)
+		if err != nil {
+			return remoteFailure(conn, "打开移动核验源目录", err)
+		}
+		if source.UidValidity != m.UIDValidity {
+			return mail.ErrUncertain
+		}
+		set := new(protocol.SeqSet)
+		set.AddNum(m.UID)
+		query := liveMessages()
+		query.Uid = set
+		conn.resetBudget()
+		sourceUIDs, err := conn.c.UidSearch(query)
+		if err != nil {
+			return remoteFailure(conn, "核验移动源邮件", err)
+		}
+		if len(sourceUIDs) > 1 || (len(sourceUIDs) == 1 && sourceUIDs[0] != m.UID) {
+			return mail.ErrUncertain
+		}
+
+		conn.resetBudget()
+		target, err := conn.c.Select(destination, true)
+		if err != nil {
+			return remoteFailure(conn, "打开移动核验目标目录", err)
+		}
+		if target.UidValidity == 0 {
+			return remoteProblem("打开移动核验目标目录", "服务器未返回有效 UIDVALIDITY")
+		}
+		conn.resetBudget()
+		targetUIDs, err := conn.c.UidSearch(liveMessages())
+		if err != nil {
+			return remoteFailure(conn, "查询移动核验目标邮件", err)
+		}
+		matches := []uint32{}
+		for start := 0; start < len(targetUIDs); start += UIDBatchSize {
+			chunk := new(protocol.SeqSet)
+			chunk.AddNum(targetUIDs[start:min(start+UIDBatchSize, len(targetUIDs))]...)
+			batch, err := fetchBatch(conn, account.ID, destination, target.UidValidity, chunk)
+			if err != nil {
+				return err
+			}
+			for _, candidate := range batch.Messages {
+				if sameMoveMetadata(m, candidate) {
+					matches = append(matches, candidate.UID)
+				}
+			}
+		}
+		out = mail.MoveEvidence{SourcePresent: len(sourceUIDs) == 1}
+		if len(matches) == 1 {
+			out.DestinationPresent = true
+			out.Destination = mail.MoveResult{Folder: destination, UIDValidity: target.UidValidity, UID: matches[0]}
+		}
+		return nil
+	})
+	return out, err
+}
+
+func sameMoveMetadata(a, b mail.Message) bool {
+	return a.Subject == b.Subject &&
+		a.Sender == b.Sender &&
+		a.SentAt == b.SentAt &&
+		a.Size == b.Size
+}
+
 func verifyMove(conn *connection, m mail.Message, result mail.MoveResult) error {
 	for _, check := range []struct {
 		folder        string

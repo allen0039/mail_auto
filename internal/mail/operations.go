@@ -745,7 +745,7 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 		return o, ErrCapability
 	}
 	for _, x := range o.Items {
-		if x.State != "needs_verification" || x.Result.UID == 0 {
+		if x.State != "needs_verification" {
 			continue
 		}
 		item := p.Items[x.Position]
@@ -766,18 +766,42 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 		if e == nil && unchanged && accountIdentity(account) == item.Config {
 			pw, err := s.password(account)
 			if err == nil {
-				if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
-					_ = s.publishMove(id, x.Position, item.Message, x.Result)
+				if x.Result.UID != 0 && x.Result.UIDValidity != 0 && x.Result.Folder != "" {
+					if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
+						_ = s.publishMove(id, x.Position, item.Message, x.Result)
+					} else {
+						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(verifyErr))
+					}
+				} else if inspector, ok := s.Remote.(MoveReconciler); ok {
+					evidence, inspectErr := inspector.InspectMove(ctx, account, pw, item.Message, item.Destination)
+					if inspectErr != nil {
+						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
+					} else if evidence.DestinationPresent && !evidence.SourcePresent {
+						if _, err = s.Store.DB.Exec("UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?", evidence.Destination.UIDValidity, evidence.Destination.UID, id, x.Position); err == nil {
+							_ = s.publishMove(id, x.Position, item.Message, evidence.Destination)
+						}
+					} else if evidence.SourcePresent && !evidence.DestinationPresent {
+						// A successful live-search of the unchanged source UID and no
+						// matching destination proves the interrupted MOVE did not apply.
+						_, _ = s.Store.DB.Exec("UPDATE operation_items SET state='failed',error_code='move_not_applied' WHERE operation_id=? AND position=? AND state='needs_verification'", id, x.Position)
+					}
 				} else {
-					slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(verifyErr))
+					slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(ErrCapability))
 				}
 			}
 		}
 		release()
 	}
-	var n int
-	if e = s.Store.DB.QueryRow("SELECT count(*) FROM operation_items WHERE operation_id=? AND state='needs_verification'", id).Scan(&n); e == nil && n == 0 {
-		_, _ = s.Store.DB.Exec("UPDATE operations SET state=CASE WHEN EXISTS(SELECT 1 FROM operation_items WHERE operation_id=? AND state='queued') THEN 'queued' WHEN EXISTS(SELECT 1 FROM operation_items WHERE operation_id=? AND state<>'completed' AND state<>'skipped') THEN 'partial' ELSE 'completed' END,updated_at=? WHERE id=?", id, id, time.Now().Unix(), id)
+	var unknown, completed, failed int
+	if e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(state='needs_verification'),0),COALESCE(sum(state IN ('completed','skipped')),0),COALESCE(sum(state IN ('failed','cancelled','queued','running')),0) FROM operation_items WHERE operation_id=?`, id).Scan(&unknown, &completed, &failed); e == nil && unknown == 0 {
+		state := "completed"
+		if failed > 0 {
+			state = "failed"
+			if completed > 0 {
+				state = "partial"
+			}
+		}
+		_, _ = s.Store.DB.Exec("UPDATE operations SET state=?,updated_at=? WHERE id=?", state, time.Now().Unix(), id)
 	}
 	return s.Operation(a, id)
 }

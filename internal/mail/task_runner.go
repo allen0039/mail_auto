@@ -293,6 +293,8 @@ func (s *Service) executeFixedTask(ctx context.Context, r TaskRun) error {
 	if e != nil {
 		return e
 	}
+	releaseAutomatic := s.holdAutomatic(p.AccountID)
+	defer releaseAutomatic()
 	if e = s.ensureTaskIndex(ctx, p); e != nil {
 		return e
 	}
