@@ -374,6 +374,37 @@ func TestTaskDurableOccurrenceAndMisfireCoalescing(t *testing.T) {
 		t.Fatal(count, e)
 	}
 }
+
+func TestTaskTickRecordsStaleRuleAndAdvancesSchedule(t *testing.T) {
+	s, _, admin, _, task, m := taskFixture(t, "observe", "internal", "rules")
+	rules, e := s.Rules(admin, m.AccountID)
+	if e != nil || len(rules) != 1 {
+		t.Fatal(rules, e)
+	}
+	task.RuleIDs = []string{rules[0].ID}
+	task.RuleVersions = map[string]int{rules[0].ID: rules[0].Version}
+	task, e = s.SaveTask(admin, task)
+	if e != nil {
+		t.Fatal(e)
+	}
+	rules[0].Name = "变更后的规则"
+	if _, e = s.SaveRule(admin, rules[0]); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.Store.DB.Exec("UPDATE automation_tasks SET next_run_at=? WHERE id=?", time.Now().Unix()-1, task.ID); e != nil {
+		t.Fatal(e)
+	}
+	s.taskTick(context.Background())
+	updated, e := s.loadTask(task.ID)
+	if e != nil || updated.NextRunAt <= time.Now().Unix() {
+		t.Fatal(updated, e)
+	}
+	runs, e := s.TaskRuns(admin, task.ID)
+	if e != nil || len(runs) != 1 || runs[0].State != "failed" || runs[0].ErrorCode != "state_conflict" {
+		t.Fatal(runs, e)
+	}
+}
+
 func TestExternalCadenceWatchdogNeverTriggersMail(t *testing.T) {
 	s, remote, admin, _, task, _ := taskFixture(t, "observe", "external", "ai")
 	configureNotification(t, s, admin, "failures")

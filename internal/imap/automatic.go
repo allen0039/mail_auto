@@ -99,12 +99,16 @@ func (s *automaticSession) Refresh(ctx context.Context, folder string, previous 
 	if e = emit(mail.Snapshot{UIDValidity: out.UIDValidity}); e != nil {
 		return out, e
 	}
-	for start := 0; start < len(existing); start += UIDBatchSize {
+	batchSize := UIDBatchSize
+	if s.account.Provider == "netease" {
+		batchSize = 100
+	}
+	for start := 0; start < len(existing); start += batchSize {
 		if e = ctx.Err(); e != nil {
 			return out, e
 		}
 		set := new(protocol.SeqSet)
-		set.AddNum(existing[start:min(start+UIDBatchSize, len(existing))]...)
+		set.AddNum(existing[start:min(start+batchSize, len(existing))]...)
 		s.conn.resetBudget()
 		ch := make(chan *protocol.Message, 16)
 		done := make(chan error, 1)
@@ -138,10 +142,6 @@ func (s *automaticSession) Refresh(ctx context.Context, folder string, previous 
 		if invalid {
 			return out, remoteProblem("读取邮件状态", "服务器返回无效或重复的 UID")
 		}
-	}
-	batchSize := UIDBatchSize
-	if s.account.Provider == "netease" {
-		batchSize = 100
 	}
 	for start := 0; start < len(added); start += batchSize {
 		if e = ctx.Err(); e != nil {

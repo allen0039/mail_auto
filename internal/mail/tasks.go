@@ -691,7 +691,14 @@ func (s *Service) createTaskRun(a Access, t Task, key, source string, scheduled 
 	if e != nil {
 		return TaskRun{}, e
 	}
-	rules, e := s.taskRules(a, t)
+	ruleAccess := a
+	if strings.HasPrefix(a.Owner, "svc:") {
+		ruleAccess, e = s.CheckAccess(a)
+		if e != nil {
+			return TaskRun{}, e
+		}
+	}
+	rules, e := s.taskRules(ruleAccess, t)
 	if e != nil {
 		return TaskRun{}, e
 	}

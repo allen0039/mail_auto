@@ -172,3 +172,15 @@ func TestRemoteFailureRedactsServerTextAndKeepsSocketCause(t *testing.T) {
 		t.Fatal("authentication error retried or exposed", e)
 	}
 }
+
+func TestUncertainTimeoutKeepsSafeCauseAndNeverInvitesReplay(t *testing.T) {
+	err := uncertainFailure(nil, "核验移动邮件位置", os.ErrDeadlineExceeded)
+	var safe interface{ PublicMessage() string }
+	var provider interface{ OperationErrorCode() string }
+	if !errors.Is(err, mail.ErrUncertain) || !errors.As(err, &safe) || !errors.As(err, &provider) {
+		t.Fatal("missing uncertainty or safe provider cause", err)
+	}
+	if provider.OperationErrorCode() != "provider_timeout" || !strings.Contains(safe.PublicMessage(), "核验移动邮件位置") {
+		t.Fatal("missing diagnostic stage", safe.PublicMessage())
+	}
+}

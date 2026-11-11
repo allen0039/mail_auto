@@ -41,7 +41,9 @@ func TestNativeMoveProtocolAndUncertainMapping(t *testing.T) {
 		t.Run(fmt.Sprint(uncertain), func(t *testing.T) {
 			trace := &trafficLog{}
 			var moved atomic.Bool
+			var opens atomic.Int32
 			adapter := Adapter{connect: func(ctx context.Context, a mail.Account, password string) (*connection, error) {
+				opens.Add(1)
 				left, right := net.Pipe()
 				left.SetDeadline(time.Now().Add(5 * time.Second))
 				go func() {
@@ -117,6 +119,9 @@ func TestNativeMoveProtocolAndUncertainMapping(t *testing.T) {
 			} else if e != nil {
 				t.Fatal(result, e)
 			}
+			if opens.Load() != 1 {
+				t.Fatalf("move and verification should reuse one login, got %d", opens.Load())
+			}
 			if saved.UID != 99 || saved.UIDValidity != 7 {
 				t.Fatal("mapping not saved", saved, e)
 			}
@@ -134,7 +139,9 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 			trace := &trafficLog{}
 			var copied, deleted, expunged, verified, saved atomic.Bool
 			var unsafe atomic.Bool
+			var opens atomic.Int32
 			adapter := Adapter{connect: func(ctx context.Context, a mail.Account, pw string) (*connection, error) {
+				opens.Add(1)
 				left, right := net.Pipe()
 				left.SetDeadline(time.Now().Add(5 * time.Second))
 				go func() {
@@ -186,7 +193,7 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 									fmt.Fprintf(right, "%s OK [COPYUID 7 42 99] copied\r\n", tag)
 								}
 							case strings.HasPrefix(upper, "STORE "):
-								if !verified.Load() || !saved.Load() || !strings.HasPrefix(upper, "STORE 42 +FLAGS.SILENT ") {
+								if folder != "INBOX" || !verified.Load() || !saved.Load() || !strings.HasPrefix(upper, "STORE 42 +FLAGS.SILENT ") {
 									unsafe.Store(true)
 								}
 								deleted.Store(true)
@@ -195,7 +202,7 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 								}
 								fmt.Fprintf(right, "%s OK flags\r\n", tag)
 							case upper == "EXPUNGE 42":
-								if !deleted.Load() || !verified.Load() || !saved.Load() {
+								if folder != "INBOX" || !deleted.Load() || !verified.Load() || !saved.Load() {
 									unsafe.Store(true)
 								}
 								if mode != "expunge_noop" {
@@ -243,6 +250,9 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 				}
 			} else if !errors.Is(err, mail.ErrUncertain) {
 				t.Fatal("must remain uncertain", err)
+			}
+			if opens.Load() != 1 {
+				t.Fatalf("UIDPLUS move and verification should reuse one login, got %d", opens.Load())
 			}
 			traffic := strings.ToUpper(trace.String())
 			if unsafe.Load() || strings.Contains(traffic, "UID MOVE") || strings.Count(traffic, "UID COPY") != 1 {

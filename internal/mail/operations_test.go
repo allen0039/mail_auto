@@ -3,12 +3,31 @@ package mail
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/store"
 )
+
+type providerTimeoutFixture struct{}
+
+func (providerTimeoutFixture) Error() string              { return "private provider detail" }
+func (providerTimeoutFixture) OperationErrorCode() string { return "provider_timeout" }
+
+func TestOperationProviderCodePreservesUncertaintyAndRedaction(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", providerTimeoutFixture{})
+	if errorCode(err) != "provider_timeout" {
+		t.Fatal("provider timeout collapsed to generic failure", errorCode(err))
+	}
+	if code := errorCode(fmt.Errorf("%w: %w", ErrUncertain, err)); code != "remote_state_unknown" {
+		t.Fatal("uncertain write must not be treated as safely retryable", code)
+	}
+	if syncErrorMessage(err) != "同步处理失败" {
+		t.Fatal("raw provider error exposed")
+	}
+}
 
 type organizerRemote struct {
 	fakeRemote

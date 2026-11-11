@@ -81,13 +81,22 @@ func (s *Service) taskTick(ctx context.Context) {
 			t, e := s.loadTask(id)
 			if e == nil && t.Enabled && t.Trigger == "internal" && t.NextRunAt > 0 && t.NextRunAt <= now {
 				// Creating the occurrence and advancing next_run_at commit together.
-				_, e = s.createTaskRun(Access{Owner: t.ServiceOwner, Version: t.AdminVersion}, t, taskRunKey(t, t.NextRunAt), "internal", t.NextRunAt)
+				scheduled := t.NextRunAt
+				_, e = s.createTaskRun(Access{Owner: t.ServiceOwner, Version: t.AdminVersion}, t, taskRunKey(t, scheduled), "internal", scheduled)
 				if errors.Is(e, ErrBusy) {
 					next, err := nextSchedule(t.Schedule, time.Now())
 					if err == nil {
 						_, _ = s.Store.DB.Exec("UPDATE automation_tasks SET next_run_at=? WHERE id=? AND version=?", next, t.ID, t.Version)
 						_ = store.Audit(s.Store.DB, "mail.task.missed", t.ID, "active_run_coalesced")
 					}
+				} else if errors.Is(e, ErrConflict) || errors.Is(e, ErrDenied) || errors.Is(e, ErrInput) {
+					// A changed rule binding, revoked grant, or invalid schedule must
+					// not leave the occurrence permanently due and spin every tick.
+					next, nextErr := nextSchedule(t.Schedule, time.Now())
+					if nextErr == nil {
+						_, _ = s.Store.DB.Exec("UPDATE automation_tasks SET next_run_at=? WHERE id=? AND version=?", next, t.ID, t.Version)
+					}
+					s.recordTaskScheduleFailure(t, scheduled, e)
 				}
 			}
 			s.taskMu.Unlock()
@@ -130,6 +139,17 @@ func (s *Service) taskTick(ctx context.Context) {
 			}
 		} else {
 			s.reconcileTaskRun(id)
+		}
+	}
+}
+
+func (s *Service) recordTaskScheduleFailure(t Task, scheduled int64, cause error) {
+	now := time.Now().Unix()
+	r := TaskRun{ID: credentials.Random(24), TaskID: t.ID, AccountID: t.AccountID, TaskName: t.Name, TaskVersion: t.Version, Owner: t.ServiceOwner, AdminVersion: t.AdminVersion, Source: "internal", RunKey: taskRunKey(t, scheduled), Mode: t.Mode, State: "failed", CreatedAt: now, UpdatedAt: now, Expires: now, ScheduledAt: scheduled, Finalized: true, ErrorCode: taskError(cause)}
+	result, e := s.Store.DB.Exec("INSERT OR IGNORE INTO task_runs(id,task_id,account_id,owner,run_key,task_version,source,state,payload,created_at,updated_at,expires) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", r.ID, t.ID, t.AccountID, r.Owner, r.RunKey, t.Version, r.Source, r.State, runJSON(r), now, now, now)
+	if e == nil {
+		if n, _ := result.RowsAffected(); n == 1 {
+			_ = s.finishTaskRun(r)
 		}
 	}
 }

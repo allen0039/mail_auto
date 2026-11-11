@@ -18,6 +18,7 @@ func (a Adapter) RuleState(ctx context.Context, account mail.Account, password s
 		return mail.Message{}, e
 	}
 	defer conn.close()
+	conn.resetBudget()
 	status, e := conn.c.Select(original.Folder, true)
 	if e != nil {
 		return mail.Message{}, remoteFailure(conn, "复核整理邮件", e)
@@ -113,17 +114,23 @@ func (a Adapter) Move(ctx context.Context, account mail.Account, password string
 		return mail.MoveResult{}, e
 	}
 	defer conn.close()
+	conn.resetBudget()
 	native, e := conn.c.Support("MOVE")
 	if e != nil {
-		return mail.MoveResult{}, ErrRemote
+		return mail.MoveResult{}, remoteFailure(conn, "查询移动能力", e)
 	}
+	conn.resetBudget()
 	uidplus, e := conn.c.Support("UIDPLUS")
-	if e != nil || !uidplus {
+	if e != nil {
+		return mail.MoveResult{}, remoteFailure(conn, "查询 UIDPLUS 能力", e)
+	}
+	if !uidplus {
 		return mail.MoveResult{}, mail.ErrCapability
 	}
+	conn.resetBudget()
 	selected, e := conn.c.Select(m.Folder, false)
 	if e != nil {
-		return mail.MoveResult{}, ErrRemote
+		return mail.MoveResult{}, remoteFailure(conn, "打开整理源目录", e)
 	}
 	if selected.ReadOnly {
 		return mail.MoveResult{}, mail.ErrCapability
@@ -135,9 +142,10 @@ func (a Adapter) Move(ctx context.Context, account mail.Account, password string
 	set.AddNum(m.UID)
 	criteria := liveMessages()
 	criteria.Uid = set
+	conn.resetBudget()
 	uids, e := conn.c.UidSearch(criteria)
 	if e != nil {
-		return mail.MoveResult{}, ErrRemote
+		return mail.MoveResult{}, remoteFailure(conn, "复核整理源邮件", e)
 	}
 	if len(uids) != 1 || uids[0] != m.UID {
 		return mail.MoveResult{}, ErrStale
@@ -167,27 +175,43 @@ func (a Adapter) Move(ctx context.Context, account mail.Account, password string
 		}
 	}
 	// Any error after issuing MOVE is uncertain: tagged NO can include partial effects.
-	if e != nil || status == nil || status.Err() != nil || !mapped {
+	if e != nil {
+		return mapping, uncertainFailure(conn, "移动邮件", e)
+	}
+	if status == nil || status.Err() != nil || !mapped {
 		return mapping, mail.ErrUncertain
 	}
 	if !native {
 		// The destination must be visible at the exact returned UID before removing
 		// the source. Failure at any phase is never automatically retried.
-		if e = a.verifyDestination(ctx, account, password, mapping); e != nil {
+		if e = verifyDestination(conn, mapping); e != nil {
+			return mapping, e
+		}
+		// Destination verification selects another mailbox. Reselect and validate
+		// the source before STORE/UID EXPUNGE, using this same login throughout.
+		conn.resetBudget()
+		selected, e = conn.c.Select(m.Folder, false)
+		if e != nil {
+			return mapping, uncertainFailure(conn, "重新打开整理源目录", e)
+		}
+		if selected.ReadOnly || selected.UidValidity != m.UIDValidity {
 			return mapping, mail.ErrUncertain
 		}
 		conn.resetBudget()
 		if e = conn.c.UidStore(set, protocol.FormatFlagsOp(protocol.AddFlags, true), []interface{}{protocol.DeletedFlag}, nil); e != nil {
-			return mapping, mail.ErrUncertain
+			return mapping, uncertainFailure(conn, "标记已复制的源邮件", e)
 		}
 		conn.resetBudget()
 		st, err := conn.c.Execute(&commands.Uid{Cmd: &protocol.Command{Name: "EXPUNGE", Arguments: []interface{}{set}}}, nil)
-		if err != nil || st == nil || st.Err() != nil {
+		if err != nil {
+			return mapping, uncertainFailure(conn, "移除已复制的源邮件", err)
+		}
+		if st == nil || st.Err() != nil {
 			return mapping, mail.ErrUncertain
 		}
 	}
-	if e = a.VerifyMove(ctx, account, password, m, mapping); e != nil {
-		return mapping, mail.ErrUncertain
+	if e = verifyMove(conn, m, mapping); e != nil {
+		return mapping, e
 	}
 	return mapping, nil
 }
@@ -197,9 +221,13 @@ func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password 
 	}
 	conn, e := a.open(ctx, account, password)
 	if e != nil {
-		return mail.ErrUncertain
+		return fmt.Errorf("%w: %w", mail.ErrUncertain, e)
 	}
 	defer conn.close()
+	return verifyMove(conn, m, result)
+}
+
+func verifyMove(conn *connection, m mail.Message, result mail.MoveResult) error {
 	for _, check := range []struct {
 		folder        string
 		validity, uid uint32
@@ -207,7 +235,10 @@ func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password 
 	}{{m.Folder, m.UIDValidity, m.UID, false}, {result.Folder, result.UIDValidity, result.UID, true}} {
 		conn.resetBudget()
 		st, e := conn.c.Select(check.folder, true)
-		if e != nil || st.UidValidity != check.validity {
+		if e != nil {
+			return uncertainFailure(conn, "打开移动核验目录", e)
+		}
+		if st.UidValidity != check.validity {
 			return mail.ErrUncertain
 		}
 		set := new(protocol.SeqSet)
@@ -217,31 +248,41 @@ func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password 
 			q = protocol.NewSearchCriteria()
 		}
 		q.Uid = set
+		conn.resetBudget()
 		uids, e := conn.c.UidSearch(q)
-		if e != nil || (len(uids) > 0) != check.present {
+		if e != nil {
+			return uncertainFailure(conn, "核验移动邮件位置", e)
+		}
+		if (len(uids) > 0) != check.present {
 			return mail.ErrUncertain
 		}
 	}
 	return nil
 }
 
-func (a Adapter) verifyDestination(ctx context.Context, account mail.Account, password string, r mail.MoveResult) error {
-	c, e := a.open(ctx, account, password)
-	if e != nil {
-		return mail.ErrUncertain
-	}
-	defer c.close()
+func uncertainFailure(c *connection, stage string, err error) error {
+	return fmt.Errorf("%w: %w", mail.ErrUncertain, remoteFailure(c, stage, err))
+}
+
+func verifyDestination(c *connection, r mail.MoveResult) error {
 	c.resetBudget()
 	st, e := c.c.Select(r.Folder, true)
-	if e != nil || st.UidValidity != r.UIDValidity {
+	if e != nil {
+		return uncertainFailure(c, "打开复制目标目录", e)
+	}
+	if st.UidValidity != r.UIDValidity {
 		return mail.ErrUncertain
 	}
 	set := new(protocol.SeqSet)
 	set.AddNum(r.UID)
 	q := liveMessages()
 	q.Uid = set
+	c.resetBudget()
 	uids, e := c.c.UidSearch(q)
-	if e != nil || len(uids) != 1 || uids[0] != r.UID {
+	if e != nil {
+		return uncertainFailure(c, "核验复制目标邮件", e)
+	}
+	if len(uids) != 1 || uids[0] != r.UID {
 		return mail.ErrUncertain
 	}
 	return nil

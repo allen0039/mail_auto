@@ -112,17 +112,20 @@ func dial(ctx context.Context, a mail.Account, password string) (*connection, er
 	c.ErrorLog = log.New(io.Discard, "", 0)
 	conn := &connection{c: c, raw: raw, budget: bc, stop: stop}
 	// ID is required by some NetEase deployments. Ignore only an unsupported capability.
+	conn.resetBudget()
 	if supported, e := c.Support("ID"); e != nil {
 		err := remoteFailure(conn, "查询服务器能力", e)
 		conn.close()
 		return nil, err
 	} else if supported {
+		conn.resetBudget()
 		if _, e = id.NewClient(c).ID(id.ID{"name": "mail-auto", "version": "0.1.0"}); e != nil {
 			err := remoteFailure(conn, "发送客户端标识", e)
 			conn.close()
 			return nil, err
 		}
 	}
+	conn.resetBudget()
 	if e = c.Login(a.Username, password); e != nil {
 		err := remoteFailure(conn, "邮箱登录", e)
 		conn.close()

@@ -53,6 +53,34 @@ func TestAutomaticProtocolIncrementalSparseUIDs(t *testing.T) {
 	}
 }
 
+func TestAutomaticExistingFlagsRespectProviderBatchSize(t *testing.T) {
+	for _, provider := range []string{"netease", "qq"} {
+		t.Run(provider, func(t *testing.T) {
+			adapter, trace, _ := noUIDNextAdapter(t, 201, false)
+			session, err := adapter.OpenAutomatic(context.Background(), mail.Account{Provider: provider}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			emit := func(mail.Snapshot) error { return nil }
+			first, err := session.Refresh(context.Background(), "INBOX", mail.FolderState{}, emit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := strings.Count(strings.ToUpper(trace.String()), " UID FETCH ")
+			second, err := session.Refresh(context.Background(), "INBOX", mail.FolderState{UIDValidity: first.UIDValidity, Unread: first.Unread}, emit)
+			want := 1
+			if provider == "netease" {
+				want = 3
+			}
+			got := strings.Count(strings.ToUpper(trace.String()), " UID FETCH ") - before
+			if err != nil || len(second.UIDs) != 201 || got != want {
+				t.Fatalf("existing flag batches=%d want=%d messages=%d err=%v", got, want, len(second.UIDs), err)
+			}
+		})
+	}
+}
+
 // A scripted real TCP server tests unsolicited push, rejected IDLE and socket
 // cancellation without ever modifying a real remote mailbox.
 func idleFixture(t *testing.T, mode string) (Adapter, chan string, <-chan struct{}) {

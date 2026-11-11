@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -451,6 +452,10 @@ func errorCode(e error) string {
 	case errors.Is(e, ErrInput):
 		return "invalid_input"
 	default:
+		var provider interface{ OperationErrorCode() string }
+		if errors.As(e, &provider) {
+			return provider.OperationErrorCode()
+		}
 		return "operation_failed"
 	}
 }
@@ -542,6 +547,7 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 		if e != nil {
 			state = "failed"
 			code = errorCode(e)
+			slog.Warn("邮件整理未完成", "operation_id", id, "position", i, "error_code", code, "reason", syncErrorMessage(e))
 			if errors.Is(e, ErrUncertain) {
 				state = "needs_verification"
 			}
@@ -750,8 +756,12 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 		unchanged := lookup == sql.ErrNoRows || (lookup == nil && ((current.Folder == item.Message.Folder && current.UID == item.Message.UID && current.UIDValidity == item.Message.UIDValidity) || (current.Folder == x.Result.Folder && current.UID == x.Result.UID && current.UIDValidity == x.Result.UIDValidity)))
 		if e == nil && unchanged && accountIdentity(account) == item.Config {
 			pw, err := s.password(account)
-			if err == nil && remote.VerifyMove(ctx, account, pw, item.Message, x.Result) == nil {
-				_ = s.publishMove(id, x.Position, item.Message, x.Result)
+			if err == nil {
+				if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
+					_ = s.publishMove(id, x.Position, item.Message, x.Result)
+				} else {
+					slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(verifyErr))
+				}
 			}
 		}
 		release()

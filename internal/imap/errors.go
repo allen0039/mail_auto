@@ -34,6 +34,16 @@ func (e *remoteError) Error() string {
 }
 func (e *remoteError) PublicMessage() string { return e.Error() }
 func (e *remoteError) Unwrap() error         { return ErrRemote }
+func (e *remoteError) OperationErrorCode() string {
+	switch e.reason {
+	case "等待邮箱服务器响应超时（45 秒）":
+		return "provider_timeout"
+	case "邮箱服务器连接中断", "邮箱网络连接失败":
+		return "provider_connection_failed"
+	default:
+		return "provider_error"
+	}
+}
 
 func remoteFailure(conn *connection, operation string, err error) error {
 	if conn != nil && conn.budget != nil {
