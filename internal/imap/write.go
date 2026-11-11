@@ -111,50 +111,82 @@ func copyUID(status *protocol.StatusResp, source uint32, dest string) (mail.Move
 	return mail.MoveResult{Folder: dest, UIDValidity: uint32(validity), UID: target.Set[0].Start}, true
 }
 
-// Prefer native UID MOVE; UIDPLUS fallback expunges only the confirmed source UID.
-// Never use Client.UidMove, which can fall back to a global EXPUNGE.
-func (a Adapter) Move(ctx context.Context, account mail.Account, password string, m mail.Message, dest string, record func(mail.MoveResult) error) (mail.MoveResult, error) {
-	conn, e := a.openRetry(ctx, account, password)
+func (a Adapter) movePreflight(ctx context.Context, account mail.Account, password string, original mail.Message) (*connection, bool, error) {
+	conn, e := a.open(ctx, account, password)
 	if e != nil {
-		return mail.MoveResult{}, e
+		return nil, false, e
 	}
-	defer conn.close()
 	conn.resetBudget()
 	native, e := conn.c.Support("MOVE")
 	if e != nil {
-		return mail.MoveResult{}, remoteFailure(conn, "查询移动能力", e)
+		conn.close()
+		return nil, false, remoteFailure(conn, "查询移动能力", e)
 	}
 	conn.resetBudget()
 	uidplus, e := conn.c.Support("UIDPLUS")
 	if e != nil {
-		return mail.MoveResult{}, remoteFailure(conn, "查询 UIDPLUS 能力", e)
+		conn.close()
+		return nil, false, remoteFailure(conn, "查询 UIDPLUS 能力", e)
 	}
 	if !uidplus {
-		return mail.MoveResult{}, mail.ErrCapability
+		conn.close()
+		return nil, false, mail.ErrCapability
 	}
 	conn.resetBudget()
-	selected, e := conn.c.Select(m.Folder, false)
+	selected, e := conn.c.Select(original.Folder, false)
 	if e != nil {
-		return mail.MoveResult{}, remoteFailure(conn, "打开整理源目录", e)
+		conn.close()
+		return nil, false, remoteFailure(conn, "打开整理源目录", e)
 	}
 	if selected.ReadOnly {
-		return mail.MoveResult{}, mail.ErrCapability
+		conn.close()
+		return nil, false, mail.ErrCapability
 	}
-	if selected.UidValidity != m.UIDValidity {
-		return mail.MoveResult{}, ErrStale
+	if selected.UidValidity != original.UIDValidity {
+		conn.close()
+		return nil, false, ErrStale
 	}
 	set := new(protocol.SeqSet)
-	set.AddNum(m.UID)
+	set.AddNum(original.UID)
 	criteria := liveMessages()
 	criteria.Uid = set
 	conn.resetBudget()
 	uids, e := conn.c.UidSearch(criteria)
 	if e != nil {
-		return mail.MoveResult{}, remoteFailure(conn, "复核整理源邮件", e)
+		conn.close()
+		return nil, false, remoteFailure(conn, "复核整理源邮件", e)
 	}
-	if len(uids) != 1 || uids[0] != m.UID {
-		return mail.MoveResult{}, ErrStale
+	if len(uids) != 1 || uids[0] != original.UID {
+		conn.close()
+		return nil, false, ErrStale
 	}
+	return conn, native, nil
+}
+
+// Prefer native UID MOVE; UIDPLUS fallback expunges only the confirmed source UID.
+// Never use Client.UidMove, which can fall back to a global EXPUNGE. Everything
+// before Execute is read-only, so a dropped preflight can safely reconnect. Once
+// the write command is issued, every transport failure remains uncertain and is
+// never replayed.
+func (a Adapter) Move(ctx context.Context, account mail.Account, password string, m mail.Message, dest string, record func(mail.MoveResult) error) (mail.MoveResult, error) {
+	var conn *connection
+	var native bool
+	err := retryRemote(ctx, func() error {
+		if conn != nil {
+			conn.close()
+			conn = nil
+		}
+		var err error
+		conn, native, err = a.movePreflight(ctx, account, password, m)
+		return err
+	})
+	if err != nil {
+		return mail.MoveResult{}, err
+	}
+	defer conn.close()
+
+	set := new(protocol.SeqSet)
+	set.AddNum(m.UID)
 	var mapping mail.MoveResult
 	var mapped bool
 	handler := responses.HandlerFunc(func(resp protocol.Resp) error {
@@ -195,9 +227,9 @@ func (a Adapter) Move(ctx context.Context, account mail.Account, password string
 		// Destination verification selects another mailbox. Reselect and validate
 		// the source before STORE/UID EXPUNGE, using this same login throughout.
 		conn.resetBudget()
-		selected, e = conn.c.Select(m.Folder, false)
-		if e != nil {
-			return mapping, uncertainFailure(conn, "重新打开整理源目录", e)
+		selected, err := conn.c.Select(m.Folder, false)
+		if err != nil {
+			return mapping, uncertainFailure(conn, "重新打开整理源目录", err)
 		}
 		if selected.ReadOnly || selected.UidValidity != m.UIDValidity {
 			return mapping, mail.ErrUncertain

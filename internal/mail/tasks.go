@@ -702,7 +702,7 @@ func (s *Service) createTaskRun(a Access, t Task, key, source string, scheduled 
 	if e != nil {
 		return TaskRun{}, e
 	}
-	r := TaskRun{ID: credentials.Random(24), TaskID: t.ID, AccountID: t.AccountID, TaskName: t.Name, TaskVersion: t.Version, PolicyVersion: p.Version, RulesDigest: rulesDigest(rules), Owner: owner, AdminVersion: t.AdminVersion, Source: source, RunKey: key, Mode: t.Mode, State: "queued", CreatedAt: now, UpdatedAt: now, Expires: now + 600, ScheduledAt: scheduled, NextCursor: t.Cursor}
+	r := TaskRun{ID: credentials.Random(24), TaskID: t.ID, AccountID: t.AccountID, TaskName: t.Name, TaskVersion: t.Version, PolicyVersion: p.Version, RulesDigest: rulesDigest(rules), Owner: owner, AdminVersion: t.AdminVersion, Source: source, RunKey: key, Mode: t.Mode, State: "queued", CreatedAt: now, UpdatedAt: now, Expires: now + taskRunTTL(t), ScheduledAt: scheduled, NextCursor: t.Cursor}
 	if t.Engine == "ai" {
 		r.State = "awaiting_ai"
 	}
@@ -741,6 +741,16 @@ func (s *Service) createTaskRun(a Access, t Task, key, source string, scheduled 
 		return r, e
 	}
 	return r, tx.Commit()
+}
+
+func taskRunTTL(t Task) int64 {
+	if t.Engine == "rules" {
+		// A 20-message batch performs multiple provider round trips per item.
+		// A short task deadline turns ordinary IMAP jitter into task_timeout even
+		// though every individual write remains safely bounded and verified.
+		return 1800
+	}
+	return 600
 }
 func (s *Service) taskBatchPolicy(a Access, p AutomationPolicy, runID string) (AutomationPolicy, error) {
 	r, e := s.loadTaskRun(runID)

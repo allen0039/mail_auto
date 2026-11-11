@@ -28,3 +28,12 @@ func TestTaskIndexDoesNotRunFullSyncWhenAutomaticSyncOwnsFreshness(t *testing.T)
 		t.Fatalf("stale automatic-owned index was accepted: %v", err)
 	}
 }
+
+func TestFixedRuleTaskDeadlineAllowsFullBatchOverSlowIMAP(t *testing.T) {
+	if got := taskRunTTL(Task{Engine: "rules"}); got != 1800 {
+		t.Fatalf("fixed rule task TTL = %d, want 1800", got)
+	}
+	if got := taskRunTTL(Task{Engine: "ai"}); got != 600 {
+		t.Fatalf("external AI task TTL = %d, want 600", got)
+	}
+}
