@@ -34,8 +34,11 @@ type organizerRemote struct {
 	moves            int
 	uncertain        bool
 	omitMapping      bool
+	verifyErr        error
 	inspectEvidence  MoveEvidence
 	inspectCallCount int
+	finishErr        error
+	finishCallCount  int
 }
 
 func (f *organizerRemote) Capabilities(context.Context, Account, string) (Capabilities, error) {
@@ -58,11 +61,15 @@ func (f *organizerRemote) Move(_ context.Context, _ Account, _ string, m Message
 	return r, nil
 }
 func (f *organizerRemote) VerifyMove(context.Context, Account, string, Message, MoveResult) error {
-	return nil
+	return f.verifyErr
 }
 func (f *organizerRemote) InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error) {
 	f.inspectCallCount++
 	return f.inspectEvidence, nil
+}
+func (f *organizerRemote) FinishMove(context.Context, Account, string, Message, MoveResult) error {
+	f.finishCallCount++
+	return f.finishErr
 }
 func organizerFixture(t *testing.T) (*Service, *organizerRemote, Access, Message) {
 	t.Helper()
@@ -218,6 +225,53 @@ func TestOrganizerMissingMappingReconcileUsesLiveEvidence(t *testing.T) {
 		}
 	})
 }
+
+func TestOrganizerReconcileFinishesCopyWhenSourceCleanupWasInterrupted(t *testing.T) {
+	s, r, a, m := organizerFixture(t)
+	r.uncertain = true
+	r.verifyErr = ErrUncertain
+	r.inspectEvidence = MoveEvidence{
+		SourcePresent:      true,
+		DestinationPresent: true,
+		Destination:        MoveResult{Folder: "Archive", UIDValidity: 7, UID: 101},
+	}
+	o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+	if o.State != "needs_verification" {
+		t.Fatal(o)
+	}
+	o, e := s.Reconcile(context.Background(), a, o.ID)
+	if e != nil || o.State != "completed" || o.Items[0].State != "completed" {
+		t.Fatal(o, e)
+	}
+	if r.moves != 1 || r.finishCallCount != 1 || r.inspectCallCount != 1 {
+		t.Fatal("reconcile reissued MOVE or skipped verified cleanup", r.moves, r.finishCallCount, r.inspectCallCount)
+	}
+	moved, e := s.Message(m.Ref)
+	if e != nil || moved.Folder != "Archive" || moved.UID != 101 {
+		t.Fatal(moved, e)
+	}
+}
+
+func TestOrganizerReconcileKeepsCleanupFailureUncertain(t *testing.T) {
+	s, r, a, m := organizerFixture(t)
+	r.uncertain = true
+	r.verifyErr = ErrUncertain
+	r.inspectEvidence = MoveEvidence{
+		SourcePresent:      true,
+		DestinationPresent: true,
+		Destination:        MoveResult{Folder: "Archive", UIDValidity: 7, UID: 101},
+	}
+	r.finishErr = ErrUncertain
+	o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+	o, e := s.Reconcile(context.Background(), a, o.ID)
+	if e != nil || o.State != "needs_verification" || o.Items[0].State != "needs_verification" {
+		t.Fatal(o, e)
+	}
+	if r.moves != 1 || r.finishCallCount != 1 {
+		t.Fatal("cleanup failure reissued MOVE", r.moves, r.finishCallCount)
+	}
+}
+
 func TestOrganizerFrozenStateAndUndoConflict(t *testing.T) {
 	s, _, a, m := organizerFixture(t)
 	for _, action := range []string{"label_add", "label_remove"} {

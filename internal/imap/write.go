@@ -339,6 +339,83 @@ func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password
 	return out, err
 }
 
+// FinishMove completes the source cleanup of an interrupted UIDPLUS MOVE. It
+// never copies the message again. Both the unchanged source and the saved
+// destination must match the original message metadata before the source is
+// removed, and this method is safe for retryRemote to invoke again after an
+// ambiguous response.
+func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password string, m mail.Message, result mail.MoveResult) error {
+	if result.UID == 0 || result.UIDValidity == 0 || result.Folder == "" ||
+		m.Folder == "" || m.UID == 0 || m.UIDValidity == 0 ||
+		strings.EqualFold(m.Folder, result.Folder) {
+		return mail.ErrUncertain
+	}
+	return retryRemote(ctx, func() error {
+		conn, err := a.open(ctx, account, password)
+		if err != nil {
+			return fmt.Errorf("%w: %w", mail.ErrUncertain, err)
+		}
+		defer conn.close()
+
+		// A previous attempt may already have removed the source. In that case
+		// the exact saved destination mapping is sufficient.
+		if verifyMove(conn, m, result) == nil {
+			return nil
+		}
+		if err = verifyMessageFingerprint(conn, account.ID, m, m.Folder, m.UIDValidity, m.UID); err != nil {
+			return err
+		}
+		if err = verifyMessageFingerprint(conn, account.ID, m, result.Folder, result.UIDValidity, result.UID); err != nil {
+			return err
+		}
+
+		conn.resetBudget()
+		source, err := conn.c.Select(m.Folder, false)
+		if err != nil {
+			return uncertainFailure(conn, "打开移动源目录", err)
+		}
+		if source.ReadOnly || source.UidValidity != m.UIDValidity {
+			return mail.ErrUncertain
+		}
+		set := new(protocol.SeqSet)
+		set.AddNum(m.UID)
+		conn.resetBudget()
+		if err = conn.c.UidStore(set, protocol.FormatFlagsOp(protocol.AddFlags, true), []interface{}{protocol.DeletedFlag}, nil); err != nil {
+			return uncertainFailure(conn, "标记已复制的源邮件", err)
+		}
+		conn.resetBudget()
+		status, err := conn.c.Execute(&commands.Uid{Cmd: &protocol.Command{Name: "EXPUNGE", Arguments: []interface{}{set}}}, nil)
+		if err != nil {
+			return uncertainFailure(conn, "移除已复制的源邮件", err)
+		}
+		if status == nil || status.Err() != nil {
+			return mail.ErrUncertain
+		}
+		return verifyMove(conn, m, result)
+	})
+}
+
+func verifyMessageFingerprint(conn *connection, accountID string, expected mail.Message, folder string, validity, uid uint32) error {
+	conn.resetBudget()
+	status, err := conn.c.Select(folder, true)
+	if err != nil {
+		return remoteFailure(conn, "打开移动核验目录", err)
+	}
+	if status.UidValidity != validity {
+		return mail.ErrUncertain
+	}
+	set := new(protocol.SeqSet)
+	set.AddNum(uid)
+	batch, err := fetchBatch(conn, accountID, folder, validity, set)
+	if err != nil {
+		return err
+	}
+	if len(batch.Messages) != 1 || batch.Messages[0].UID != uid || !sameMoveMetadata(expected, batch.Messages[0]) {
+		return mail.ErrUncertain
+	}
+	return nil
+}
+
 func sameMoveMetadata(a, b mail.Message) bool {
 	return a.Subject == b.Subject &&
 		a.Sender == b.Sender &&

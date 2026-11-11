@@ -37,6 +37,9 @@ type WritableRemote interface {
 type MoveReconciler interface {
 	InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error)
 }
+type MoveFinisher interface {
+	FinishMove(context.Context, Account, string, Message, MoveResult) error
+}
 type FolderSettings struct {
 	AccountID     string `json:"account_id"`
 	Archive       string `json:"archive_folder"`

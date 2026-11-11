@@ -769,6 +769,13 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 				if x.Result.UID != 0 && x.Result.UIDValidity != 0 && x.Result.Folder != "" {
 					if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
 						_ = s.publishMove(id, x.Position, item.Message, x.Result)
+					} else if inspector, ok := s.Remote.(MoveReconciler); ok {
+						evidence, inspectErr := inspector.InspectMove(ctx, account, pw, item.Message, item.Destination)
+						if inspectErr != nil {
+							slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
+						} else {
+							s.reconcileMoveEvidence(ctx, id, x.Position, item.Message, evidence, account, pw)
+						}
 					} else {
 						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(verifyErr))
 					}
@@ -776,14 +783,8 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 					evidence, inspectErr := inspector.InspectMove(ctx, account, pw, item.Message, item.Destination)
 					if inspectErr != nil {
 						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
-					} else if evidence.DestinationPresent && !evidence.SourcePresent {
-						if _, err = s.Store.DB.Exec("UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?", evidence.Destination.UIDValidity, evidence.Destination.UID, id, x.Position); err == nil {
-							_ = s.publishMove(id, x.Position, item.Message, evidence.Destination)
-						}
-					} else if evidence.SourcePresent && !evidence.DestinationPresent {
-						// A successful live-search of the unchanged source UID and no
-						// matching destination proves the interrupted MOVE did not apply.
-						_, _ = s.Store.DB.Exec("UPDATE operation_items SET state='failed',error_code='move_not_applied' WHERE operation_id=? AND position=? AND state='needs_verification'", id, x.Position)
+					} else {
+						s.reconcileMoveEvidence(ctx, id, x.Position, item.Message, evidence, account, pw)
 					}
 				} else {
 					slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(ErrCapability))
@@ -805,6 +806,53 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 	}
 	return s.Operation(a, id)
 }
+
+func (s *Service) reconcileMoveEvidence(
+	ctx context.Context,
+	id string,
+	position int,
+	message Message,
+	evidence MoveEvidence,
+	account Account,
+	password string,
+) {
+	switch {
+	case evidence.DestinationPresent && !evidence.SourcePresent:
+		if _, err := s.Store.DB.Exec(
+			"UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?",
+			evidence.Destination.UIDValidity, evidence.Destination.UID, id, position,
+		); err == nil {
+			_ = s.publishMove(id, position, message, evidence.Destination)
+		}
+	case evidence.SourcePresent && !evidence.DestinationPresent:
+		// A successful live-search of the unchanged source UID and no matching
+		// destination proves the interrupted MOVE did not apply.
+		_, _ = s.Store.DB.Exec(
+			"UPDATE operation_items SET state='failed',error_code='move_not_applied' WHERE operation_id=? AND position=? AND state='needs_verification'",
+			id, position,
+		)
+	case evidence.SourcePresent && evidence.DestinationPresent:
+		// UIDPLUS can save the destination mapping even when cleanup of the source
+		// times out. Never reissue MOVE: finish only after exact source and target
+		// fingerprints have been verified.
+		finisher, ok := s.Remote.(MoveFinisher)
+		if !ok {
+			slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", position, "reason", syncErrorMessage(ErrCapability))
+			return
+		}
+		if err := finisher.FinishMove(ctx, account, password, message, evidence.Destination); err != nil {
+			slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", position, "reason", syncErrorMessage(err))
+			return
+		}
+		if _, err := s.Store.DB.Exec(
+			"UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?",
+			evidence.Destination.UIDValidity, evidence.Destination.UID, id, position,
+		); err == nil {
+			_ = s.publishMove(id, position, message, evidence.Destination)
+		}
+	}
+}
+
 func (s *Service) UndoPlan(ctx context.Context, a Access, id string) ([]Plan, error) {
 	o, e := s.Operation(a, id)
 	if e != nil {
