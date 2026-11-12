@@ -91,6 +91,40 @@ func TestNotificationFailuresPolicyAndCooldown(t *testing.T) {
 		t.Fatal("event dedupe/cooldown", count)
 	}
 }
+
+func TestNotificationRecoveryHonorsFailuresPolicy(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[recovery], func(t *testing.T) {
+			s, _, admin, _, task, _ := taskFixture(t, "observe", "manual", "rules")
+			channel := configureNotification(t, s, admin, "failures")
+			if _, err := s.SaveNotifications(admin, NotificationInput{Version: channel.Version, Enabled: true, ChatID: channel.ChatID, Policy: "failures", Recovery: recovery}); err != nil {
+				t.Fatal(err)
+			}
+			run := notificationRun(t, s, admin, task, "needs_verification", "remote_state_unknown")
+			run.State = "completed"
+			run.ErrorCode = ""
+			run.Completed = 1
+			if err := s.finishTaskRun(run); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.finishTaskRun(run); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := s.Store.DB.QueryRow("SELECT count(*) FROM notification_outbox WHERE run_id=?", run.ID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if recovery {
+				want = 2
+			}
+			if count != want {
+				t.Fatal("recovery notification count", count, want)
+			}
+		})
+	}
+}
+
 func TestNotification429RetryNeverRerunsMail(t *testing.T) {
 	s, remote, admin, _, task, _ := taskFixture(t, "observe", "manual", "rules")
 	configureNotification(t, s, admin, "failures")

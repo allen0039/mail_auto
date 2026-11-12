@@ -295,17 +295,23 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 }
 
 func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
-	for _, match := range []bool{false, true} {
-		t.Run(fmt.Sprintf("match_%t", match), func(t *testing.T) {
+	for _, mode := range []string{"match", "mismatch", "deleted_source", "no_uidplus", "store_disconnect", "expunge_disconnect"} {
+		t.Run(mode, func(t *testing.T) {
 			trace := &trafficLog{}
 			var deleted, expunged, unsafe atomic.Bool
+			var opens atomic.Int32
 			const sentAt = "12-Nov-2026 00:00:00 +0000"
 			adapter := Adapter{connect: func(ctx context.Context, a mail.Account, password string) (*connection, error) {
+				attempt := opens.Add(1)
 				left, right := net.Pipe()
 				left.SetDeadline(time.Now().Add(5 * time.Second))
 				go func() {
 					defer right.Close()
-					fmt.Fprint(right, "* OK [CAPABILITY IMAP4rev1 UIDPLUS] fixture\r\n")
+					capabilities := "IMAP4rev1 UIDPLUS"
+					if mode == "no_uidplus" {
+						capabilities = "IMAP4rev1"
+					}
+					fmt.Fprintf(right, "* OK [CAPABILITY %s] fixture\r\n", capabilities)
 					scanner := bufio.NewScanner(right)
 					folder := ""
 					for scanner.Scan() {
@@ -323,7 +329,7 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 						upper := strings.ToUpper(arg)
 						switch cmd {
 						case "CAPABILITY":
-							fmt.Fprintf(right, "* CAPABILITY IMAP4rev1 UIDPLUS\r\n%s OK cap\r\n", tag)
+							fmt.Fprintf(right, "* CAPABILITY %s\r\n%s OK cap\r\n", capabilities, tag)
 						case "LOGIN":
 							fmt.Fprintf(right, "%s OK login\r\n", tag)
 						case "SELECT", "EXAMINE":
@@ -344,14 +350,18 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 								if folder != "INBOX" {
 									unsafe.Store(true)
 								}
-								writeFixtureEnvelope(right, 42, "source", sentAt)
+								flags := ""
+								if mode == "deleted_source" || deleted.Load() {
+									flags = "\\Deleted"
+								}
+								writeFixtureEnvelopeWithFlags(right, 42, "source", sentAt, flags)
 								fmt.Fprintf(right, "%s OK fetch\r\n", tag)
 							case strings.HasPrefix(upper, "FETCH 99 "):
 								if folder != "Trash" {
 									unsafe.Store(true)
 								}
 								subject := "source"
-								if !match {
+								if mode == "mismatch" {
 									subject = "different"
 								}
 								writeFixtureEnvelope(right, 99, subject, sentAt)
@@ -361,12 +371,18 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 									unsafe.Store(true)
 								}
 								deleted.Store(true)
+								if mode == "store_disconnect" && attempt == 1 {
+									return
+								}
 								fmt.Fprintf(right, "%s OK flags\r\n", tag)
 							case upper == "EXPUNGE 42":
 								if folder != "INBOX" || !deleted.Load() {
 									unsafe.Store(true)
 								}
 								expunged.Store(true)
+								if mode == "expunge_disconnect" && attempt == 1 {
+									return
+								}
 								fmt.Fprintf(right, "%s OK expunged\r\n", tag)
 							default:
 								unsafe.Store(true)
@@ -402,7 +418,7 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 				mail.Message{Folder: "INBOX", UID: 42, UIDValidity: 7, Subject: "source", Sender: "sender@example.com", SentAt: sent.Unix(), Size: 100},
 				mail.MoveResult{Folder: "Trash", UID: 99, UIDValidity: 7},
 			)
-			if match {
+			if mode == "match" || mode == "deleted_source" || mode == "store_disconnect" || mode == "expunge_disconnect" {
 				if err != nil || !expunged.Load() {
 					t.Fatal(err, trace.String())
 				}
@@ -413,13 +429,102 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 			if unsafe.Load() || strings.Contains(traffic, "UID COPY") || strings.Contains(traffic, "UID MOVE") {
 				t.Fatal("unsafe recovery protocol", traffic)
 			}
+			if (mode == "store_disconnect" || mode == "expunge_disconnect") && opens.Load() != 2 {
+				t.Fatal("interrupted cleanup did not reconnect exactly once", opens.Load())
+			}
 		})
 	}
 }
 
 func writeFixtureEnvelope(w io.Writer, uid uint32, subject, date string) {
-	fmt.Fprintf(w, "* 1 FETCH (UID %d ENVELOPE (NIL %q ((\"Sender\" NIL \"sender\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL) FLAGS () RFC822.SIZE 100 INTERNALDATE %q)\r\n",
-		uid, subject, date)
+	writeFixtureEnvelopeWithFlags(w, uid, subject, date, "")
+}
+
+func writeFixtureEnvelopeWithFlags(w io.Writer, uid uint32, subject, date, flags string) {
+	fmt.Fprintf(w, "* 1 FETCH (UID %d ENVELOPE (NIL %q ((\"Sender\" NIL \"sender\" \"example.com\")) NIL NIL NIL NIL NIL NIL NIL) FLAGS (%s) RFC822.SIZE 100 INTERNALDATE %q)\r\n",
+		uid, subject, flags, date)
+}
+
+func TestInspectMoveRejectsDeletedSourcesAndAmbiguousTargets(t *testing.T) {
+	for _, mode := range []string{"not_applied", "unique", "duplicate", "deleted_source", "incomplete_target"} {
+		t.Run(mode, func(t *testing.T) {
+			adapter := Adapter{connect: func(context.Context, mail.Account, string) (*connection, error) {
+				left, right := net.Pipe()
+				left.SetDeadline(time.Now().Add(5 * time.Second))
+				go func() {
+					defer right.Close()
+					fmt.Fprint(right, "* OK [CAPABILITY IMAP4rev1] fixture\r\n")
+					scanner := bufio.NewScanner(right)
+					folder := ""
+					for scanner.Scan() {
+						fields := strings.SplitN(scanner.Text(), " ", 3)
+						if len(fields) < 3 {
+							return
+						}
+						tag, command, args := fields[0], strings.ToUpper(fields[1]), fields[2]
+						switch command {
+						case "LOGIN":
+							fmt.Fprintf(right, "%s OK login\r\n", tag)
+						case "EXAMINE":
+							folder = strings.Trim(args, "\"")
+							fmt.Fprintf(right, "* FLAGS (\\Seen \\Deleted)\r\n* 2 EXISTS\r\n* OK [UIDVALIDITY 7] validity\r\n%s OK [READ-ONLY] examine\r\n", tag)
+						case "UID":
+							upper := strings.ToUpper(args)
+							switch {
+							case strings.HasPrefix(upper, "SEARCH "):
+								uids := ""
+								if folder == "INBOX" {
+									if mode != "deleted_source" || !strings.Contains(upper, "UNDELETED") {
+										uids = " 42"
+									}
+								} else if mode == "duplicate" {
+									uids = " 99 100"
+								} else if mode != "not_applied" {
+									uids = " 99"
+								}
+								fmt.Fprintf(right, "* SEARCH%s\r\n%s OK search\r\n", uids, tag)
+							case strings.HasPrefix(upper, "FETCH "):
+								if mode != "incomplete_target" {
+									writeFixtureEnvelope(right, 99, "source", "12-Nov-2026 00:00:00 +0000")
+									if mode == "duplicate" {
+										writeFixtureEnvelope(right, 100, "source", "12-Nov-2026 00:00:00 +0000")
+									}
+								}
+								fmt.Fprintf(right, "%s OK fetch\r\n", tag)
+							default:
+								t.Error("unexpected command", args)
+								return
+							}
+						default:
+							t.Error("unexpected command", command)
+							return
+						}
+					}
+				}()
+				client, err := client.New(left)
+				if err != nil {
+					left.Close()
+					return nil, err
+				}
+				client.ErrorLog = log.New(io.Discard, "", 0)
+				client.Timeout = 3 * time.Second
+				if err = client.Login("fixture", "password"); err != nil {
+					left.Close()
+					return nil, err
+				}
+				return &connection{c: client, raw: left, stop: func() bool { return true }}, nil
+			}}
+			message := mail.Message{Folder: "INBOX", UID: 42, UIDValidity: 7, Subject: "source", Sender: "sender@example.com", SentAt: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC).Unix(), Size: 100}
+			evidence, err := adapter.InspectMove(context.Background(), mail.Account{ID: "fixture"}, "password", message, "Archive")
+			if mode == "not_applied" || mode == "unique" {
+				if err != nil || !evidence.SourcePresent || evidence.DestinationPresent != (mode == "unique") {
+					t.Fatal(evidence, err)
+				}
+			} else if !errors.Is(err, mail.ErrUncertain) {
+				t.Fatal("incomplete evidence was accepted", evidence, err)
+			}
+		})
+	}
 }
 
 func TestCreateFolderRequiresRemoteConfirmation(t *testing.T) {

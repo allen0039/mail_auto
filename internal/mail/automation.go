@@ -266,6 +266,7 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 		if t.Engine == "rules" {
 			b.WorkerID = s.workerID
 		}
+		b.Expires = r.Expires
 	}
 	cursor := in.Cursor
 	for b.Scanned < 500 && len(b.Items) < limit {

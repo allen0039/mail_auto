@@ -37,3 +37,35 @@ func TestFixedRuleTaskDeadlineAllowsFullBatchOverSlowIMAP(t *testing.T) {
 		t.Fatalf("external AI task TTL = %d, want 600", got)
 	}
 }
+
+func TestOlderTaskRecoveryCannotRewindLatestCursor(t *testing.T) {
+	s, _, admin, _, task, _ := taskFixture(t, "observe", "manual", "rules")
+	older, err := s.RunTask(admin, TaskRunInput{TaskID: task.ID, Version: task.Version, RunKey: "older"}, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	older.State = "needs_verification"
+	older.BatchID = "older-batch"
+	older.NextCursor = "older-cursor"
+	if err = s.finishTaskRun(older); err != nil {
+		t.Fatal(err)
+	}
+	newer, err := s.RunTask(admin, TaskRunInput{TaskID: task.ID, Version: task.Version, RunKey: "newer"}, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer.State = "completed"
+	newer.BatchID = "newer-batch"
+	newer.NextCursor = "newer-cursor"
+	if err = s.finishTaskRun(newer); err != nil {
+		t.Fatal(err)
+	}
+	older.State = "completed"
+	if err = s.finishTaskRun(older); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.loadTask(task.ID)
+	if err != nil || current.Cursor != newer.NextCursor {
+		t.Fatal("older reconciliation rewound task cursor", current.Cursor, err)
+	}
+}

@@ -516,16 +516,11 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 		return
 	}
 	accountID := p.Items[0].Message.AccountID
-	for _, item := range p.Items[1:] {
-		if item.Message.AccountID != accountID {
-			return
-		}
-	}
 	release, e := s.acquire(accountID)
 	if e != nil {
 		return
 	}
-	defer release()
+	defer func() { release() }()
 	claim, e := s.Store.DB.Exec("UPDATE operations SET state='running',updated_at=? WHERE id=? AND state='queued'", time.Now().Unix(), id)
 	if e == nil {
 		n, err := claim.RowsAffected()
@@ -551,6 +546,17 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 		if cancelled {
 			_, _ = s.Store.DB.Exec("UPDATE operation_items SET state='cancelled' WHERE operation_id=? AND position=?", id, i)
 			continue
+		}
+		if item.Message.AccountID != accountID {
+			release()
+			release = func() {}
+			accountID = item.Message.AccountID
+			releaseNext, err := s.acquire(accountID)
+			if err != nil {
+				_, _ = s.Store.DB.Exec("UPDATE operations SET state='queued',updated_at=? WHERE id=? AND state='running'", time.Now().Unix(), id)
+				return
+			}
+			release = releaseNext
 		}
 		access, e := s.CheckAccess(Access{Owner: owner, Version: p.Version})
 		if e == nil {
@@ -727,8 +733,9 @@ func (s *Service) publishMove(id string, pos int, m Message, r MoveResult) error
 	return nil
 }
 
-// Reconcile only verifies a previously saved mapping. It never reissues MOVE.
 func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation, error) {
+	s.automationMu.Lock()
+	defer s.automationMu.Unlock()
 	o, e := s.Operation(a, id)
 	if e != nil {
 		return o, e
@@ -748,11 +755,15 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 		if x.State != "needs_verification" {
 			continue
 		}
+		if x.Position < 0 || x.Position >= len(p.Items) {
+			return o, ErrConflict
+		}
 		item := p.Items[x.Position]
 		access, e := s.CheckAccess(a)
 		if e != nil {
 			return o, e
 		}
+		access.automation = p.Automation != nil
 		if !access.Allows(item.Message.AccountID, item.Message.Folder, p.Action) || !access.Allows(item.Message.AccountID, x.Result.Folder, p.Action) {
 			return o, ErrDenied
 		}
@@ -769,22 +780,23 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 				if x.Result.UID != 0 && x.Result.UIDValidity != 0 && x.Result.Folder != "" {
 					if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
 						_ = s.publishMove(id, x.Position, item.Message, x.Result)
-					} else if inspector, ok := s.Remote.(MoveReconciler); ok {
-						evidence, inspectErr := inspector.InspectMove(ctx, account, pw, item.Message, item.Destination)
-						if inspectErr != nil {
-							slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
-						} else {
-							s.reconcileMoveEvidence(ctx, id, x.Position, item.Message, evidence, account, pw)
-						}
 					} else {
-						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(verifyErr))
+						err := s.finishRecoveredMove(ctx, access, o, p, item, account, pw, x.Result)
+						if err == nil {
+							_ = s.publishMove(id, x.Position, item.Message, x.Result)
+						} else {
+							slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(err))
+						}
 					}
 				} else if inspector, ok := s.Remote.(MoveReconciler); ok {
 					evidence, inspectErr := inspector.InspectMove(ctx, account, pw, item.Message, item.Destination)
 					if inspectErr != nil {
 						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
-					} else {
-						s.reconcileMoveEvidence(ctx, id, x.Position, item.Message, evidence, account, pw)
+					} else if evidence.SourcePresent && !evidence.DestinationPresent {
+						_, _ = s.Store.DB.Exec(
+							"UPDATE operation_items SET state='failed',error_code='move_not_applied' WHERE operation_id=? AND position=? AND state='needs_verification'",
+							id, x.Position,
+						)
 					}
 				} else {
 					slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(ErrCapability))
@@ -793,64 +805,64 @@ func (s *Service) Reconcile(ctx context.Context, a Access, id string) (Operation
 		}
 		release()
 	}
-	var unknown, completed, failed int
-	if e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(state='needs_verification'),0),COALESCE(sum(state IN ('completed','skipped')),0),COALESCE(sum(state IN ('failed','cancelled','queued','running')),0) FROM operation_items WHERE operation_id=?`, id).Scan(&unknown, &completed, &failed); e == nil && unknown == 0 {
+	var unknown, completed, failed, queued, cancelled int
+	if e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(state IN ('needs_verification','running')),0),COALESCE(sum(state IN ('completed','skipped')),0),COALESCE(sum(state='failed'),0),COALESCE(sum(state='queued'),0),COALESCE(sum(state='cancelled'),0) FROM operation_items WHERE operation_id=?`, id).Scan(&unknown, &completed, &failed, &queued, &cancelled); e == nil && unknown == 0 {
 		state := "completed"
-		if failed > 0 {
+		if failed > 0 || cancelled > 0 {
 			state = "failed"
+			if cancelled > 0 {
+				state = "cancelled"
+			}
 			if completed > 0 {
 				state = "partial"
 			}
+		}
+		if queued > 0 {
+			state = "queued"
 		}
 		_, _ = s.Store.DB.Exec("UPDATE operations SET state=?,updated_at=? WHERE id=?", state, time.Now().Unix(), id)
 	}
 	return s.Operation(a, id)
 }
 
-func (s *Service) reconcileMoveEvidence(
-	ctx context.Context,
-	id string,
-	position int,
-	message Message,
-	evidence MoveEvidence,
-	account Account,
-	password string,
-) {
-	switch {
-	case evidence.DestinationPresent && !evidence.SourcePresent:
-		if _, err := s.Store.DB.Exec(
-			"UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?",
-			evidence.Destination.UIDValidity, evidence.Destination.UID, id, position,
-		); err == nil {
-			_ = s.publishMove(id, position, message, evidence.Destination)
-		}
-	case evidence.SourcePresent && !evidence.DestinationPresent:
-		// A successful live-search of the unchanged source UID and no matching
-		// destination proves the interrupted MOVE did not apply.
-		_, _ = s.Store.DB.Exec(
-			"UPDATE operation_items SET state='failed',error_code='move_not_applied' WHERE operation_id=? AND position=? AND state='needs_verification'",
-			id, position,
-		)
-	case evidence.SourcePresent && evidence.DestinationPresent:
-		// UIDPLUS can save the destination mapping even when cleanup of the source
-		// times out. Never reissue MOVE: finish only after exact source and target
-		// fingerprints have been verified.
-		finisher, ok := s.Remote.(MoveFinisher)
+func (s *Service) finishRecoveredMove(ctx context.Context, access Access, operation Operation, plan Plan, item PlanItem, account Account, password string, result MoveResult) error {
+	if operation.Cancelled || result.Folder != item.Destination {
+		return ErrDenied
+	}
+	settings, err := s.FolderSettings(account.ID)
+	if err != nil {
+		return err
+	}
+	if !settings.WritesEnabled || settings.Version != item.SettingsVersion {
+		return ErrDenied
+	}
+	if plan.Automation != nil {
+		freshRemote, ok := s.Remote.(RuleStateRemote)
 		if !ok {
-			slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", position, "reason", syncErrorMessage(ErrCapability))
-			return
+			return ErrCapability
 		}
-		if err := finisher.FinishMove(ctx, account, password, message, evidence.Destination); err != nil {
-			slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", position, "reason", syncErrorMessage(err))
-			return
+		fresh, err := freshRemote.RuleState(ctx, account, password, item.Message)
+		if err != nil {
+			return err
 		}
-		if _, err := s.Store.DB.Exec(
-			"UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?",
-			evidence.Destination.UIDValidity, evidence.Destination.UID, id, position,
-		); err == nil {
-			_ = s.publishMove(id, position, message, evidence.Destination)
+		fresh.Ref = item.Message.Ref
+		fresh.ChangedAt = item.Message.ChangedAt
+		if _, _, err = s.validateAutomationPlan(access, plan, fresh); err != nil {
+			return err
 		}
 	}
+	var cancelled bool
+	if err = s.Store.DB.QueryRow("SELECT cancelled FROM operations WHERE id=?", operation.ID).Scan(&cancelled); err != nil {
+		return err
+	}
+	if cancelled {
+		return ErrDenied
+	}
+	finisher, ok := s.Remote.(MoveFinisher)
+	if !ok {
+		return ErrCapability
+	}
+	return finisher.FinishMove(ctx, account, password, item.Message, result)
 }
 
 func (s *Service) UndoPlan(ctx context.Context, a Access, id string) ([]Plan, error) {

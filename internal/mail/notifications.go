@@ -265,19 +265,20 @@ func (s *Service) enqueueNotification(tx *sql.Tx, t Task, r TaskRun) error {
 	if !c.Enabled || policy == "off" {
 		return nil
 	}
+	var existing, unresolved int
+	if e = tx.QueryRow("SELECT count(*),COALESCE(sum(event_key=?),0) FROM notification_outbox WHERE run_id=? AND event_key<>?", r.ID+":needs_verification", r.ID, r.ID+":"+r.State).Scan(&existing, &unresolved); e != nil {
+		return e
+	}
 	failure := notificationFailure(r)
-	if policy == "failures" && !failure {
+	recovered := c.Recovery && unresolved > 0 && !failure && r.Unknown == 0
+	if policy == "failures" && !failure && !recovered {
 		return nil
 	}
-	if policy == "changes" && !failure && r.Completed == 0 {
+	if policy == "changes" && !failure && r.Completed == 0 && !recovered {
 		return nil
 	}
 	if policy != "all" && !failure && r.State == "observed" {
 		return nil
-	}
-	var existing int
-	if e = tx.QueryRow("SELECT count(*) FROM notification_outbox WHERE run_id=? AND event_key<>?", r.ID, r.ID+":"+r.State).Scan(&existing); e != nil {
-		return e
 	}
 	if existing > 0 && !failure && !c.Recovery {
 		return nil

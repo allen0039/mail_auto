@@ -301,6 +301,18 @@ func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password
 		if len(sourceUIDs) > 1 || (len(sourceUIDs) == 1 && sourceUIDs[0] != m.UID) {
 			return mail.ErrUncertain
 		}
+		if len(sourceUIDs) == 0 {
+			query = protocol.NewSearchCriteria()
+			query.Uid = set
+			conn.resetBudget()
+			physicalUIDs, err := conn.c.UidSearch(query)
+			if err != nil {
+				return remoteFailure(conn, "核验已删除源邮件", err)
+			}
+			if len(physicalUIDs) != 0 {
+				return mail.ErrUncertain
+			}
+		}
 
 		conn.resetBudget()
 		target, err := conn.c.Select(destination, true)
@@ -323,11 +335,23 @@ func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password
 			if err != nil {
 				return err
 			}
+			expected := targetUIDs[start:min(start+UIDBatchSize, len(targetUIDs))]
+			if len(batch.Messages) != len(expected) {
+				return mail.ErrUncertain
+			}
+			seen := map[uint32]bool{}
 			for _, candidate := range batch.Messages {
+				if seen[candidate.UID] {
+					return mail.ErrUncertain
+				}
+				seen[candidate.UID] = true
 				if sameMoveMetadata(m, candidate) {
 					matches = append(matches, candidate.UID)
 				}
 			}
+		}
+		if len(matches) > 1 {
+			return mail.ErrUncertain
 		}
 		out = mail.MoveEvidence{SourcePresent: len(sourceUIDs) == 1}
 		if len(matches) == 1 {
@@ -361,6 +385,14 @@ func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password 
 		// the exact saved destination mapping is sufficient.
 		if verifyMove(conn, m, result) == nil {
 			return nil
+		}
+		conn.resetBudget()
+		uidplus, err := conn.c.Support("UIDPLUS")
+		if err != nil {
+			return uncertainFailure(conn, "查询恢复移动能力", err)
+		}
+		if !uidplus {
+			return mail.ErrUncertain
 		}
 		if err = verifyMessageFingerprint(conn, account.ID, m, m.Folder, m.UIDValidity, m.UID); err != nil {
 			return err
@@ -406,7 +438,7 @@ func verifyMessageFingerprint(conn *connection, accountID string, expected mail.
 	}
 	set := new(protocol.SeqSet)
 	set.AddNum(uid)
-	batch, err := fetchBatch(conn, accountID, folder, validity, set)
+	batch, err := fetchMetadata(conn, accountID, folder, validity, set, folder == expected.Folder)
 	if err != nil {
 		return err
 	}

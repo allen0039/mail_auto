@@ -34,6 +34,26 @@ func taskFixture(t *testing.T, mode, trigger, engine string) (*Service, *automat
 	s.workerID = "task-test-worker"
 	return s, remote, admin, client, task, m
 }
+
+func TestFixedTaskBatchLeaseCoversRunDeadline(t *testing.T) {
+	s, _, admin, _, task, message := taskFixture(t, "execute", "manual", "rules")
+	run, err := s.RunTask(admin, TaskRunInput{TaskID: task.ID, Version: task.Version, RunKey: "full-deadline"}, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Store.DB.Exec("UPDATE task_runs SET state='running',lease_owner=?,lease_until=? WHERE id=?", s.workerID, time.Now().Unix()+45, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := s.ClaimAI(Access{Owner: run.Owner, Version: run.AdminVersion}, AIClaimInput{RunID: run.ID, AccountID: message.AccountID})
+	if err != nil || batch.Expires != run.Expires {
+		t.Fatal("batch expires before its task", batch.Expires, run.Expires, err)
+	}
+	var expires int64
+	if err = s.Store.DB.QueryRow("SELECT expires FROM automation_claims WHERE batch_id=?", batch.ID).Scan(&expires); err != nil || expires != run.Expires {
+		t.Fatal("claim expires before its task", expires, run.Expires, err)
+	}
+}
+
 func TestTaskObserveIdempotenceAndIdentityRevocation(t *testing.T) {
 	s, remote, admin, _, task, _ := taskFixture(t, "observe", "manual", "rules")
 	in := TaskRunInput{TaskID: task.ID, Version: task.Version, RunKey: "once"}
@@ -478,5 +498,13 @@ func TestCancelledTaskRetainsUnknownMailOutcome(t *testing.T) {
 	deliveries, e := s.NotificationDeliveries(admin)
 	if e != nil || len(deliveries) != 1 {
 		t.Fatal(deliveries, e)
+	}
+	if _, e = s.Store.DB.Exec("UPDATE operation_items SET state='completed' WHERE operation_id=?; UPDATE operations SET state='completed' WHERE id=?", op.ID, op.ID); e != nil {
+		t.Fatal(e)
+	}
+	s.reconcileTaskRun(r.ID)
+	r, e = s.TaskRun(admin, r.ID)
+	if e != nil || r.State != "cancelled" || r.Unknown != 0 || r.ErrorCode != "" {
+		t.Fatal("verified task retained an obsolete error", r, e)
 	}
 }

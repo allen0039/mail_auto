@@ -39,6 +39,7 @@ type organizerRemote struct {
 	inspectCallCount int
 	finishErr        error
 	finishCallCount  int
+	finishResult     MoveResult
 }
 
 func (f *organizerRemote) Capabilities(context.Context, Account, string) (Capabilities, error) {
@@ -67,8 +68,9 @@ func (f *organizerRemote) InspectMove(context.Context, Account, string, Message,
 	f.inspectCallCount++
 	return f.inspectEvidence, nil
 }
-func (f *organizerRemote) FinishMove(context.Context, Account, string, Message, MoveResult) error {
+func (f *organizerRemote) FinishMove(_ context.Context, _ Account, _ string, _ Message, result MoveResult) error {
 	f.finishCallCount++
+	f.finishResult = result
 	return f.finishErr
 }
 func organizerFixture(t *testing.T) (*Service, *organizerRemote, Access, Message) {
@@ -200,7 +202,7 @@ func TestOrganizerMissingMappingReconcileUsesLiveEvidence(t *testing.T) {
 		}
 	})
 
-	t.Run("unique_destination_match_completes", func(t *testing.T) {
+	t.Run("metadata_match_without_copyuid_stays_uncertain", func(t *testing.T) {
 		s, r, a, m := organizerFixture(t)
 		r.omitMapping = true
 		r.uncertain = true
@@ -213,14 +215,14 @@ func TestOrganizerMissingMappingReconcileUsesLiveEvidence(t *testing.T) {
 			t.Fatal(o)
 		}
 		o, e := s.Reconcile(context.Background(), a, o.ID)
-		if e != nil || o.State != "completed" || o.Items[0].State != "completed" {
+		if e != nil || o.State != "needs_verification" || o.Items[0].State != "needs_verification" {
 			t.Fatal(o, e)
 		}
 		moved, e := s.Message(m.Ref)
-		if e != nil || moved.Folder != "Archive" || moved.UID != 99 {
+		if e != nil || moved.Folder != m.Folder || moved.UID != m.UID {
 			t.Fatal(moved, e)
 		}
-		if r.moves != 1 {
+		if r.moves != 1 || r.finishCallCount != 0 {
 			t.Fatal("reconcile reissued MOVE", r.moves)
 		}
 	})
@@ -243,7 +245,7 @@ func TestOrganizerReconcileFinishesCopyWhenSourceCleanupWasInterrupted(t *testin
 	if e != nil || o.State != "completed" || o.Items[0].State != "completed" {
 		t.Fatal(o, e)
 	}
-	if r.moves != 1 || r.finishCallCount != 1 || r.inspectCallCount != 1 {
+	if r.moves != 1 || r.finishCallCount != 1 || r.inspectCallCount != 0 || r.finishResult != o.Items[0].Result {
 		t.Fatal("reconcile reissued MOVE or skipped verified cleanup", r.moves, r.finishCallCount, r.inspectCallCount)
 	}
 	moved, e := s.Message(m.Ref)
@@ -269,6 +271,106 @@ func TestOrganizerReconcileKeepsCleanupFailureUncertain(t *testing.T) {
 	}
 	if r.moves != 1 || r.finishCallCount != 1 {
 		t.Fatal("cleanup failure reissued MOVE", r.moves, r.finishCallCount)
+	}
+}
+
+func TestOrganizerReconcileNeverSubstitutesSavedMapping(t *testing.T) {
+	s, r, a, m := organizerFixture(t)
+	r.uncertain = true
+	r.verifyErr = ErrUncertain
+	r.finishErr = ErrUncertain
+	r.inspectEvidence = MoveEvidence{
+		DestinationPresent: true,
+		Destination:        MoveResult{Folder: "Archive", UIDValidity: 7, UID: 999},
+	}
+	o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+	saved := o.Items[0].Result
+	o, err := s.Reconcile(context.Background(), a, o.ID)
+	if err != nil || o.State != "needs_verification" || o.Items[0].Result != saved || r.finishResult != saved || r.inspectCallCount != 0 {
+		t.Fatal("saved COPYUID was replaced", o, err, r.finishResult, r.inspectCallCount)
+	}
+}
+
+func TestOrganizerReconcileRespectsWriteRevocationAndCancellation(t *testing.T) {
+	for _, mode := range []string{"disabled", "settings_changed", "cancelled", "missing_mapping"} {
+		t.Run(mode, func(t *testing.T) {
+			s, r, a, m := organizerFixture(t)
+			r.uncertain = true
+			r.verifyErr = ErrUncertain
+			r.omitMapping = mode == "missing_mapping"
+			r.inspectEvidence = MoveEvidence{SourcePresent: true, DestinationPresent: true, Destination: MoveResult{Folder: "Archive", UIDValidity: 7, UID: 101}}
+			o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+			switch mode {
+			case "disabled":
+				_, err := s.Store.DB.Exec("UPDATE folder_settings SET writes_enabled=0 WHERE account_id=?", m.AccountID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "settings_changed":
+				_, err := s.Store.DB.Exec("UPDATE folder_settings SET version=version+1 WHERE account_id=?", m.AccountID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "cancelled":
+				if err := s.CancelOperation(a, o.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			o, err := s.Reconcile(context.Background(), a, o.ID)
+			if err != nil || o.State != "needs_verification" || r.finishCallCount != 0 || r.moves != 1 {
+				t.Fatal("recovery bypassed write preconditions", o, err, r.finishCallCount)
+			}
+		})
+	}
+}
+
+func TestOrganizerReconcileResumesQueuedItemsAfterRestart(t *testing.T) {
+	s, r, a, m := organizerFixture(t)
+	var second string
+	if err := s.Store.DB.QueryRow("SELECT ref FROM messages WHERE account_id=? AND folder='Trash'", m.AccountID).Scan(&second); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.NewPlan(context.Background(), a, PlanInput{Refs: []string{m.Ref, second}, Action: "archive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := s.ExecutePlan(a, p.ID, "restart-remaining")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Store.DB.Exec("UPDATE operations SET state='needs_verification' WHERE id=?; UPDATE operation_items SET state='needs_verification',destination_validity=7,destination_uid=101 WHERE operation_id=? AND position=0", o.ID, o.ID); err != nil {
+		t.Fatal(err)
+	}
+	o, err = s.Reconcile(context.Background(), a, o.ID)
+	if err != nil || o.State != "queued" || o.Items[1].State != "queued" {
+		t.Fatal("remaining items were stranded", o, err)
+	}
+	s.runOperation(context.Background(), o.ID)
+	o, err = s.Operation(a, o.ID)
+	if err != nil || o.State != "completed" || r.moves != 1 {
+		t.Fatal(o, err, r.moves)
+	}
+}
+
+func TestOrganizerPlanRunsAcrossAccounts(t *testing.T) {
+	s, r, a, m := organizerFixture(t)
+	second, err := s.Create(AccountInput{Name: "second", Provider: "qq", Username: "second@qq.com", Password: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Sync(context.Background(), second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SaveFolderSettings(context.Background(), FolderSettings{AccountID: second.ID, Archive: "Archive", Trash: "Trash", WritesEnabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	messages, _, err := s.Search(Search{AccountID: second.ID, Folder: "INBOX"})
+	if err != nil || len(messages) != 1 {
+		t.Fatal(messages, err)
+	}
+	o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref, messages[0].Ref}, Action: "archive"})
+	if o.State != "completed" || r.moves != 2 {
+		t.Fatal("multi-account operation did not finish", o, r.moves)
 	}
 }
 

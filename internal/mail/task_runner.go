@@ -439,6 +439,9 @@ func (s *Service) reconcileTaskRun(id string) {
 	if e = s.Store.DB.QueryRow("SELECT count(*) FROM operations WHERE plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)", b.ID).Scan(&planned); e != nil {
 		return
 	}
+	if r.Unknown == 0 && r.ErrorCode == "remote_state_unknown" {
+		r.ErrorCode = ""
+	}
 	if activeTaskState(r.State) || r.State == "needs_verification" {
 		if b.State == "empty" {
 			r.State = "noop"
@@ -448,6 +451,7 @@ func (s *Service) reconcileTaskRun(id string) {
 			r.State = "cancelled"
 		} else if b.State == "submitted" && planned == len(b.PlanIDs) && pending == 0 {
 			r.State = "completed"
+			r.ErrorCode = ""
 			if r.Completed == 0 {
 				r.State = "noop"
 			}
@@ -517,7 +521,7 @@ func (s *Service) finishTaskRun(r TaskRun) error {
 	}
 	if t.Version == r.TaskVersion && r.BatchID != "" && !slices.Contains([]string{"failed", "interrupted", "cancelled"}, r.State) {
 		t.Cursor = r.NextCursor
-		if _, e = tx.Exec("UPDATE automation_tasks SET payload=? WHERE id=? AND version=?", taskJSON(t), t.ID, t.Version); e != nil {
+		if _, e = tx.Exec("UPDATE automation_tasks SET payload=? WHERE id=? AND version=? AND NOT EXISTS (SELECT 1 FROM task_runs newer WHERE newer.task_id=? AND newer.rowid>(SELECT rowid FROM task_runs WHERE id=?))", taskJSON(t), t.ID, t.Version, t.ID, r.ID); e != nil {
 			return e
 		}
 	}

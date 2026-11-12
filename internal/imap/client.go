@@ -280,6 +280,10 @@ func (adapter Adapter) Scan(ctx context.Context, a mail.Account, password, folde
 }
 
 func fetchBatch(conn *connection, accountID, folder string, validity uint32, set *protocol.SeqSet) (mail.Snapshot, error) {
+	return fetchMetadata(conn, accountID, folder, validity, set, false)
+}
+
+func fetchMetadata(conn *connection, accountID, folder string, validity uint32, set *protocol.SeqSet, includeDeleted bool) (mail.Snapshot, error) {
 	conn.resetBudget()
 	ch := make(chan *protocol.Message, 16)
 	done := make(chan error, 1)
@@ -294,7 +298,7 @@ func fetchBatch(conn *connection, accountID, folder string, validity uint32, set
 			continue
 		}
 		// A message can acquire \\Deleted between SEARCH and FETCH.
-		if hasFlag(m.Flags, protocol.DeletedFlag) {
+		if !includeDeleted && hasFlag(m.Flags, protocol.DeletedFlag) {
 			continue
 		}
 		date := m.InternalDate

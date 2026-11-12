@@ -66,6 +66,48 @@ func decisionFor(b AIBatch) []AIDecision {
 	}
 	return out
 }
+
+func TestAutomationRecoveryRechecksPolicyAndProtectedFlags(t *testing.T) {
+	for _, mode := range []string{"allowed", "policy_revoked", "flagged"} {
+		t.Run(mode, func(t *testing.T) {
+			s, remote, admin, client, _, policy, message := automationFixture(t, "execute")
+			remote.uncertain = true
+			remote.verifyErr = ErrUncertain
+			batch, err := s.ClaimAI(client, AIClaimInput{AccountID: message.AccountID, RunKey: "recovery"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			batch, err = s.SubmitAI(context.Background(), client, AISubmitInput{BatchID: batch.ID, IdempotencyKey: "recovery", Decisions: decisionFor(batch)})
+			if err != nil || len(batch.PlanIDs) != 1 {
+				t.Fatal(batch, err)
+			}
+			operation, err := s.ExecuteAI(client, batch.ID, batch.PlanIDs[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.runOperation(context.Background(), operation.ID)
+			if mode == "policy_revoked" {
+				policy.Enabled = false
+				if _, err = s.SaveAutomationPolicy(admin, policy); err != nil {
+					t.Fatal(err)
+				}
+			}
+			remote.flagged = mode == "flagged"
+			operation, err = s.Reconcile(context.Background(), client, operation.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "allowed" {
+				if operation.State != "completed" || remote.finishCallCount != 1 {
+					t.Fatal(operation, remote.finishCallCount)
+				}
+			} else if operation.State != "needs_verification" || remote.finishCallCount != 0 {
+				t.Fatal("recovery bypassed automation policy", operation, remote.finishCallCount)
+			}
+		})
+	}
+}
+
 func TestAutomationClaimSubmitExecuteAndDedupe(t *testing.T) {
 	s, r, _, a, _, _, m := automationFixture(t, "execute")
 	ctx := context.Background()
