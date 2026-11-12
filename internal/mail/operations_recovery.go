@@ -161,7 +161,7 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 		if !access.Allows(item.Message.AccountID, item.Message.Folder, p.Action) || !access.Allows(item.Message.AccountID, x.Result.Folder, p.Action) {
 			return o, ErrDenied
 		}
-		release, e := s.acquire(item.Message.AccountID)
+		release, e := s.acquireRecovery(item.Message.AccountID)
 		if e != nil {
 			continue
 		}
@@ -173,6 +173,7 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 			if err == nil {
 				if x.Result.UID != 0 && x.Result.UIDValidity != 0 && x.Result.Folder != "" {
 					if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
+						s.invalidateAutomatic(item.Message.AccountID)
 						if err = s.publishRecoveredMove(id, x.Position, item, x.Result); err != nil {
 							s.recordRecovery(id, x.Position, err)
 						}
@@ -281,6 +282,7 @@ func (s *Service) finishRecoveredMove(ctx context.Context, access Access, operat
 	if !ok {
 		return ErrCapability
 	}
+	s.invalidateAutomatic(account.ID)
 	return finisher.FinishMove(ctx, account, password, item.Message, result, func(fresh Message) error {
 		fresh.Ref = item.Message.Ref
 		fresh.ChangedAt = item.Message.ChangedAt

@@ -91,22 +91,47 @@ func (s *Service) acquireConfig(id string) (func(), error) {
 	return func() { s.mu.Lock(); delete(s.active, id); s.mu.Unlock() }, nil
 }
 func (s *Service) acquireLocked(id string) (func(), error) {
-	if s.stopping {
+	release, err := s.acquireReadSlotLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateAutomaticLocked(id)
+	return release, nil
+}
+
+// acquireRecovery takes the same exclusive account gate and read slot as
+// acquire but keeps in-flight automatic snapshots valid. Recovery must call
+// invalidateAutomatic before it publishes index changes or attempts a remote
+// write.
+func (service *Service) acquireRecovery(accountID string) (func(), error) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	return service.acquireReadSlotLocked(accountID)
+}
+func (service *Service) acquireReadSlotLocked(accountID string) (func(), error) {
+	if service.stopping {
 		return nil, ErrBusy
 	}
-	if s.active == nil {
-		s.active = map[string]bool{}
+	if service.active == nil {
+		service.active = map[string]bool{}
 	}
-	if s.active[id] || s.running >= 2 {
+	if service.active[accountID] || service.running >= 2 {
 		return nil, ErrBusy
 	}
-	s.active[id] = true
-	s.running++
-	if s.epoch == nil {
-		s.epoch = map[string]uint64{}
+	service.active[accountID] = true
+	service.running++
+	return func() { service.mu.Lock(); delete(service.active, accountID); service.running--; service.mu.Unlock() }, nil
+}
+func (service *Service) invalidateAutomatic(accountID string) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	service.invalidateAutomaticLocked(accountID)
+}
+func (service *Service) invalidateAutomaticLocked(accountID string) {
+	if service.epoch == nil {
+		service.epoch = map[string]uint64{}
 	}
-	s.epoch[id]++
-	return func() { s.mu.Lock(); delete(s.active, id); s.running--; s.mu.Unlock() }, nil
+	service.epoch[accountID]++
 }
 
 // holdAutomatic keeps the background sync session from connecting between the

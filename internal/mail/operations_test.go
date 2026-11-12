@@ -37,6 +37,7 @@ type organizerRemote struct {
 	omitMapping      bool
 	verifyErr        error
 	inspectEvidence  MoveEvidence
+	inspectErr       error
 	inspectCallCount int
 	finishErr        error
 	finishCallCount  int
@@ -73,7 +74,7 @@ func (f *organizerRemote) VerifyMove(context.Context, Account, string, Message, 
 }
 func (f *organizerRemote) InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error) {
 	f.inspectCallCount++
-	return f.inspectEvidence, nil
+	return f.inspectEvidence, f.inspectErr
 }
 func (f *organizerRemote) FinishMove(_ context.Context, _ Account, _ string, m Message, result MoveResult, validate func(Message) error) error {
 	f.finishCallCount++
