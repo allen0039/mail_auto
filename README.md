@@ -12,7 +12,7 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前源码为 `0.4.18` 候选版本，镜像以 Docker Hub 上实际存在的标签为准；`latest` 指向最近一次发布的版本。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。 发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.4.18`，可使用固定镜像标签 `allen0039/mail-auto:0.4.18`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级至本版前请备份数据库和主密钥，schema 9 的回退说明见[运维文档](docs/operations.md)。
 
 在运行 Docker 的主机执行：
 
@@ -125,7 +125,7 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 - [配置与邮箱接入](docs/configuration.md)
 - [备份、恢复、远程访问与升级](docs/operations.md)
-- [0.4.18 候选版本范围、验证结果与已知限制](docs/acceptance-0.4.18.md)
+- [0.4.18 版本范围、验证结果与已知限制](docs/acceptance-0.4.18.md)
 - [规则与外部 AI 定时任务使用指南](docs/automation-guide.md)
 - [历史验收记录与计划文档](docs/archive/)
 - [MCP 接入与邮件整理](docs/mcp-setup.md)
