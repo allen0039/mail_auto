@@ -6,13 +6,13 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 新增「整理规则」「定时与任务」「TG 通知」：可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。AI 由外部 MCP 客户端触发，服务端不接入模型 API。[使用说明](docs/automation-guide.md)。
 
-远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.4.17 验证范围](docs/acceptance-0.4.17.md)。
+远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.4.18 验证范围](docs/acceptance-0.4.18.md)。
 
 支持 QQ、网易（163 / 126 / yeah.net）、iCloud 的 IMAPS 接入；此前已验证单个网易账号 13 个文件夹、1,730 条元数据只读同步。QQ、iCloud 和真实远端写入仍待专用测试邮件验证。
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)，已发布版本包含 `0.4.17` 和 `latest`。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。 发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前源码为 `0.4.18` 候选版本，镜像以 Docker Hub 上实际存在的标签为准；`latest` 指向最近一次发布的版本。镜像构建支持 Linux amd64 / arm64，标准部署无需 `.env`。 发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。
 
 在运行 Docker 的主机执行：
 
@@ -125,7 +125,7 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 - [配置与邮箱接入](docs/configuration.md)
 - [备份、恢复、远程访问与升级](docs/operations.md)
-- [当前版本范围、验证结果与已知限制](docs/acceptance-0.4.17.md)
+- [0.4.18 候选版本范围、验证结果与已知限制](docs/acceptance-0.4.18.md)
 - [规则与外部 AI 定时任务使用指南](docs/automation-guide.md)
 - [历史验收记录与计划文档](docs/archive/)
 - [MCP 接入与邮件整理](docs/mcp-setup.md)

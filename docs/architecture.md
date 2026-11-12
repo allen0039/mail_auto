@@ -1,5 +1,12 @@
 # 当前架构
 
+## schema 9 补充
+
+- 待核验恢复：`Reconcile`/后台 `reconcileNextOperation` → `reconcile` → `finishRecoveredMove` → `FinishMove(validate)`。`validate` 由 mail 层提供，依次检查停止来源、写入开关与目录映射、账号身份，以及自动化计划的 `validateAutomationRecovery`（`internal/mail/recovery.go`）。它在打开清理会话前用计划快照检查一次，在 `FinishMove` 内用同一会话重读的源邮件检查两次（STORE `\Deleted` 前、UID EXPUNGE 前）；第二次失败会撤回本次的 `\Deleted`。恢复检查不检查运行状态、租约、批次期限、worker 标识和跨日，这些只控制新写入；`taskRunPolicy` 是它与 `taskBatchPolicy` 共用的任务收窄逻辑。自动化计划总是按创建它的任务身份（`plan.Owner`）授权，与触发者无关。
+- 核验档位：`operationReconcileWindow`（24 小时，约 30 秒一次）与 `operationSlowReconcileWindow`（30 天，6 小时一次并审计）；更早的只能手动核验。`Operation.ReconcileMode`/`NextCheckAt` 供界面显示。
+- `operations.cancel_source` 区分手动停止（`user`）和系统停止（`system:<错误码>`）；只有 `system:task_timeout`、`system:worker_lease_expired` 不阻止自动化恢复。
+- 诊断：写入失败时把固定的阶段文案存入 `operation_items.detail`；每次核验把结果写入 `recovery_code`、`recovery_detail`、`checked_at`。
+
 ## schema 8 补充
 
 - 元数据：IMAP 元数据读取在 ENVELOPE 之外加读 BODYSTRUCTURE 和 `BODY.PEEK[HEADER.FIELDS (REFERENCES LIST-ID)]`，得到收件人、抄送、Message-ID、In-Reply-To、References、List-Id 和是否有附件。`metadata_version=2` 表示行内已有这些字段；增量同步把版本较低的行当作需要重新读取的 UID，发布时不更新 `changed_at`。所有读写都用 `messageColumns` 显式列出列名，不使用 `SELECT *`。

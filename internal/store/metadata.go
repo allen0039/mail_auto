@@ -54,3 +54,39 @@ func migrateMetadata(tx *sql.Tx) error {
 	_, err := tx.Exec(`CREATE INDEX IF NOT EXISTS messages_message_id ON messages(account_id,message_id) WHERE message_id<>''`)
 	return err
 }
+
+// diagnosticColumns are added by schema 9. They hold only fixed, sanitized
+// messages (never provider text, credentials or mail content).
+var diagnosticColumns = []string{
+	"detail TEXT NOT NULL DEFAULT ''",
+	"recovery_code TEXT NOT NULL DEFAULT ''",
+	"recovery_detail TEXT NOT NULL DEFAULT ''",
+	"checked_at INTEGER NOT NULL DEFAULT 0",
+}
+
+func migrateDiagnostics(tx *sql.Tx) error {
+	ops, err := tableColumns(tx, "operations")
+	if err != nil {
+		return err
+	}
+	// "user" for an explicit stop; "system:<reason>" when a task deadline or
+	// lease ended the run. Older cancelled rows stay "" and count as explicit.
+	if !ops["cancel_source"] {
+		if _, err = tx.Exec("ALTER TABLE operations ADD COLUMN cancel_source TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	columns, err := tableColumns(tx, "operation_items")
+	if err != nil {
+		return err
+	}
+	for _, field := range diagnosticColumns {
+		if columns[strings.Fields(field)[0]] {
+			continue
+		}
+		if _, err := tx.Exec("ALTER TABLE operation_items ADD COLUMN " + field); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -565,7 +565,7 @@ func (s *Service) CancelAIBatch(a Access, id string) error {
 	if _, e = tx.Exec("UPDATE automation_claims SET state='done',expires=0 WHERE batch_id=?", id); e != nil {
 		return e
 	}
-	if _, e = tx.Exec("UPDATE operations SET cancelled=1 WHERE plan_id IN(SELECT plan_id FROM automation_claims WHERE batch_id=?)", id); e != nil {
+	if _, e = tx.Exec("UPDATE operations SET cancelled=1,cancel_source='user' WHERE plan_id IN(SELECT plan_id FROM automation_claims WHERE batch_id=?)", id); e != nil {
 		return e
 	}
 	if e = store.Audit(tx, "mail.ai.cancel", id, "ok"); e != nil {

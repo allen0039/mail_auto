@@ -220,7 +220,7 @@ func TestTaskExplicitRuleBindingSnapshotsVersions(t *testing.T) {
 	if e != nil || len(selected) != 1 || selected[0].ID != rules[0].ID {
 		t.Fatal(selected, e)
 	}
-	preview, e := s.PreviewTask(admin, task.ID, "")
+	preview, e := s.PreviewTask(admin, task.ID, "", false)
 	if e != nil || len(preview.Items) != 1 || preview.Items[0].RuleID != rules[0].ID {
 		t.Fatal(preview, e)
 	}

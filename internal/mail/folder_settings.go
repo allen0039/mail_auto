@@ -44,7 +44,9 @@ type MoveReconciler interface {
 	InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error)
 }
 type MoveFinisher interface {
-	FinishMove(context.Context, Account, string, Message, MoveResult) error
+	// FinishMove passes fresh source metadata, read on the cleanup session, to
+	// validate right before marking and again right before expunging.
+	FinishMove(context.Context, Account, string, Message, MoveResult, func(Message) error) error
 }
 type FolderSettings struct {
 	AccountID     string `json:"account_id"`

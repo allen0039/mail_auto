@@ -19,6 +19,13 @@ type preparedAutomationRemote struct {
 	preparedMoves int
 }
 
+// FinishMove reports the remote star state on the cleanup session as well.
+func (r *automationRemote) FinishMove(ctx context.Context, a Account, pw string, m Message, result MoveResult, validate func(Message) error) error {
+	return r.organizerRemote.FinishMove(ctx, a, pw, m, result, func(fresh Message) error {
+		fresh.Flagged = fresh.Flagged || r.flagged
+		return validate(fresh)
+	})
+}
 func (r *automationRemote) RuleState(_ context.Context, _ Account, _ string, m Message) (Message, error) {
 	m.Flagged = r.flagged
 	return m, nil
@@ -228,11 +235,11 @@ func TestAutomationRecoveryRechecksPolicyAndProtectedFlags(t *testing.T) {
 				t.Fatal(err)
 			}
 			if mode == "allowed" {
-				if operation.State != "completed" || remote.finishCallCount != 1 {
+				if operation.State != "completed" || remote.finishExpunges != 1 {
 					t.Fatal(operation, remote.finishCallCount)
 				}
-			} else if operation.State != "needs_verification" || remote.finishCallCount != 0 {
-				t.Fatal("recovery bypassed automation policy", operation, remote.finishCallCount)
+			} else if operation.State != "needs_verification" || remote.finishStores != 0 || remote.finishExpunges != 0 {
+				t.Fatal("recovery bypassed automation policy", operation, remote.finishStores)
 			}
 		})
 	}

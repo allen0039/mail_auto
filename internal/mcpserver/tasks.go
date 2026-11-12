@@ -18,8 +18,9 @@ type TaskEnabledInput struct {
 	Enabled bool   `json:"enabled"`
 }
 type TaskPreviewInput struct {
-	TaskID string `json:"task_id"`
-	Cursor string `json:"cursor,omitempty"`
+	TaskID      string `json:"task_id"`
+	Cursor      string `json:"cursor,omitempty"`
+	OnlyMatched bool   `json:"only_matched,omitempty"`
 }
 type TaskRunIDInput struct {
 	RunID string `json:"run_id"`
@@ -42,8 +43,8 @@ func addTasks(server *mcp.Server, s *mail.Service, a mail.Access) {
 		out, e := s.SetTaskEnabled(a, in.TaskID, in.Version, in.Enabled)
 		return map[string]any{"task": out}, e
 	})
-	add(server, s, a, "mail_task_preview", "Preview up to 25 indexed messages with current rules, history, stable-delay and protections. No writes or body reads. Inspect next_cursor; this metadata snapshot is not a freshness guarantee.", true, func(ctx context.Context, in TaskPreviewInput) (map[string]any, error) {
-		out, e := s.PreviewTask(a, in.TaskID, in.Cursor)
+	add(server, s, a, "mail_task_preview", "Preview up to 25 indexed messages with current rules, history, stable-delay and protections. No writes or body reads. Pass next_cursor to continue. only_matched=true scans up to 500 messages and returns only matched ones; counts cover this call only, not the whole folder. max_batch is the per-run limit. This metadata snapshot is not a freshness guarantee.", true, func(ctx context.Context, in TaskPreviewInput) (map[string]any, error) {
+		out, e := s.PreviewTask(a, in.TaskID, in.Cursor, in.OnlyMatched)
 		return map[string]any{"preview": out}, e
 	})
 	add(server, s, a, "mail_task_run", "Trigger an enabled external task with automation+read, current version and stable run_key per occurrence; retries reuse it. manual=true explicitly invokes a one-off run for any trigger mode, including paused tasks. Fixed rules run server-side within policy. AI tasks return run_id: mail_ai_claim with run_id/account_id, inspect batch pages, submit decisions, inspect plans, execute, poll mail_task_run_get. One bounded batch per run; later occurrences continue next_cursor. Never starts AI or external scheduling.", false, func(ctx context.Context, in mail.TaskRunInput) (map[string]any, error) {

@@ -6,7 +6,7 @@
   const actionNames = {read: "读取", folder_manage: "在原邮箱创建文件夹", archive: "归档", move: "分类到文件夹", trash: "移入回收站", restore: "恢复", flag: "修改已读 / 星标", mark_read: "标为已读", mark_unread: "标为未读", unflag: "取消星标", rule_manage: "创建和调整自定义规则", task_manage: "配置和启停整理任务", automation: "定时任务批次（受自动整理授权约束）"};
   const statusNames = {queued: "排队", running: "执行中", completed: "完成", partial: "部分完成", failed: "失败", needs_verification: "待核验", cancelled: "已停止", skipped: "已跳过"};
   const run = fn => async e => {
-    if (e) e.preventDefault();
+    if (shouldPreventDefault(e)) e.preventDefault();
     try { await fn(e); } catch (err) { notify(err.message, true); }
   };
   function folderNames(id) {
@@ -16,7 +16,11 @@
     return `<option value="">${esc(empty)}</option>` + items.map(f => `<option value="${esc(f.name)}">${esc(f.label || folderLabel(f.name))}</option>`).join("");
   }
   function updateSelection() {
+    const bar = $("#bulk-toolbar");
+    if (bar) bar.classList.toggle("has-selection", selected.size > 0);
     $("#selection-count").textContent = `已选 ${selected.size} 封`;
+    if ($("#preview-selection")) $("#preview-selection").disabled = selected.size === 0;
+    if ($("#clear-selection")) $("#clear-selection").disabled = selected.size === 0;
     const accounts = [...new Set(selected.values())];
     const destination = $("#bulk-destination"), previous = destination.value;
     destination.hidden = $("#bulk-action").value !== "move";
@@ -121,7 +125,7 @@
   }));
   async function loadOperations() {
     const operations = await api("/api/operations");
-    $("#operations-list").innerHTML = operations.length ? operations.map(o => `<details class="organizer-item"><summary>${esc(statusNames[o.state] || o.state)} · ${o.items.length} 封 · ${esc(date(o.created_at))}</summary><p class="ref">${esc(o.id)}</p><div class="organizer-inline"><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="cancel">停止剩余项</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="reconcile">核验未知结果</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="undo">预览可撤销项</button></div>${o.items.map(x => `<p>${esc(x.ref.slice(0, 12))}… · ${esc(statusNames[x.state] || x.state)}${x.error_code ? ` · ${esc(x.error_code)}` : ""}${x.destination.folder ? ` → ${esc(folderLabel(x.destination.folder))}` : ""}</p>`).join("")}</details>`).join("") : '<p class="muted">还没有整理任务。</p>';
+    renderDetails($("#operations-list"), operations.length ? operations.map(o => `<details class="organizer-item" data-key="${esc(o.id)}"><summary>${esc(statusNames[o.state] || o.state)} · ${o.items.length} 封 · ${esc(date(o.created_at))}</summary><p class="ref">${esc(o.id)}</p>${o.reconcile_mode ? `<p class="${o.reconcile_mode === "auto" ? "muted" : "task-warning"} small">${o.reconcile_mode === "auto" ? `后台自动核验中（创建后 24 小时内约每 30 秒一次），下次约 ${esc(date(o.next_check_at))}` : o.reconcile_mode === "slow" ? `已超自动核验窗口：后台每 6 小时低频核验一次（至创建后 30 天），下次约 ${esc(date(o.next_check_at))}；也可点“核验未知结果”立即核验` : "已超自动核验窗口（创建超过 30 天）：后台不再核验，请点“核验未知结果”手动核验；缺少目标 UID 或证据不足时需人工核对原邮箱"}</p>` : ""}<div class="organizer-inline"><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="cancel">停止剩余项</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="reconcile">核验未知结果</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="undo">预览可撤销项</button></div>${o.items.map(x => `<div class="operation-item"><p>${esc(x.ref.slice(0, 12))}… · ${esc(statusNames[x.state] || x.state)}${x.error_code ? ` · ${esc(x.error_code)}` : ""}${x.destination.folder ? ` → ${esc(folderLabel(x.destination.folder))}${x.destination.uid ? `（目标 UID ${x.destination.uid}）` : ""}` : ""}</p>${x.detail && x.state !== "completed" ? `<p class="muted small">首次写入：${esc(x.detail)}</p>` : ""}${x.error_code === "flags_not_applied" ? `<p class="task-warning small">附加标记未应用或未确认：${esc(x.recovery_detail || x.detail || "移动已完成，但附加的标记修改未应用或未确认，请在邮箱中核对并按需手动修改。")}</p>` : x.recovery_detail ? `<p class="${x.state === "needs_verification" ? "task-warning" : "muted"} small">最近核验${x.checked_at ? `（${esc(date(x.checked_at))}）` : ""}：${esc(x.recovery_detail)}</p>` : x.state === "needs_verification" && x.checked_at ? `<p class="muted small">最近核验：${esc(date(x.checked_at))}</p>` : ""}</div>`).join("")}</details>`).join("") : '<p class="muted">还没有整理任务。</p>');
   }
   $("#refresh-operations").addEventListener("click", run(loadOperations));
   $("#operations-list").addEventListener("click", run(async e => {

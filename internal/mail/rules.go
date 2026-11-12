@@ -62,6 +62,19 @@ type RulePreview struct {
 	Items      []RuleEvaluation `json:"items"`
 	Total      int              `json:"total"`
 	NextCursor string           `json:"next_cursor,omitempty"`
+	// Task previews also report what this call scanned: the number of source
+	// messages evaluated, their outcome counts (this call only, not the whole
+	// folder) and the per-run processing limit.
+	Scanned     int            `json:"scanned,omitempty"`
+	Counts      map[string]int `json:"counts,omitempty"`
+	MaxBatch    int            `json:"max_batch,omitempty"`
+	OnlyMatched bool           `json:"only_matched,omitempty"`
+}
+
+// ruleCursorAfter returns a cursor that resumes right after m.
+func ruleCursorAfter(accountID string, folders []string, m Message) string {
+	raw, _ := json.Marshal(ruleCursor{Time: m.SentAt, Ref: m.Ref, Scope: digest([]any{accountID, folders})})
+	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 func digest(v any) string {

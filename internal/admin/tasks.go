@@ -48,10 +48,11 @@ func (s *Server) tasksAPI(w http.ResponseWriter, r *http.Request) bool {
 			}
 		} else if len(parts) == 2 && parts[1] == "preview" && r.Method == "POST" {
 			var in struct {
-				Cursor string `json:"cursor"`
+				Cursor      string `json:"cursor"`
+				OnlyMatched bool   `json:"only_matched"`
 			}
 			if decode(w, r, &in) {
-				out, e := s.Mail.PreviewTask(a, id, in.Cursor)
+				out, e := s.Mail.PreviewTask(a, id, in.Cursor, in.OnlyMatched)
 				respond(out, e)
 			}
 		} else if len(parts) == 2 && parts[1] == "enabled" && r.Method == "POST" {

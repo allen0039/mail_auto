@@ -40,13 +40,21 @@ type TaskRun struct {
 	Completed     int    `json:"completed"`
 	Failed        int    `json:"failed"`
 	Unknown       int    `json:"unknown"`
-	Skipped       int    `json:"skipped"`
-	Protected     int    `json:"protected"`
-	HasMore       bool   `json:"has_more"`
-	NextCursor    string `json:"next_cursor,omitempty"`
-	ErrorCode     string `json:"error_code,omitempty"`
-	NotifyState   string `json:"notification_state"`
-	NotifyError   string `json:"notification_error,omitempty"`
+	// Queued and Running are writes not yet attempted or still in flight;
+	// ProgressAt is the latest state change of any of the run's operations.
+	// FlagWarnings counts completed moves whose follow-up flag change was
+	// not applied (error_code flags_not_applied); they are not failures.
+	FlagWarnings int    `json:"flag_warnings"`
+	Queued       int    `json:"queued"`
+	Running      int    `json:"running"`
+	ProgressAt   int64  `json:"progress_at,omitempty"`
+	Skipped      int    `json:"skipped"`
+	Protected    int    `json:"protected"`
+	HasMore      bool   `json:"has_more"`
+	NextCursor   string `json:"next_cursor,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	NotifyState  string `json:"notification_state"`
+	NotifyError  string `json:"notification_error,omitempty"`
 }
 
 func (s *Service) loadTaskRun(id string) (TaskRun, error) {
@@ -252,14 +260,8 @@ func (s *Service) taskBatchPolicy(a Access, p AutomationPolicy, runID string) (A
 	if e != nil {
 		return p, e
 	}
-	if r.Owner != a.Owner || r.AdminVersion != a.Version || t.Version != r.TaskVersion || t.AdminVersion != a.Version || r.Expires <= time.Now().Unix() || !slices.Contains([]string{"queued", "running", "awaiting_ai"}, r.State) || p.Version != r.PolicyVersion {
+	if r.Expires <= time.Now().Unix() || !slices.Contains([]string{"queued", "running", "awaiting_ai"}, r.State) {
 		return p, ErrConflict
-	}
-	if r.Source == "internal" && (!p.AllowInternal || !t.Enabled || t.Trigger != "internal") {
-		return p, ErrDenied
-	}
-	if r.Source == "external" && (!t.Enabled || t.Trigger != "external") {
-		return p, ErrDenied
 	}
 	if t.Engine == "rules" {
 		var until int64
@@ -270,6 +272,23 @@ func (s *Service) taskBatchPolicy(a Access, p AutomationPolicy, runID string) (A
 			return p, ErrConflict
 		}
 	}
+	return s.taskRunPolicy(a, p, r, t)
+}
+
+// taskRunPolicy checks that a run still belongs to the current task, grant and
+// administrator, and narrows the account policy to the task. It deliberately
+// ignores run state, deadline and worker lease: those gate starting new writes,
+// while recovery of an already issued write must still work after the run ends.
+func (s *Service) taskRunPolicy(a Access, p AutomationPolicy, r TaskRun, t Task) (AutomationPolicy, error) {
+	if r.Owner != a.Owner || r.AdminVersion != a.Version || t.Version != r.TaskVersion || t.AdminVersion != a.Version || p.Version != r.PolicyVersion {
+		return p, ErrConflict
+	}
+	if r.Source == "internal" && (!p.AllowInternal || !t.Enabled || t.Trigger != "internal") {
+		return p, ErrDenied
+	}
+	if r.Source == "external" && (!t.Enabled || t.Trigger != "external") {
+		return p, ErrDenied
+	}
 	for _, f := range t.SourceFolders {
 		if !slices.Contains(p.SourceFolders, f) {
 			return p, ErrDenied
@@ -278,7 +297,7 @@ func (s *Service) taskBatchPolicy(a Access, p AutomationPolicy, runID string) (A
 	if t.Mode == "execute" && p.Mode != "execute" {
 		return p, ErrDenied
 	}
-	if _, e = s.taskRules(a, t); e != nil {
+	if _, e := s.taskRules(a, t); e != nil {
 		return p, e
 	}
 	p.Mode = t.Mode
@@ -290,7 +309,16 @@ func (s *Service) taskBatchPolicy(a Access, p AutomationPolicy, runID string) (A
 	p.taskDigest = digest([]any{t.ID, t.Version, t.RuleIDs, t.RuleVersions})
 	return p, nil
 }
-func (s *Service) PreviewTask(a Access, id, cursor string) (RulePreview, error) {
+
+// Preview limits: one page shows 25 messages; "only matched" scans at most 500
+// source messages per call so a sparse rule can be located without unbounded
+// work. Previews read only the local index: no body reads, flag changes or moves.
+const (
+	previewPageSize = 25
+	previewScanCap  = 500
+)
+
+func (s *Service) PreviewTask(a Access, id, cursor string, onlyMatched bool) (RulePreview, error) {
 	a, e := s.CheckAccess(a)
 	if e != nil {
 		return RulePreview{}, e
@@ -319,14 +347,47 @@ func (s *Service) PreviewTask(a Access, id, cursor string) (RulePreview, error) 
 	p.Since = max(p.Since, t.Since)
 	p.ProtectUnread = p.ProtectUnread || t.ProtectUnread
 	p.ProtectFlagged = p.ProtectFlagged || t.ProtectFlagged
-	ms, total, next, e := s.ruleCandidates(a, t.AccountID, t.SourceFolders, cursor, 25)
-	if e != nil {
-		return RulePreview{}, e
+	out := RulePreview{Items: []RuleEvaluation{}, Counts: map[string]int{}, MaxBatch: min(p.MaxBatch, t.MaxBatch), OnlyMatched: onlyMatched}
+	now := time.Now().Unix()
+	if !onlyMatched {
+		ms, total, next, e := s.ruleCandidates(a, t.AccountID, t.SourceFolders, cursor, previewPageSize)
+		if e != nil {
+			return RulePreview{}, e
+		}
+		out.Total, out.NextCursor, out.Scanned = total, next, len(ms)
+		for _, m := range ms {
+			item := evaluateRules(m, rules, p, now)
+			out.Counts[item.Status]++
+			out.Items = append(out.Items, item)
+		}
+		return out, nil
 	}
-	out := RulePreview{Items: []RuleEvaluation{}, Total: total, NextCursor: next}
-	for _, m := range ms {
-		out.Items = append(out.Items, evaluateRules(m, rules, p, time.Now().Unix()))
+	for out.Scanned < previewScanCap && len(out.Items) < previewPageSize {
+		ms, total, next, e := s.ruleCandidates(a, t.AccountID, t.SourceFolders, cursor, min(100, previewScanCap-out.Scanned))
+		if e != nil {
+			return RulePreview{}, e
+		}
+		out.Total = total
+		stopped := false
+		for _, m := range ms {
+			out.Scanned++
+			item := evaluateRules(m, rules, p, now)
+			out.Counts[item.Status]++
+			if item.Status == "matched" {
+				out.Items = append(out.Items, item)
+			}
+			cursor = ruleCursorAfter(t.AccountID, t.SourceFolders, m)
+			if len(out.Items) == previewPageSize {
+				stopped = true
+				break
+			}
+		}
+		if next == "" && !stopped {
+			cursor = ""
+			break
+		}
 	}
+	out.NextCursor = cursor
 	return out, nil
 }
 func (s *Service) CancelTaskRun(a Access, id string) error {

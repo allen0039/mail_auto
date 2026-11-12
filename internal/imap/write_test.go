@@ -416,10 +416,11 @@ func TestMoveWithRuleStateUsesOneValidatedConnection(t *testing.T) {
 }
 
 func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
-	for _, mode := range []string{"match", "mismatch", "deleted_source", "no_uidplus", "store_disconnect", "expunge_disconnect"} {
+	for _, mode := range []string{"match", "mismatch", "deleted_source", "no_uidplus", "store_disconnect", "expunge_disconnect", "reject_before_store", "flagged_after_store", "flagged_after_store_already_deleted"} {
 		t.Run(mode, func(t *testing.T) {
 			trace := &trafficLog{}
-			var deleted, expunged, unsafe atomic.Bool
+			var deleted, expunged, unsafe, flaggedRemotely atomic.Bool
+			var undone, validations atomic.Int32
 			var opens atomic.Int32
 			const sentAt = "12-Nov-2026 00:00:00 +0000"
 			adapter := Adapter{connect: func(ctx context.Context, a mail.Account, password string) (*connection, error) {
@@ -471,11 +472,14 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 								if folder != "INBOX" {
 									unsafe.Store(true)
 								}
-								flags := ""
-								if mode == "deleted_source" || deleted.Load() {
-									flags = "\\Deleted"
+								flags := []string{}
+								if mode == "deleted_source" || mode == "flagged_after_store_already_deleted" || deleted.Load() {
+									flags = append(flags, "\\Deleted")
 								}
-								writeFixtureEnvelopeWithFlags(right, 42, "source", sentAt, flags)
+								if flaggedRemotely.Load() {
+									flags = append(flags, "\\Flagged")
+								}
+								writeFixtureEnvelopeWithFlags(right, 42, "source", sentAt, strings.Join(flags, " "))
 								fmt.Fprintf(right, "%s OK fetch\r\n", tag)
 							case strings.HasPrefix(upper, "FETCH 99 "):
 								if folder != "Trash" {
@@ -487,11 +491,22 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 								}
 								writeFixtureEnvelope(right, 99, subject, sentAt)
 								fmt.Fprintf(right, "%s OK fetch\r\n", tag)
+							case strings.HasPrefix(upper, "STORE 42 -FLAGS.SILENT "):
+								if folder != "INBOX" || !strings.Contains(upper, "DELETED") {
+									unsafe.Store(true)
+								}
+								undone.Add(1)
+								deleted.Store(false)
+								fmt.Fprintf(right, "%s OK flags\r\n", tag)
 							case strings.HasPrefix(upper, "STORE 42 +FLAGS.SILENT "):
 								if folder != "INBOX" {
 									unsafe.Store(true)
 								}
 								deleted.Store(true)
+								if strings.HasPrefix(mode, "flagged_after_store") {
+									// Another client stars the message right after our STORE.
+									flaggedRemotely.Store(true)
+								}
 								if mode == "store_disconnect" && attempt == 1 {
 									return
 								}
@@ -538,13 +553,39 @@ func TestFinishMoveOnlyDeletesFingerprintMatchedSource(t *testing.T) {
 				"password",
 				mail.Message{Folder: "INBOX", UID: 42, UIDValidity: 7, Subject: "source", Sender: "sender@example.com", SentAt: sent.Unix(), Size: 100},
 				mail.MoveResult{Folder: "Trash", UID: 99, UIDValidity: 7},
+				func(fresh mail.Message) error {
+					validations.Add(1)
+					if mode == "reject_before_store" || fresh.Flagged {
+						return mail.ErrConflict
+					}
+					return nil
+				},
 			)
-			if mode == "match" || mode == "deleted_source" || mode == "store_disconnect" || mode == "expunge_disconnect" {
+			switch mode {
+			case "match", "deleted_source", "store_disconnect", "expunge_disconnect":
 				if err != nil || !expunged.Load() {
 					t.Fatal(err, trace.String())
 				}
-			} else if !errors.Is(err, mail.ErrUncertain) || deleted.Load() || expunged.Load() {
-				t.Fatal("fingerprint mismatch changed source", err, trace.String())
+			case "reject_before_store":
+				if !errors.Is(err, mail.ErrConflict) || deleted.Load() || expunged.Load() || strings.Contains(strings.ToUpper(trace.String()), " STORE ") {
+					t.Fatal("validation failure still wrote", err, trace.String())
+				}
+			case "flagged_after_store":
+				if !errors.Is(err, mail.ErrConflict) || expunged.Load() || deleted.Load() || undone.Load() != 1 {
+					t.Fatal("post-STORE change not rolled back", err, trace.String())
+				}
+			case "flagged_after_store_already_deleted":
+				// A \Deleted mark from an earlier interrupted attempt is left as found.
+				if !errors.Is(err, mail.ErrConflict) || expunged.Load() || undone.Load() != 0 {
+					t.Fatal("pre-existing mark mishandled", err, trace.String())
+				}
+			default:
+				if !errors.Is(err, mail.ErrUncertain) || deleted.Load() || expunged.Load() {
+					t.Fatal("fingerprint mismatch changed source", err, trace.String())
+				}
+			}
+			if (mode == "match" || mode == "deleted_source") && validations.Load() != 2 {
+				t.Fatal("cleanup must validate before STORE and before EXPUNGE", validations.Load())
 			}
 			traffic := strings.ToUpper(trace.String())
 			if unsafe.Load() || strings.Contains(traffic, "UID COPY") || strings.Contains(traffic, "UID MOVE") {

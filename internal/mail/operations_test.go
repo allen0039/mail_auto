@@ -41,6 +41,12 @@ type organizerRemote struct {
 	finishErr        error
 	finishCallCount  int
 	finishResult     MoveResult
+	// finishFresh simulates the source state read on the cleanup session:
+	// check 0 runs before STORE \Deleted, check 1 before UID EXPUNGE.
+	finishFresh    func(check int, m Message) Message
+	finishStores   int
+	finishUndos    int
+	finishExpunges int
 }
 
 func (f *organizerRemote) Capabilities(context.Context, Account, string) (Capabilities, error) {
@@ -69,10 +75,29 @@ func (f *organizerRemote) InspectMove(context.Context, Account, string, Message,
 	f.inspectCallCount++
 	return f.inspectEvidence, nil
 }
-func (f *organizerRemote) FinishMove(_ context.Context, _ Account, _ string, _ Message, result MoveResult) error {
+func (f *organizerRemote) FinishMove(_ context.Context, _ Account, _ string, m Message, result MoveResult, validate func(Message) error) error {
 	f.finishCallCount++
 	f.finishResult = result
-	return f.finishErr
+	if f.finishErr != nil {
+		return f.finishErr
+	}
+	for check := 0; check < 2; check++ {
+		fresh := m
+		if f.finishFresh != nil {
+			fresh = f.finishFresh(check, fresh)
+		}
+		if err := validate(fresh); err != nil {
+			if check == 1 {
+				f.finishUndos++
+			}
+			return err
+		}
+		if check == 0 {
+			f.finishStores++
+		}
+	}
+	f.finishExpunges++
+	return nil
 }
 func organizerFixture(t *testing.T) (*Service, *organizerRemote, Access, Message) {
 	t.Helper()
@@ -192,7 +217,7 @@ func TestOrganizerWorkerReconcilesUncertainOperation(t *testing.T) {
 	if o.State != "needs_verification" {
 		t.Fatal(o)
 	}
-	if !s.reconcileNextOperation(context.Background(), time.Now().Add(time.Second), time.Hour) {
+	if !s.reconcileNextOperation(context.Background(), time.Now().Add(time.Second), time.Now().Add(-time.Hour), time.Now().Add(time.Second), false) {
 		t.Fatal("uncertain operation was not selected for recovery")
 	}
 	o, e := s.Operation(a, o.ID)
@@ -202,7 +227,7 @@ func TestOrganizerWorkerReconcilesUncertainOperation(t *testing.T) {
 	if r.moves != 1 {
 		t.Fatal("worker replayed MOVE", r.moves)
 	}
-	if s.reconcileNextOperation(context.Background(), time.Now().Add(2*time.Second), time.Hour) {
+	if s.reconcileNextOperation(context.Background(), time.Now().Add(2*time.Second), time.Now().Add(-time.Hour), time.Now().Add(2*time.Second), false) {
 		t.Fatal("completed operation was selected again")
 	}
 }

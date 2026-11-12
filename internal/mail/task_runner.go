@@ -357,7 +357,7 @@ func (s *Service) executeFixedTask(ctx context.Context, r TaskRun) error {
 }
 func (s *Service) cancelRunBatch(r TaskRun) error {
 	// Cancellation must work even if task/credential revocation made its identity invalid.
-	_, e := s.Store.DB.Exec("UPDATE operations SET cancelled=1 WHERE plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)", r.BatchID)
+	_, e := s.Store.DB.Exec("UPDATE operations SET cancel_source=CASE WHEN cancelled=1 THEN cancel_source ELSE ? END,cancelled=1 WHERE plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)", "system:"+r.ErrorCode, r.BatchID)
 	if e != nil {
 		return e
 	}
@@ -440,10 +440,13 @@ func (s *Service) reconcileTaskRun(id string) {
 		}
 	}
 	var pending, planned int
-	e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(i.state='completed'),0),COALESCE(sum(i.state='failed'),0),COALESCE(sum(i.state IN ('needs_verification','running')),0),COALESCE(sum(i.state IN ('skipped','cancelled')),0),COALESCE(sum(i.state IN ('queued','running')),0) FROM operation_items i JOIN operations o ON o.id=i.operation_id WHERE o.plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)`, b.ID).Scan(&r.Completed, &r.Failed, &r.Unknown, &r.Skipped, &pending)
+	// A write in flight is "running", not unknown: only items whose remote
+	// result could not be decided count as needs_verification.
+	e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(i.state='completed'),0),COALESCE(sum(i.state='failed'),0),COALESCE(sum(i.state='needs_verification'),0),COALESCE(sum(i.state IN ('skipped','cancelled')),0),COALESCE(sum(i.state='queued'),0),COALESCE(sum(i.state='running'),0),COALESCE(max(o.updated_at),0),COALESCE(sum(i.state='completed' AND i.error_code='flags_not_applied'),0) FROM operation_items i JOIN operations o ON o.id=i.operation_id WHERE o.plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)`, b.ID).Scan(&r.Completed, &r.Failed, &r.Unknown, &r.Skipped, &r.Queued, &r.Running, &r.ProgressAt, &r.FlagWarnings)
 	if e != nil {
 		return
 	}
+	pending = r.Queued + r.Running
 	if e = s.Store.DB.QueryRow("SELECT count(*) FROM operations WHERE plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)", b.ID).Scan(&planned); e != nil {
 		return
 	}

@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the newest database layout this binary can open.
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 type Store struct {
 	DB      *sql.DB
@@ -124,7 +124,10 @@ func (s *Store) migrate() error {
 	if e = migrateMetadata(tx); e != nil {
 		return e
 	}
-	if _, e = tx.Exec("PRAGMA user_version=8"); e != nil {
+	if e = migrateDiagnostics(tx); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("PRAGMA user_version=9"); e != nil {
 		return e
 	}
 	return tx.Commit()

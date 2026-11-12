@@ -304,6 +304,9 @@ func (s *Service) enqueueNotification(tx *sql.Tx, t Task, r TaskRun) error {
 	if r.ErrorCode != "" {
 		text += "\n错误：" + r.ErrorCode
 	}
+	if r.FlagWarnings > 0 {
+		text += fmt.Sprintf("\n附加标记未应用或未确认 %d 封（移动已完成，请核对并按需手动修改标记）", r.FlagWarnings)
+	}
 	if r.HasMore {
 		text += "\n仍有候选，下次触发继续扫描"
 	}

@@ -27,8 +27,13 @@ type PlanInput struct {
 }
 
 const (
+	// Fresh uncertain writes are verified after a short quiet period for a day.
 	operationReconcileDelay  = 30 * time.Second
 	operationReconcileWindow = 24 * time.Hour
+	// Older ones are retried at most every six hours for 30 days; after that
+	// they stay visible and can only be verified manually.
+	operationSlowReconcileDelay  = 6 * time.Hour
+	operationSlowReconcileWindow = 30 * 24 * time.Hour
 )
 
 type PlanItem struct {
@@ -87,6 +92,12 @@ type OperationItem struct {
 	Error        string     `json:"error_code,omitempty"`
 	BeforeLabels []string   `json:"before_labels"`
 	Result       MoveResult `json:"destination"`
+	// Sanitized diagnostics: the first write failure, and the latest automatic
+	// verification outcome with its time.
+	Detail         string `json:"detail,omitempty"`
+	RecoveryCode   string `json:"recovery_code,omitempty"`
+	RecoveryDetail string `json:"recovery_detail,omitempty"`
+	CheckedAt      int64  `json:"checked_at,omitempty"`
 }
 type Operation struct {
 	ID        string          `json:"id"`
@@ -96,6 +107,24 @@ type Operation struct {
 	CreatedAt int64           `json:"created_at"`
 	UpdatedAt int64           `json:"updated_at"`
 	Items     []OperationItem `json:"items"`
+	// For needs_verification only: "auto" (frequent, first 24 hours), "slow"
+	// (every six hours up to 30 days) or "manual"; NextCheckAt is an estimate.
+	ReconcileMode string `json:"reconcile_mode,omitempty"`
+	NextCheckAt   int64  `json:"next_check_at,omitempty"`
+}
+
+func reconcileSchedule(o Operation, now time.Time) (string, int64) {
+	if o.State != "needs_verification" {
+		return "", 0
+	}
+	age := now.Sub(time.Unix(o.CreatedAt, 0))
+	switch {
+	case age < operationReconcileWindow:
+		return "auto", max(o.UpdatedAt+int64(operationReconcileDelay/time.Second), now.Unix())
+	case age < operationSlowReconcileWindow:
+		return "slow", max(o.UpdatedAt+int64(operationSlowReconcileDelay/time.Second), now.Unix())
+	}
+	return "manual", 0
 }
 
 func accountIdentity(a Account) string {
@@ -404,7 +433,7 @@ func (s *Service) Operation(a Access, id string) (Operation, error) {
 	if e != nil {
 		return o, e
 	}
-	rows, e := s.Store.DB.Query("SELECT position,ref,state,error_code,before_labels,destination,destination_validity,destination_uid FROM operation_items WHERE operation_id=? ORDER BY position", id)
+	rows, e := s.Store.DB.Query("SELECT position,ref,state,error_code,before_labels,destination,destination_validity,destination_uid,detail,recovery_code,recovery_detail,checked_at FROM operation_items WHERE operation_id=? ORDER BY position", id)
 	if e != nil {
 		return o, e
 	}
@@ -413,7 +442,7 @@ func (s *Service) Operation(a Access, id string) (Operation, error) {
 	for rows.Next() {
 		var x OperationItem
 		var raw string
-		if e = rows.Scan(&x.Position, &x.Ref, &x.State, &x.Error, &raw, &x.Result.Folder, &x.Result.UIDValidity, &x.Result.UID); e != nil {
+		if e = rows.Scan(&x.Position, &x.Ref, &x.State, &x.Error, &raw, &x.Result.Folder, &x.Result.UIDValidity, &x.Result.UID, &x.Detail, &x.RecoveryCode, &x.RecoveryDetail, &x.CheckedAt); e != nil {
 			return o, e
 		}
 		if e = json.Unmarshal([]byte(raw), &x.BeforeLabels); e != nil {
@@ -421,13 +450,14 @@ func (s *Service) Operation(a Access, id string) (Operation, error) {
 		}
 		o.Items = append(o.Items, x)
 	}
+	o.ReconcileMode, o.NextCheckAt = reconcileSchedule(o, time.Now())
 	return o, rows.Err()
 }
 func (s *Service) CancelOperation(a Access, id string) error {
 	if _, e := s.Operation(a, id); e != nil {
 		return e
 	}
-	_, e := s.Store.DB.Exec("UPDATE operations SET cancelled=1,updated_at=? WHERE id=?", time.Now().Unix(), id)
+	_, e := s.Store.DB.Exec("UPDATE operations SET cancelled=1,cancel_source='user',updated_at=? WHERE id=?", time.Now().Unix(), id)
 	return e
 }
 func (s *Service) Operations(a Access) ([]Operation, error) {
@@ -553,10 +583,17 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 		}
 		state = "completed"
 		code := ""
+		detail := ""
 		if errors.Is(e, errFlagsNotApplied) {
-			// The move itself is confirmed; only the follow-up flag change failed.
+			// The move itself is confirmed; only the follow-up flag change failed
+			// or could not be confirmed. Replace the provisional pending warning
+			// stored with the move by the final explanation.
 			code = errorCode(e)
-			e = nil
+			detail = flagsWarning(item, flagsFailed)
+			if _, err := s.Store.DB.Exec("UPDATE operation_items SET state='completed',error_code=?,detail=?,recovery_code=?,recovery_detail=?,checked_at=? WHERE operation_id=? AND position=?", code, detail, code, detail, time.Now().Unix(), id, i); err != nil {
+				return
+			}
+			continue
 		}
 		if e != nil {
 			state = "failed"
@@ -569,7 +606,10 @@ func (s *Service) runOperation(ctx context.Context, id string) {
 				state = "skipped"
 			}
 		}
-		if _, err := s.Store.DB.Exec("UPDATE operation_items SET state=?,error_code=? WHERE operation_id=? AND position=?", state, code, id, i); err != nil {
+		if e != nil {
+			detail = syncErrorMessage(e)
+		}
+		if _, err := s.Store.DB.Exec("UPDATE operation_items SET state=?,error_code=?,detail=? WHERE operation_id=? AND position=?", state, code, detail, id, i); err != nil {
 			return
 		}
 	}
@@ -697,10 +737,10 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 			if err != nil {
 				return err
 			}
-			if err = s.publishMove(id, pos, m, result); err != nil {
+			if err = s.publishNormalMove(id, pos, m, item, result); err != nil {
 				return err
 			}
-			return s.flagsAfterMove(ctx, account, pw, m, item, result)
+			return s.flagsAfterMove(ctx, id, pos, account, pw, m, item, result)
 		}
 		freshRemote, ok := s.Remote.(RuleStateRemote)
 		if !ok {
@@ -718,12 +758,32 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	if e != nil {
 		return e
 	}
-	if e = s.publishMove(id, pos, m, result); e != nil {
+	if e = s.publishNormalMove(id, pos, m, item, result); e != nil {
 		return e
 	}
-	return s.flagsAfterMove(ctx, account, pw, m, item, result)
+	return s.flagsAfterMove(ctx, id, pos, account, pw, m, item, result)
 }
 func (s *Service) publishMove(id string, pos int, m Message, r MoveResult) error {
+	return s.publishMoveWithWarning(id, pos, m, r, "", "")
+}
+
+// publishNormalMove publishes a move confirmed by the original write. When the
+// plan has follow-up flags, the completion is stored together with a
+// provisional flags_not_applied warning: from this commit until the flag
+// change is confirmed and indexed (see publishMovedFlags), a process restart
+// must leave a visible warning instead of a silent success. Recovery never
+// replays the flag STORE.
+func (s *Service) publishNormalMove(id string, pos int, m Message, item PlanItem, r MoveResult) error {
+	if item.Flags.Empty() {
+		return s.publishMove(id, pos, m, r)
+	}
+	return s.publishMoveWithWarning(id, pos, m, r, "flags_not_applied", flagsWarning(item, flagsPending))
+}
+
+// publishMoveWithWarning rebinds the stable ref to the confirmed destination
+// and completes the item in one transaction; a non-empty warning code (such as
+// flags_not_applied) is stored atomically with the completion.
+func (s *Service) publishMoveWithWarning(id string, pos int, m Message, r MoveResult, warning, detail string) error {
 	if r.UID == 0 || r.UIDValidity == 0 || r.Folder == "" {
 		return ErrUncertain
 	}
@@ -741,7 +801,7 @@ func (s *Service) publishMove(id string, pos int, m Message, r MoveResult) error
 	if e != nil {
 		return ErrUncertain
 	}
-	if _, e = tx.Exec("UPDATE operation_items SET state='completed',error_code='' WHERE operation_id=? AND position=?", id, pos); e != nil {
+	if _, e = tx.Exec("UPDATE operation_items SET state='completed',error_code=?,recovery_code=?,recovery_detail=?,checked_at=? WHERE operation_id=? AND position=?", warning, warning, detail, time.Now().Unix(), id, pos); e != nil {
 		return ErrUncertain
 	}
 	if e = tx.Commit(); e != nil {

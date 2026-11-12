@@ -366,15 +366,18 @@ func (a Adapter) executeMove(conn *connection, native bool, m mail.Message, dest
 	}
 	if mapped {
 		if save := record(mapping); save != nil {
-			return mapping, mail.ErrUncertain
+			return mapping, uncertainProblem("保存目标映射", "目标 UID 已返回但本地保存失败")
 		}
 	}
 	// Any error after issuing MOVE is uncertain: tagged NO can include partial effects.
 	if e != nil {
 		return mapping, uncertainFailure(conn, "移动邮件", e)
 	}
-	if status == nil || status.Err() != nil || !mapped {
-		return mapping, mail.ErrUncertain
+	if status == nil || status.Err() != nil {
+		return mapping, uncertainProblem("移动邮件", "服务器未确认移动命令")
+	}
+	if !mapped {
+		return mapping, uncertainProblem("移动邮件", "服务器未返回目标 UID（COPYUID）")
 	}
 	if !native {
 		// The destination must be visible at the exact returned UID before removing
@@ -390,7 +393,7 @@ func (a Adapter) executeMove(conn *connection, native bool, m mail.Message, dest
 			return mapping, uncertainFailure(conn, "重新打开整理源目录", err)
 		}
 		if selected.ReadOnly || selected.UidValidity != m.UIDValidity {
-			return mapping, mail.ErrUncertain
+			return mapping, uncertainProblem("重新打开整理源目录", "源目录只读或 UIDVALIDITY 已变化")
 		}
 		conn.resetBudget()
 		if e = conn.c.UidStore(set, protocol.FormatFlagsOp(protocol.AddFlags, true), []interface{}{protocol.DeletedFlag}, nil); e != nil {
@@ -402,7 +405,7 @@ func (a Adapter) executeMove(conn *connection, native bool, m mail.Message, dest
 			return mapping, uncertainFailure(conn, "移除已复制的源邮件", err)
 		}
 		if st == nil || st.Err() != nil {
-			return mapping, mail.ErrUncertain
+			return mapping, uncertainProblem("移除已复制的源邮件", "服务器拒绝 UID EXPUNGE")
 		}
 	}
 	// A successful native MOVE or UIDPLUS COPY + targeted UID EXPUNGE is decided
@@ -523,14 +526,24 @@ func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password
 }
 
 // FinishMove completes the source cleanup of an interrupted UIDPLUS MOVE. It
-// never copies the message again. Both the unchanged source and the saved
-// destination must match the original message metadata before the source is
-// removed, and this method is safe for retryRemote to invoke again after an
-// ambiguous response.
-func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password string, m mail.Message, result mail.MoveResult) error {
+// never copies the message again and never issues a global EXPUNGE.
+//
+// The saved destination must still match the original metadata. On the same
+// authenticated session that performs the cleanup, the source UID is selected
+// read-write and its metadata and flags are read again; validate receives that
+// fresh state immediately before STORE \Deleted and again immediately before
+// UID EXPUNGE. If the second check fails, the \Deleted flag added by this call
+// is removed and nothing is expunged.
+//
+// IMAP has no conditional expunge, so a flag change made by another client in
+// the few milliseconds between the last FETCH and UID EXPUNGE cannot be
+// excluded. CONDSTORE's UNCHANGEDSINCE would only guard the STORE, not the
+// EXPUNGE, so the post-STORE re-read gives the same guarantee without
+// depending on a capability several providers lack.
+func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password string, m mail.Message, result mail.MoveResult, validate func(mail.Message) error) error {
 	if result.UID == 0 || result.UIDValidity == 0 || result.Folder == "" ||
 		m.Folder == "" || m.UID == 0 || m.UIDValidity == 0 ||
-		strings.EqualFold(m.Folder, result.Folder) {
+		strings.EqualFold(m.Folder, result.Folder) || validate == nil {
 		return mail.ErrUncertain
 	}
 	return retryRemote(ctx, func() error {
@@ -551,10 +564,7 @@ func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password 
 			return uncertainFailure(conn, "查询恢复移动能力", err)
 		}
 		if !uidplus {
-			return mail.ErrUncertain
-		}
-		if err = verifyMessageFingerprint(conn, account.ID, m, m.Folder, m.UIDValidity, m.UID); err != nil {
-			return err
+			return uncertainProblem("查询恢复移动能力", "服务器不再支持 UIDPLUS")
 		}
 		if err = verifyMessageFingerprint(conn, account.ID, m, result.Folder, result.UIDValidity, result.UID); err != nil {
 			return err
@@ -566,7 +576,14 @@ func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password 
 			return uncertainFailure(conn, "打开移动源目录", err)
 		}
 		if source.ReadOnly || source.UidValidity != m.UIDValidity {
-			return mail.ErrUncertain
+			return uncertainProblem("打开移动源目录", "源目录只读或 UIDVALIDITY 已变化")
+		}
+		fresh, wasDeleted, err := readRecoverySource(conn, account.ID, m)
+		if err != nil {
+			return err
+		}
+		if err = validate(fresh); err != nil {
+			return err
 		}
 		set := new(protocol.SeqSet)
 		set.AddNum(m.UID)
@@ -574,16 +591,61 @@ func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password 
 		if err = conn.c.UidStore(set, protocol.FormatFlagsOp(protocol.AddFlags, true), []interface{}{protocol.DeletedFlag}, nil); err != nil {
 			return uncertainFailure(conn, "标记已复制的源邮件", err)
 		}
+		// Re-read after marking: a concurrent client may have changed the
+		// message between the first check and the STORE.
+		fresh, _, err = readRecoverySource(conn, account.ID, m)
+		if err == nil {
+			err = validate(fresh)
+		}
+		if err != nil {
+			if !wasDeleted {
+				conn.resetBudget()
+				if undo := conn.c.UidStore(set, protocol.FormatFlagsOp(protocol.RemoveFlags, true), []interface{}{protocol.DeletedFlag}, nil); undo != nil {
+					return uncertainFailure(conn, "撤回源邮件删除标记", undo)
+				}
+			}
+			return err
+		}
 		conn.resetBudget()
 		status, err := conn.c.Execute(&commands.Uid{Cmd: &protocol.Command{Name: "EXPUNGE", Arguments: []interface{}{set}}}, nil)
 		if err != nil {
 			return uncertainFailure(conn, "移除已复制的源邮件", err)
 		}
 		if status == nil || status.Err() != nil {
-			return mail.ErrUncertain
+			return uncertainProblem("移除已复制的源邮件", "服务器拒绝 UID EXPUNGE")
 		}
 		return nil
 	})
+}
+
+// readRecoverySource reads the selected source UID, including a message already
+// flagged \Deleted, and checks that it is still the planned message.
+func readRecoverySource(conn *connection, accountID string, m mail.Message) (mail.Message, bool, error) {
+	set := new(protocol.SeqSet)
+	set.AddNum(m.UID)
+	conn.resetBudget()
+	ch := make(chan *protocol.Message, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- conn.c.UidFetch(set, []protocol.FetchItem{protocol.FetchUid, protocol.FetchFlags}, ch)
+	}()
+	var deleted bool
+	for v := range ch {
+		if v != nil && v.Uid == m.UID {
+			deleted = hasFlag(v.Flags, protocol.DeletedFlag)
+		}
+	}
+	if err := <-done; err != nil {
+		return mail.Message{}, false, uncertainFailure(conn, "复核待清理的源邮件", err)
+	}
+	batch, err := fetchMetadata(conn, accountID, m.Folder, m.UIDValidity, set, true)
+	if err != nil {
+		return mail.Message{}, false, err
+	}
+	if len(batch.Messages) != 1 || batch.Messages[0].UID != m.UID || !sameMoveMetadata(m, batch.Messages[0]) {
+		return mail.Message{}, false, uncertainProblem("复核待清理的源邮件", "源邮件元数据与计划不一致或已不存在")
+	}
+	return batch.Messages[0], deleted, nil
 }
 
 func verifyMessageFingerprint(conn *connection, accountID string, expected mail.Message, folder string, validity, uid uint32) error {
@@ -593,7 +655,7 @@ func verifyMessageFingerprint(conn *connection, accountID string, expected mail.
 		return remoteFailure(conn, "打开移动核验目录", err)
 	}
 	if status.UidValidity != validity {
-		return mail.ErrUncertain
+		return uncertainProblem("打开移动核验目录", "目录 UIDVALIDITY 已变化")
 	}
 	set := new(protocol.SeqSet)
 	set.AddNum(uid)
@@ -602,7 +664,7 @@ func verifyMessageFingerprint(conn *connection, accountID string, expected mail.
 		return err
 	}
 	if len(batch.Messages) != 1 || batch.Messages[0].UID != uid || !sameMoveMetadata(expected, batch.Messages[0]) {
-		return mail.ErrUncertain
+		return uncertainProblem("核验邮件指纹", "邮件元数据与计划不一致或已不存在")
 	}
 	return nil
 }
@@ -626,7 +688,7 @@ func verifyMove(conn *connection, m mail.Message, result mail.MoveResult) error 
 			return uncertainFailure(conn, "打开移动核验目录", e)
 		}
 		if st.UidValidity != check.validity {
-			return mail.ErrUncertain
+			return uncertainProblem("打开移动核验目录", "目录 UIDVALIDITY 已变化")
 		}
 		set := new(protocol.SeqSet)
 		set.AddNum(check.uid)
@@ -641,10 +703,16 @@ func verifyMove(conn *connection, m mail.Message, result mail.MoveResult) error 
 			return uncertainFailure(conn, "核验移动邮件位置", e)
 		}
 		if (len(uids) > 0) != check.present {
-			return mail.ErrUncertain
+			return uncertainProblem("核验移动邮件位置", "源邮件仍在或目标邮件缺失")
 		}
 	}
 	return nil
+}
+
+// uncertainProblem reports an issued or partially verified write whose effect
+// cannot be decided, with a fixed stage and reason for diagnostics.
+func uncertainProblem(stage, reason string) error {
+	return fmt.Errorf("%w: %w", mail.ErrUncertain, remoteProblem(stage, reason))
 }
 
 func uncertainFailure(c *connection, stage string, err error) error {
@@ -658,7 +726,7 @@ func verifyDestination(c *connection, r mail.MoveResult) error {
 		return uncertainFailure(c, "打开复制目标目录", e)
 	}
 	if st.UidValidity != r.UIDValidity {
-		return mail.ErrUncertain
+		return uncertainProblem("打开复制目标目录", "目标目录 UIDVALIDITY 与返回映射不一致")
 	}
 	set := new(protocol.SeqSet)
 	set.AddNum(r.UID)
@@ -670,7 +738,7 @@ func verifyDestination(c *connection, r mail.MoveResult) error {
 		return uncertainFailure(c, "核验复制目标邮件", e)
 	}
 	if len(uids) != 1 || uids[0] != r.UID {
-		return mail.ErrUncertain
+		return uncertainProblem("核验复制目标邮件", "目标目录中找不到返回的 UID")
 	}
 	return nil
 }
