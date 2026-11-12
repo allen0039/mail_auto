@@ -56,7 +56,7 @@
   $("#policy-history").addEventListener("change",e=>$("#policy-since").disabled=!e.target.checked);
   $("#automation-policy-form").addEventListener("submit",run(async e=>{
     if(!policy)throw new Error("请先选择邮箱");
-    const sources=checked("#policy-sources"),destinations=checked("#policy-destinations");if(sources.some(f=>destinations.includes(f)))throw new Error("源目录与分类目标不能重叠，以免反复移动");
+    const sources=checked("#policy-sources"),destinations=checked("#policy-destinations");
     const since=$("#policy-since").value,expires=$("#policy-expires").value;
     const input={...policy,enabled:$("#policy-enabled").checked,allow_internal:$("#policy-internal").checked,mode:$("#policy-mode").value,source_folders:sources,destinations,actions:$$('[name="policy-action"]:checked').map(x=>x.value),allow_body:$("#policy-body").checked,protect_unread:$("#policy-protect-unread").checked,protect_flagged:$("#policy-protect-flagged").checked,protected_senders:$("#policy-protected-senders").value.split(/\n/).map(x=>x.trim()).filter(Boolean),include_history:$("#policy-history").checked,since:since?Math.floor(new Date(`${since}T00:00:00+08:00`).getTime()/1000):0,expires:Math.floor(new Date(`${expires}T23:59:59+08:00`).getTime()/1000),max_batch:Number($("#policy-max-batch").value),stable_seconds:Number($("#policy-stable").value)*60};
     await busy($('button[type="submit"]',e.currentTarget),"保存中…",async()=>{policy=await api(`/api/automation/policy/${encodeURIComponent(accountID())}`,{method:"PUT",body:JSON.stringify(input)});renderPolicy();notify("整理授权已保存，可到“定时与任务”配置触发方式");});

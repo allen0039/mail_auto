@@ -84,6 +84,93 @@ func decisionFor(b AIBatch) []AIDecision {
 	return out
 }
 
+func TestAutomationClassifyThenExpireInSameFolder(t *testing.T) {
+	service, _, admin, client, originalRule, policy, message := automationFixture(t, "execute")
+	originalRule.Enabled = false
+	if _, err := service.SaveRule(admin, originalRule); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Store.DB.Exec("INSERT INTO mailboxes(account_id,name,uidvalidity,synced_at) VALUES(?,?,7,?)", message.AccountID, "TestFlight", time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	policy.SourceFolders = []string{"INBOX", "TestFlight"}
+	policy.Destinations = []string{"TestFlight"}
+	policy.Actions = []string{"move", "trash"}
+	var err error
+	policy, err = service.SaveAutomationPolicy(admin, policy)
+	if err != nil {
+		t.Fatal("classification destination must also support retention cleanup", err)
+	}
+	for _, rule := range []Rule{
+		{AccountID: message.AccountID, Name: "Expire", Priority: 5, Enabled: true, SourceFolders: []string{"INBOX", "TestFlight"}, Match: RuleGroup{Mode: "all", Conditions: []RuleCondition{{Field: "sender", Operator: "equals", Value: "testflight_no_reply@email.apple.com"}, {Field: "received_days", Operator: "gte", Value: "60"}}}, Action: "trash"},
+		{AccountID: message.AccountID, Name: "Classify", Priority: 6, Enabled: true, SourceFolders: []string{"INBOX"}, Match: RuleGroup{Mode: "all", Conditions: []RuleCondition{{Field: "sender", Operator: "equals", Value: "testflight_no_reply@email.apple.com"}}}, Action: "move", Destination: "TestFlight"},
+	} {
+		if _, err = service.SaveRule(admin, rule); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rules, err := service.Rules(admin, message.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	for _, scenario := range []struct {
+		folder, sender, action string
+		days                   int64
+	}{
+		{"INBOX", "testflight_no_reply@email.apple.com", "move", 59},
+		{"INBOX", "testflight_no_reply@email.apple.com", "trash", 60},
+		{"TestFlight", "testflight_no_reply@email.apple.com", "keep", 59},
+		{"TestFlight", "testflight_no_reply@email.apple.com", "trash", 60},
+		{"INBOX", "other@example.com", "keep", 90},
+	} {
+		candidate := message
+		candidate.Folder = scenario.folder
+		candidate.Sender = scenario.sender
+		candidate.ReceivedAt = now - scenario.days*86400
+		result := evaluateRules(candidate, rules, policy, now)
+		if result.Action != scenario.action {
+			t.Fatalf("%+v: got %+v", scenario, result)
+		}
+	}
+	for _, phase := range []struct {
+		days           int64
+		action, folder string
+	}{{59, "move", "TestFlight"}, {60, "trash", "Trash"}} {
+		if _, err = service.Store.DB.Exec("UPDATE messages SET sender=?,received_at=? WHERE ref=?", "testflight_no_reply@email.apple.com", now-phase.days*86400, message.Ref); err != nil {
+			t.Fatal(err)
+		}
+		batch, claimErr := service.ClaimAI(client, AIClaimInput{AccountID: message.AccountID, RunKey: phase.action})
+		if claimErr != nil || len(batch.Items) != 1 || batch.Items[0].Action != phase.action {
+			t.Fatal(batch, claimErr)
+		}
+		item := batch.Items[0]
+		batch, err = service.SubmitAI(context.Background(), client, AISubmitInput{BatchID: batch.ID, IdempotencyKey: phase.action, Decisions: []AIDecision{{Ref: item.Message.Ref, Signature: item.Signature, Action: item.Action, Destination: item.Destination, Reason: "retention rule"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation, executeErr := service.ExecuteAI(client, batch.ID, batch.PlanIDs[0])
+		if executeErr != nil {
+			t.Fatal(executeErr)
+		}
+		service.runOperation(context.Background(), operation.ID)
+		current, lookupErr := service.Message(message.Ref)
+		if lookupErr != nil || current.Folder != phase.folder {
+			t.Fatal(current, lookupErr)
+		}
+	}
+	for _, folder := range []string{"Archive", "Trash"} {
+		invalid := policy
+		invalid.SourceFolders = []string{folder}
+		if _, err = service.SaveAutomationPolicy(admin, invalid); !errors.Is(err, ErrInput) {
+			t.Fatal("archive/trash source accepted", folder, err)
+		}
+	}
+	if _, err = service.SaveRule(admin, Rule{AccountID: message.AccountID, Name: "Reverse", Priority: 7, Enabled: true, SourceFolders: []string{"TestFlight"}, Match: RuleGroup{Mode: "all"}, Action: "move", Destination: "INBOX"}); !errors.Is(err, ErrConflict) {
+		t.Fatal("classification cycle accepted", err)
+	}
+}
+
 func TestAutomationUsesPreparedMovePath(t *testing.T) {
 	s, remote, _, client, _, _, message := automationFixture(t, "execute")
 	prepared := &preparedAutomationRemote{automationRemote: remote}

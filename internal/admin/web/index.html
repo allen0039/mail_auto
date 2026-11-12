@@ -21,7 +21,7 @@
       <section class="auth-story">
         <a class="wordmark" href="/"
           ><span class="envelope" aria-hidden="true"></span> MAIL AUTO
-          <span class="version">0.4.15</span></a
+          <span class="version">0.4.16</span></a
         >
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -31,7 +31,7 @@
           </p>
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE MAIL</span><strong>自托管</strong
-            ><span>MAIL ORGANIZER · V0.4.15</span>
+            ><span>MAIL ORGANIZER · V0.4.16</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储</p>
@@ -119,7 +119,7 @@
         <a class="wordmark" href="/"
           ><span class="envelope" aria-hidden="true"></span> MAIL AUTO</a
         >
-        <div class="workspace-label">个人邮件工作台 <span>v0.4.15</span></div>
+        <div class="workspace-label">个人邮件工作台 <span>v0.4.16</span></div>
         <nav aria-label="主导航">
           <button data-view="organizer" class="nav-button">整理与 MCP</button>
           <button data-view="rules" class="nav-button">整理规则</button>
@@ -313,6 +313,7 @@
    <form id="automation-policy-form" class="rules-form">
     <div class="rules-grid"><div><label class="checkbox-label"><input id="policy-enabled" type="checkbox" />允许任务领取邮件</label><label class="checkbox-label"><input id="policy-internal" type="checkbox" />允许内置定时执行固定规则</label></div><label>运行方式<select id="policy-mode"><option value="observe">只观察：记录建议，不移动邮件</option><option value="execute">执行：在授权范围内整理原邮箱</option></select></label></div>
     <div class="rules-grid"><fieldset><legend>允许读取的源目录</legend><div id="policy-sources" class="rules-folder-options"></div></fieldset><fieldset><legend>允许分类移入的目标目录</legend><div id="policy-destinations" class="rules-folder-options"></div></fieldset></div>
+    <p class="muted small">分类文件夹可以同时作为过期清理的来源；单条移动规则不能移回原目录，规则之间不能形成循环。</p>
     <fieldset><legend>允许动作</legend><div class="organizer-inline"><label class="checkbox-label"><input type="checkbox" name="policy-action" value="move" />移到选定目录</label><label class="checkbox-label"><input type="checkbox" name="policy-action" value="archive" />移入账号归档目录</label><label class="checkbox-label"><input type="checkbox" name="policy-action" value="trash" />移入账号回收站</label></div><p class="muted small">归档和回收站目录在「整理与 MCP」配置；跨日未执行计划需重新评估。按类别归档请选“移到选定目录”，保留目录分类。</p></fieldset>
     <div class="rules-grid"><label class="checkbox-label"><input id="policy-protect-unread" type="checkbox" checked />保留未读邮件</label><label class="checkbox-label"><input id="policy-protect-flagged" type="checkbox" checked />保留星标邮件</label><label class="checkbox-label"><input id="policy-body" type="checkbox" />允许必要时读取正文片段</label><label class="checkbox-label"><input id="policy-history" type="checkbox" />包括历史邮件</label></div>
     <div class="rules-grid"><label>保护联系人（每行一个邮箱地址）<textarea id="policy-protected-senders" rows="3" placeholder="person@example.com"></textarea></label><label>历史起始日（留空表示全部历史）<input id="policy-since" type="date" disabled /><small>未勾选历史时，从首次启用范围时开始处理新邮件。</small></label></div>
@@ -424,7 +425,7 @@
               <h2>从可靠的读取开始。</h2>
               <p>
                 Mail Auto
-                <strong>0.4.15</strong>
+                <strong>0.4.16</strong>
                 是计划书的初始工程版本。支持管理员安全初始化、多邮箱连接、自动同步与本地搜索。
               </p>
               <dl>

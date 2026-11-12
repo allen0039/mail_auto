@@ -132,7 +132,7 @@ func (s *Service) SaveAutomationPolicy(a Access, p AutomationPolicy) (Automation
 		return p, e
 	}
 	for _, f := range p.SourceFolders {
-		if f == settings.Archive || f == settings.Trash || slices.Contains(p.Destinations, f) {
+		if f == settings.Archive || f == settings.Trash {
 			return p, ErrInput
 		}
 	}
