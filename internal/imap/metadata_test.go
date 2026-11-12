@@ -84,3 +84,32 @@ func TestNormalizeListID(t *testing.T) {
 		}
 	}
 }
+
+func TestExtendedMetadataRequiresCompleteEvidence(t *testing.T) {
+	section := &protocol.BodySectionName{BodyPartName: protocol.BodyPartName{Specifier: protocol.HeaderSpecifier, Fields: []string{"REFERENCES", "LIST-ID"}}}
+	for _, tc := range []struct {
+		name      string
+		body      *protocol.BodyStructure
+		header    string
+		hasHeader bool
+		complete  bool
+	}{
+		{"complete", &protocol.BodyStructure{}, "\r\n", true, true},
+		{"missing structure", nil, "\r\n", true, false},
+		{"missing header", &protocol.BodyStructure{}, "", false, false},
+		{"oversized header", &protocol.BodyStructure{}, "List-Id: " + strings.Repeat("a", maxHeaderBytes) + "\r\n", true, false},
+		{"malformed header", &protocol.BodyStructure{}, "invalid header\r\n", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := &protocol.Message{Envelope: &protocol.Envelope{}, BodyStructure: tc.body}
+			if tc.hasHeader {
+				message.Body = map[*protocol.BodySectionName]protocol.Literal{section: strings.NewReader(tc.header)}
+			}
+			out := mail.Message{MetadataVersion: 1}
+			applyExtendedMetadata(&out, message)
+			if (out.MetadataVersion == mail.CurrentMetadataVersion) != tc.complete {
+				t.Fatalf("metadata version = %d", out.MetadataVersion)
+			}
+		})
+	}
+}

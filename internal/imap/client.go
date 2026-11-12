@@ -333,7 +333,7 @@ func fetchMetadata(conn *connection, accountID, folder string, validity uint32, 
 			received = m.InternalDate.Unix()
 		}
 		_, flagsKnown := m.Items[protocol.FetchFlags]
-		out := mail.Message{ReceivedAt: received, Flagged: hasFlag(m.Flags, protocol.FlaggedFlag), FlagsKnown: flagsKnown, MetadataVersion: mail.CurrentMetadataVersion, AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size}
+		out := mail.Message{ReceivedAt: received, Flagged: hasFlag(m.Flags, protocol.FlaggedFlag), FlagsKnown: flagsKnown, MetadataVersion: 1, AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size}
 		applyExtendedMetadata(&out, m)
 		batch.Messages = append(batch.Messages, out)
 	}

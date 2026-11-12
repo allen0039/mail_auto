@@ -73,12 +73,12 @@ func headerFields(m *protocol.Message) textproto.MIMEHeader {
 		if section == nil || literal == nil || section.Specifier != protocol.HeaderSpecifier || len(section.Fields) == 0 {
 			continue
 		}
-		raw, err := io.ReadAll(io.LimitReader(literal, maxHeaderBytes))
-		if err != nil {
+		raw, err := io.ReadAll(io.LimitReader(literal, maxHeaderBytes+1))
+		if err != nil || len(raw) > maxHeaderBytes {
 			return nil
 		}
 		h, err := textproto.NewReader(bufio.NewReader(strings.NewReader(string(raw) + "\r\n"))).ReadMIMEHeader()
-		if err != nil && len(h) == 0 {
+		if err != nil {
 			return nil
 		}
 		return h
@@ -94,10 +94,32 @@ func applyExtendedMetadata(out *mailbox.Message, m *protocol.Message) {
 		out.InReplyTo = cleanField(m.Envelope.InReplyTo, 512)
 	}
 	out.HasAttachment = hasAttachment(m.BodyStructure)
-	if h := headerFields(m); h != nil {
+	if h := headerFields(m); h != nil && completeBodyStructure(m.BodyStructure) {
 		out.References = cleanField(strings.Join(strings.Fields(h.Get("References")), " "), 2048)
 		out.ListID = cleanField(normalizeListID(h.Get("List-Id")), 512)
+		out.MetadataVersion = mailbox.CurrentMetadataVersion
 	}
+}
+
+func completeBodyStructure(root *protocol.BodyStructure) bool {
+	parts := 0
+	var valid func(*protocol.BodyStructure, int) bool
+	valid = func(part *protocol.BodyStructure, depth int) bool {
+		if part == nil || depth > 12 {
+			return false
+		}
+		parts++
+		if parts > 128 {
+			return false
+		}
+		for _, child := range part.Parts {
+			if !valid(child, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	return valid(root, 0)
 }
 
 // normalizeListID keeps the machine identifier from "Name <id.example.com>".
