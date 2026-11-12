@@ -337,13 +337,8 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 		if _, e = tx.Exec("INSERT OR IGNORE INTO automation_daily(account_id,day,count,claimed) VALUES(?,?,0,0)", b.AccountID, day); e != nil {
 			return b, e
 		}
-		result, e := tx.Exec("UPDATE automation_daily SET claimed=claimed+? WHERE account_id=? AND day=? AND claimed+?<=?", len(b.Items), b.AccountID, day, len(b.Items), p.DailyLimit)
-		if e != nil {
+		if _, e = tx.Exec("UPDATE automation_daily SET claimed=claimed+? WHERE account_id=? AND day=?", len(b.Items), b.AccountID, day); e != nil {
 			return b, e
-		}
-		n, _ := result.RowsAffected()
-		if n != 1 {
-			return b, ErrDailyLimit
 		}
 	}
 	if _, e = tx.Exec("INSERT INTO automation_batches VALUES(?,?,?,?,?,?,?,?)", b.ID, b.AccountID, b.Owner, b.RunKey, string(raw), b.State, b.CreatedAt, b.Expires); e != nil {

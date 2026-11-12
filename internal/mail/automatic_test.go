@@ -284,12 +284,26 @@ func TestAutomaticSyncWaitsForWholeTaskBatch(t *testing.T) {
 		status := s.AutomaticStatus()
 		return len(status.Accounts) == 1 && status.Accounts[0].State == "watching"
 	})
+	r.lock.Lock()
+	opensBeforeHold := r.opens
+	r.lock.Unlock()
 	release := s.holdAutomatic(a.ID)
+	awaitAutomatic(t, func() bool {
+		r.lock.Lock()
+		defer r.lock.Unlock()
+		return r.closed >= 1
+	})
 	r.lock.Lock()
 	r.boxes["INBOX"] = Snapshot{UIDValidity: 7, Messages: []Message{{UID: 3}}}
 	r.lock.Unlock()
 	r.changed <- struct{}{}
 	awaitAutomatic(t, func() bool { return s.AutomaticStatus().Accounts[0].State == "waiting" })
+	r.lock.Lock()
+	if r.opens != opensBeforeHold {
+		r.lock.Unlock()
+		t.Fatal("automatic sync reconnected during a task batch hold")
+	}
+	r.lock.Unlock()
 	_, n, _ := s.Search(Search{})
 	if n != 2 {
 		t.Fatal("automatic sync changed the index while a task batch held the account")

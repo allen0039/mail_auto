@@ -31,6 +31,17 @@ var ErrStale = errors.New("邮件引用已失效，请重新同步后查询")
 
 type Adapter struct {
 	connect func(context.Context, mail.Account, string) (*connection, error)
+	pool    *writePool
+}
+
+type writePool struct {
+	mu     sync.Mutex
+	active map[string]int
+	conns  map[string]*connection
+}
+
+func NewAdapter() *Adapter {
+	return &Adapter{pool: &writePool{active: map[string]int{}, conns: map[string]*connection{}}}
 }
 
 func init() { protocol.CharsetReader = charset.Reader }

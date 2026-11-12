@@ -122,7 +122,17 @@ func (s *Service) holdAutomatic(id string) func() {
 	}
 	s.automaticHolds[id]++
 	s.epoch[id]++
+	var active *automaticSessionHandle
+	if s.automatic != nil {
+		if worker := s.automatic.workers[id]; worker != nil {
+			active = worker.activeSession
+			worker.activeSession = nil
+		}
+	}
 	s.mu.Unlock()
+	if active != nil {
+		active.Close()
+	}
 	return func() {
 		s.mu.Lock()
 		if s.automaticHolds[id] <= 1 {

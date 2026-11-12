@@ -106,7 +106,7 @@ func run(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	service := &mail.Service{Store: st, Vault: vault, Remote: remote.Adapter{}, SecretDir: c.SecretDir, Context: ctx, NotificationPublicURL: c.PublicURL}
+	service := &mail.Service{Store: st, Vault: vault, Remote: remote.NewAdapter(), SecretDir: c.SecretDir, Context: ctx, NotificationPublicURL: c.PublicURL}
 	if e = service.RecoverSync(ctx); e != nil {
 		return e
 	}

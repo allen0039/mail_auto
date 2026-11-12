@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/store"
@@ -181,6 +182,28 @@ func TestOrganizerUncertainReconcileNeverRetriesMove(t *testing.T) {
 	}
 	if _, e = s.Reconcile(context.Background(), a, o.ID); e != nil || r.moves != 1 {
 		t.Fatal("reissued MOVE", e, r.moves)
+	}
+}
+
+func TestOrganizerWorkerReconcilesUncertainOperation(t *testing.T) {
+	s, r, a, m := organizerFixture(t)
+	r.uncertain = true
+	o := executeFixture(t, s, a, PlanInput{Refs: []string{m.Ref}, Action: "archive"})
+	if o.State != "needs_verification" {
+		t.Fatal(o)
+	}
+	if !s.reconcileNextOperation(context.Background(), time.Now().Add(time.Second), time.Hour) {
+		t.Fatal("uncertain operation was not selected for recovery")
+	}
+	o, e := s.Operation(a, o.ID)
+	if e != nil || o.State != "completed" {
+		t.Fatal(o, e)
+	}
+	if r.moves != 1 {
+		t.Fatal("worker replayed MOVE", r.moves)
+	}
+	if s.reconcileNextOperation(context.Background(), time.Now().Add(2*time.Second), time.Hour) {
+		t.Fatal("completed operation was selected again")
 	}
 }
 func TestOrganizerMissingMappingReconcileUsesLiveEvidence(t *testing.T) {

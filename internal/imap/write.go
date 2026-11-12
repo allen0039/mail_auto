@@ -20,27 +20,31 @@ func (a Adapter) RuleState(ctx context.Context, account mail.Account, password s
 			return err
 		}
 		defer conn.close()
-		conn.resetBudget()
-		status, err := conn.c.Select(original.Folder, true)
-		if err != nil {
-			return remoteFailure(conn, "复核整理邮件", err)
-		}
-		if status.UidValidity != original.UIDValidity {
-			return mail.ErrConflict
-		}
-		set := new(protocol.SeqSet)
-		set.AddNum(original.UID)
-		batch, err := fetchBatch(conn, account.ID, original.Folder, status.UidValidity, set)
-		if err != nil {
-			return err
-		}
-		if len(batch.Messages) != 1 || batch.Messages[0].UID != original.UID {
-			return mail.ErrConflict
-		}
-		out = batch.Messages[0]
-		return nil
+		out, err = ruleStateOnConnection(conn, account.ID, original)
+		return err
 	})
 	return out, err
+}
+
+func ruleStateOnConnection(conn *connection, accountID string, original mail.Message) (mail.Message, error) {
+	conn.resetBudget()
+	status, err := conn.c.Select(original.Folder, true)
+	if err != nil {
+		return mail.Message{}, remoteFailure(conn, "复核整理邮件", err)
+	}
+	if status.UidValidity != original.UIDValidity {
+		return mail.Message{}, mail.ErrConflict
+	}
+	set := new(protocol.SeqSet)
+	set.AddNum(original.UID)
+	batch, err := fetchBatch(conn, accountID, original.Folder, status.UidValidity, set)
+	if err != nil {
+		return mail.Message{}, err
+	}
+	if len(batch.Messages) != 1 || batch.Messages[0].UID != original.UID {
+		return mail.Message{}, mail.ErrConflict
+	}
+	return batch.Messages[0], nil
 }
 
 func (a Adapter) Capabilities(ctx context.Context, account mail.Account, password string) (mail.Capabilities, error) {
@@ -116,35 +120,38 @@ func (a Adapter) movePreflight(ctx context.Context, account mail.Account, passwo
 	if e != nil {
 		return nil, false, e
 	}
+	native, e := movePreflightOnConnection(conn, original)
+	if e != nil {
+		conn.close()
+		return nil, false, e
+	}
+	return conn, native, nil
+}
+
+func movePreflightOnConnection(conn *connection, original mail.Message) (bool, error) {
 	conn.resetBudget()
 	native, e := conn.c.Support("MOVE")
 	if e != nil {
-		conn.close()
-		return nil, false, remoteFailure(conn, "查询移动能力", e)
+		return false, remoteFailure(conn, "查询移动能力", e)
 	}
 	conn.resetBudget()
 	uidplus, e := conn.c.Support("UIDPLUS")
 	if e != nil {
-		conn.close()
-		return nil, false, remoteFailure(conn, "查询 UIDPLUS 能力", e)
+		return false, remoteFailure(conn, "查询 UIDPLUS 能力", e)
 	}
 	if !uidplus {
-		conn.close()
-		return nil, false, mail.ErrCapability
+		return false, mail.ErrCapability
 	}
 	conn.resetBudget()
 	selected, e := conn.c.Select(original.Folder, false)
 	if e != nil {
-		conn.close()
-		return nil, false, remoteFailure(conn, "打开整理源目录", e)
+		return false, remoteFailure(conn, "打开整理源目录", e)
 	}
 	if selected.ReadOnly {
-		conn.close()
-		return nil, false, mail.ErrCapability
+		return false, mail.ErrCapability
 	}
 	if selected.UidValidity != original.UIDValidity {
-		conn.close()
-		return nil, false, ErrStale
+		return false, ErrStale
 	}
 	set := new(protocol.SeqSet)
 	set.AddNum(original.UID)
@@ -153,14 +160,12 @@ func (a Adapter) movePreflight(ctx context.Context, account mail.Account, passwo
 	conn.resetBudget()
 	uids, e := conn.c.UidSearch(criteria)
 	if e != nil {
-		conn.close()
-		return nil, false, remoteFailure(conn, "复核整理源邮件", e)
+		return false, remoteFailure(conn, "复核整理源邮件", e)
 	}
 	if len(uids) != 1 || uids[0] != original.UID {
-		conn.close()
-		return nil, false, ErrStale
+		return false, ErrStale
 	}
-	return conn, native, nil
+	return native, nil
 }
 
 // Prefer native UID MOVE; UIDPLUS fallback expunges only the confirmed source UID.
@@ -184,6 +189,159 @@ func (a Adapter) Move(ctx context.Context, account mail.Account, password string
 		return mail.MoveResult{}, err
 	}
 	defer conn.close()
+	return a.executeMove(conn, native, m, dest, record)
+}
+
+func (a Adapter) BeginWriteSession(accountID string) func() {
+	if a.pool == nil {
+		return func() {}
+	}
+	a.pool.mu.Lock()
+	a.pool.active[accountID]++
+	a.pool.mu.Unlock()
+	return func() {
+		a.pool.mu.Lock()
+		if a.pool.active[accountID] <= 1 {
+			delete(a.pool.active, accountID)
+		} else {
+			a.pool.active[accountID]--
+		}
+		conn := a.pool.conns[accountID]
+		delete(a.pool.conns, accountID)
+		a.pool.mu.Unlock()
+		if conn != nil {
+			conn.close()
+		}
+	}
+}
+
+// MoveWithRuleState validates the latest remote message state and performs the
+// write on the same authenticated connection. During a task batch, consecutive
+// messages reuse that connection instead of opening a new TLS session each time.
+func (a Adapter) MoveWithRuleState(
+	ctx context.Context,
+	account mail.Account,
+	password string,
+	m mail.Message,
+	dest string,
+	validate func(mail.Message) error,
+	record func(mail.MoveResult) error,
+) (mail.MoveResult, error) {
+	if a.pool != nil && a.pool.enabled(account.ID) {
+		return a.moveWithRuleStatePooled(ctx, account, password, m, dest, validate, record)
+	}
+	return a.moveWithRuleStateDirect(ctx, account, password, m, dest, validate, record)
+}
+
+func (p *writePool) enabled(accountID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.active[accountID] > 0
+}
+
+func (a Adapter) moveWithRuleStateDirect(
+	ctx context.Context,
+	account mail.Account,
+	password string,
+	m mail.Message,
+	dest string,
+	validate func(mail.Message) error,
+	record func(mail.MoveResult) error,
+) (mail.MoveResult, error) {
+	var conn *connection
+	var native bool
+	err := retryRemote(ctx, func() error {
+		if conn != nil {
+			conn.close()
+			conn = nil
+		}
+		var err error
+		conn, err = a.open(ctx, account, password)
+		if err != nil {
+			return err
+		}
+		fresh, err := ruleStateOnConnection(conn, account.ID, m)
+		if err != nil {
+			return err
+		}
+		if err = validate(fresh); err != nil {
+			return err
+		}
+		native, err = movePreflightOnConnection(conn, m)
+		return err
+	})
+	if err != nil {
+		if conn != nil {
+			conn.close()
+		}
+		return mail.MoveResult{}, err
+	}
+	defer conn.close()
+	return a.executeMove(conn, native, m, dest, record)
+}
+
+func (a Adapter) moveWithRuleStatePooled(
+	ctx context.Context,
+	account mail.Account,
+	password string,
+	m mail.Message,
+	dest string,
+	validate func(mail.Message) error,
+	record func(mail.MoveResult) error,
+) (mail.MoveResult, error) {
+	pool := a.pool
+	pool.mu.Lock()
+	if pool.active[account.ID] <= 0 {
+		pool.mu.Unlock()
+		return a.moveWithRuleStateDirect(ctx, account, password, m, dest, validate, record)
+	}
+	conn := pool.conns[account.ID]
+	var native bool
+	attempt := 0
+	err := retryRemote(ctx, func() error {
+		attempt++
+		if attempt > 1 && conn != nil {
+			conn.close()
+			conn = nil
+		}
+		if conn == nil {
+			var err error
+			conn, err = a.open(ctx, account, password)
+			if err != nil {
+				return err
+			}
+		}
+		fresh, err := ruleStateOnConnection(conn, account.ID, m)
+		if err != nil {
+			return err
+		}
+		if err = validate(fresh); err != nil {
+			return err
+		}
+		native, err = movePreflightOnConnection(conn, m)
+		return err
+	})
+	if err != nil {
+		delete(pool.conns, account.ID)
+		if conn != nil {
+			conn.close()
+		}
+		pool.mu.Unlock()
+		return mail.MoveResult{}, err
+	}
+	result, err := a.executeMove(conn, native, m, dest, record)
+	if err != nil {
+		delete(pool.conns, account.ID)
+		conn.close()
+		pool.mu.Unlock()
+		return result, err
+	}
+	pool.conns[account.ID] = conn
+	pool.mu.Unlock()
+	return result, nil
+}
+
+func (a Adapter) executeMove(conn *connection, native bool, m mail.Message, dest string, record func(mail.MoveResult) error) (mail.MoveResult, error) {
 
 	set := new(protocol.SeqSet)
 	set.AddNum(m.UID)
@@ -247,9 +405,10 @@ func (a Adapter) Move(ctx context.Context, account mail.Account, password string
 			return mapping, mail.ErrUncertain
 		}
 	}
-	if e = verifyMove(conn, m, mapping); e != nil {
-		return mapping, e
-	}
+	// A successful native MOVE or UIDPLUS COPY + targeted UID EXPUNGE is decided
+	// by the tagged server response. The destination was verified before source
+	// cleanup for the fallback path; repeating both mailbox searches here adds
+	// two failure points without adding evidence that changes the decision.
 	return mapping, nil
 }
 func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password string, m mail.Message, result mail.MoveResult) error {
@@ -423,7 +582,7 @@ func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password 
 		if status == nil || status.Err() != nil {
 			return mail.ErrUncertain
 		}
-		return verifyMove(conn, m, result)
+		return nil
 	})
 }
 

@@ -151,7 +151,7 @@ func TestNativeMoveProtocolAndUncertainMapping(t *testing.T) {
 }
 
 func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
-	for _, mode := range []string{"success", "copy_disconnect", "no_mapping", "record_failure", "target_missing", "store_disconnect", "expunge_disconnect", "expunge_noop"} {
+	for _, mode := range []string{"success", "copy_disconnect", "no_mapping", "record_failure", "target_missing", "store_disconnect", "expunge_disconnect"} {
 		t.Run(mode, func(t *testing.T) {
 			trace := &trafficLog{}
 			var copied, deleted, expunged, verified, saved atomic.Bool
@@ -222,9 +222,7 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 								if folder != "INBOX" || !deleted.Load() || !verified.Load() || !saved.Load() {
 									unsafe.Store(true)
 								}
-								if mode != "expunge_noop" {
-									expunged.Store(true)
-								}
+								expunged.Store(true)
 								if mode == "expunge_disconnect" {
 									return
 								}
@@ -287,10 +285,133 @@ func TestUIDPlusOnlyMoveSafetyAndInterruptions(t *testing.T) {
 			if early && (deleted.Load() || strings.Contains(traffic, "UID EXPUNGE")) {
 				t.Fatal("source removed before copy confirmation", traffic)
 			}
-			if mode == "expunge_noop" && !strings.Contains(traffic, "UID 42\n") {
-				t.Fatal("deleted source not verified", traffic)
-			}
 		})
+	}
+}
+
+func TestMoveWithRuleStateUsesOneValidatedConnection(t *testing.T) {
+	trace := &trafficLog{}
+	var copied, deleted, expunged, validated, saved atomic.Bool
+	var opens atomic.Int32
+	adapter := NewAdapter()
+	releaseSession := adapter.BeginWriteSession("fixture")
+	defer releaseSession()
+	adapter.connect = func(ctx context.Context, a mail.Account, pw string) (*connection, error) {
+		opens.Add(1)
+		left, right := net.Pipe()
+		left.SetDeadline(time.Now().Add(5 * time.Second))
+		go func() {
+			defer right.Close()
+			fmt.Fprint(right, "* OK [CAPABILITY IMAP4rev1 UIDPLUS] fixture\r\n")
+			scan := bufio.NewScanner(right)
+			folder := ""
+			for scan.Scan() {
+				line := scan.Text()
+				trace.Write([]byte(line + "\n"))
+				parts := strings.SplitN(line, " ", 3)
+				if len(parts) < 2 {
+					return
+				}
+				tag, cmd := parts[0], strings.ToUpper(parts[1])
+				arg := ""
+				if len(parts) > 2 {
+					arg = parts[2]
+				}
+				upper := strings.ToUpper(arg)
+				switch cmd {
+				case "CAPABILITY":
+					fmt.Fprintf(right, "* CAPABILITY IMAP4rev1 UIDPLUS\r\n%s OK cap\r\n", tag)
+				case "LOGIN":
+					fmt.Fprintf(right, "%s OK login\r\n", tag)
+				case "SELECT", "EXAMINE":
+					folder = strings.Trim(arg, "\"")
+					fmt.Fprintf(right, "* FLAGS (\\Seen)\r\n* 1 EXISTS\r\n* OK [UIDVALIDITY 7] validity\r\n%s OK [READ-WRITE] select\r\n", tag)
+				case "UID":
+					switch {
+					case strings.HasPrefix(upper, "SEARCH "):
+						uid := ""
+						if folder == "INBOX" && !expunged.Load() {
+							uid = " 42"
+						}
+						if folder == "Trash" && copied.Load() {
+							uid = " 99"
+						}
+						fmt.Fprintf(right, "* SEARCH%s\r\n%s OK search\r\n", uid, tag)
+					case strings.HasPrefix(upper, "FETCH "):
+						writeFixtureEnvelope(right, 42, "source", "12-Nov-2026 00:00:00 +0000")
+						fmt.Fprintf(right, "%s OK fetch\r\n", tag)
+					case upper == "COPY 42 TRASH" || upper == `COPY 42 "TRASH"`:
+						copied.Store(true)
+						fmt.Fprintf(right, "%s OK [COPYUID 7 42 99] copied\r\n", tag)
+					case strings.HasPrefix(upper, "STORE 42 +FLAGS.SILENT "):
+						deleted.Store(true)
+						fmt.Fprintf(right, "%s OK flags\r\n", tag)
+					case upper == "EXPUNGE 42":
+						if !deleted.Load() || !copied.Load() || !validated.Load() {
+							fmt.Fprintf(right, "%s BAD unsafe cleanup\r\n", tag)
+						} else {
+							expunged.Store(true)
+							fmt.Fprintf(right, "%s OK expunged\r\n", tag)
+						}
+					default:
+						t.Errorf("unexpected UID command: %s", arg)
+						return
+					}
+				default:
+					t.Errorf("unexpected command: %s", cmd)
+					return
+				}
+			}
+		}()
+		c, err := client.New(left)
+		if err != nil {
+			return nil, err
+		}
+		c.ErrorLog = log.New(io.Discard, "", 0)
+		c.Timeout = 3 * time.Second
+		if err = c.Login("fixture", "password"); err != nil {
+			left.Close()
+			return nil, err
+		}
+		return &connection{c: c, raw: left, stop: func() bool { return true }}, nil
+	}
+
+	message := mail.Message{Folder: "INBOX", UID: 42, UIDValidity: 7, Subject: "source", Sender: "sender@example.com", SentAt: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC).Unix(), Size: 100, Unread: true}
+	result, err := adapter.MoveWithRuleState(
+		context.Background(),
+		mail.Account{ID: "fixture"},
+		"password",
+		message,
+		"Trash",
+		func(fresh mail.Message) error {
+			if fresh.Subject != message.Subject || fresh.Sender != message.Sender || fresh.SentAt != message.SentAt || fresh.Size != message.Size {
+				return fmt.Errorf("unexpected fresh state: %+v", fresh)
+			}
+			validated.Store(true)
+			return nil
+		},
+		func(mapping mail.MoveResult) error {
+			if mapping.Folder != "Trash" || mapping.UIDValidity != 7 || mapping.UID != 99 {
+				return fmt.Errorf("unexpected mapping: %+v", mapping)
+			}
+			saved.Store(true)
+			return nil
+		},
+	)
+	if err != nil || !validated.Load() || !copied.Load() || !deleted.Load() || !expunged.Load() || !saved.Load() {
+		t.Fatal(result, err, trace.String())
+	}
+	if opens.Load() != 1 {
+		t.Fatalf("rule validation and move should share one connection, got %d", opens.Load())
+	}
+	adapter.pool.mu.Lock()
+	retained := adapter.pool.conns["fixture"] != nil
+	adapter.pool.mu.Unlock()
+	if !retained {
+		t.Fatal("write session did not retain its authenticated connection")
+	}
+	if strings.Count(strings.ToUpper(trace.String()), "UID SEARCH") != 2 {
+		t.Fatalf("move performed redundant post-cleanup searches: %s", trace.String())
 	}
 }
 

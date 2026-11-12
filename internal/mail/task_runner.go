@@ -295,6 +295,10 @@ func (s *Service) executeFixedTask(ctx context.Context, r TaskRun) error {
 	}
 	releaseAutomatic := s.holdAutomatic(p.AccountID)
 	defer releaseAutomatic()
+	if writableSessions, ok := s.Remote.(WriteSessionRemote); ok {
+		releaseWriteSession := writableSessions.BeginWriteSession(p.AccountID)
+		defer releaseWriteSession()
+	}
 	if e = s.ensureTaskIndex(ctx, p); e != nil {
 		return e
 	}

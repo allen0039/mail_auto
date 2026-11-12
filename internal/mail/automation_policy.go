@@ -26,7 +26,7 @@ type AutomationPolicy struct {
 	ProtectFlagged   bool     `json:"protect_flagged"`
 	ProtectedSenders []string `json:"protected_senders"`
 	MaxBatch         int      `json:"max_batch"`
-	DailyLimit       int      `json:"daily_limit"`
+	DailyLimit       int      `json:"daily_limit,omitempty"`
 	StableSeconds    int      `json:"stable_seconds"`
 	IncludeHistory   bool     `json:"include_history"`
 	Since            int64    `json:"since"`
@@ -42,7 +42,7 @@ type policyRecord struct {
 
 func defaultPolicy(id string) AutomationPolicy {
 	now := time.Now().Unix()
-	return AutomationPolicy{AccountID: id, Mode: "observe", SourceFolders: []string{}, Destinations: []string{}, Actions: []string{}, ProtectedSenders: []string{}, ProtectUnread: true, ProtectFlagged: true, MaxBatch: 20, DailyLimit: 100, StableSeconds: 180, Since: now, Expires: now + 30*86400}
+	return AutomationPolicy{AccountID: id, Mode: "observe", SourceFolders: []string{}, Destinations: []string{}, Actions: []string{}, ProtectedSenders: []string{}, ProtectUnread: true, ProtectFlagged: true, MaxBatch: 20, StableSeconds: 180, Since: now, Expires: now + 30*86400}
 }
 func (s *Service) loadAutomationPolicy(id string) (AutomationPolicy, error) {
 	var raw string
@@ -57,6 +57,7 @@ func (s *Service) loadAutomationPolicy(id string) (AutomationPolicy, error) {
 	if json.Unmarshal([]byte(raw), &record) != nil {
 		return AutomationPolicy{}, ErrConflict
 	}
+	record.Policy.DailyLimit = 0
 	record.Policy.AdminVersion = record.AdminVersion
 	return record.Policy, nil
 }
@@ -113,8 +114,9 @@ func (s *Service) SaveAutomationPolicy(a Access, p AutomationPolicy) (Automation
 	if old.Version != p.Version {
 		return p, ErrConflict
 	}
+	p.DailyLimit = 0
 	now := time.Now().Unix()
-	if !slices.Contains([]string{"observe", "execute"}, p.Mode) || len(p.SourceFolders) > 20 || len(p.Destinations) > 50 || len(p.Actions) > 3 || p.MaxBatch < 1 || p.MaxBatch > 50 || p.DailyLimit < 1 || p.DailyLimit > 500 || p.StableSeconds < 0 || p.StableSeconds > 3600 || len(p.ProtectedSenders) > 100 || p.Since < 0 || p.Since > now {
+	if !slices.Contains([]string{"observe", "execute"}, p.Mode) || len(p.SourceFolders) > 20 || len(p.Destinations) > 50 || len(p.Actions) > 3 || p.MaxBatch < 1 || p.MaxBatch > 50 || p.StableSeconds < 0 || p.StableSeconds > 3600 || len(p.ProtectedSenders) > 100 || p.Since < 0 || p.Since > now {
 		return p, ErrInput
 	}
 	if p.Enabled && (len(p.SourceFolders) == 0 || p.Expires <= now || p.Expires > now+90*86400) {

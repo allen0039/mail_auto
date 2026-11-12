@@ -23,6 +23,12 @@ type PlanInput struct {
 	Labels      []string     `json:"labels,omitempty"`
 	Destination string       `json:"destination,omitempty"`
 }
+
+const (
+	operationReconcileDelay  = 30 * time.Second
+	operationReconcileWindow = 24 * time.Hour
+)
+
 type PlanItem struct {
 	Message         Message `json:"message"`
 	Destination     string  `json:"destination,omitempty"`
@@ -304,13 +310,8 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 		if _, e = tx.Exec("INSERT OR IGNORE INTO automation_daily(account_id,day,count,claimed) VALUES(?,?,0,0)", automationPolicy.AccountID, day); e != nil {
 			return Operation{}, e
 		}
-		result, err := tx.Exec("UPDATE automation_daily SET count=count+? WHERE account_id=? AND day=? AND count+?<=?", len(p.Items), automationPolicy.AccountID, day, len(p.Items), automationPolicy.DailyLimit)
-		if err != nil {
-			return Operation{}, err
-		}
-		n, _ := result.RowsAffected()
-		if n != 1 {
-			return Operation{}, ErrDailyLimit
+		if _, e = tx.Exec("UPDATE automation_daily SET count=count+? WHERE account_id=? AND day=?", len(p.Items), automationPolicy.AccountID, day); e != nil {
+			return Operation{}, e
 		}
 	}
 	for _, item := range p.Items {
@@ -496,12 +497,54 @@ func (s *Service) StartOperations() error {
 				var id string
 				if s.Store.DB.QueryRow("SELECT id FROM operations WHERE state='queued' ORDER BY created_at,id LIMIT 1").Scan(&id) == nil {
 					s.runOperation(ctx, id)
+					continue
 				}
+				s.reconcileNextOperation(ctx, time.Now().Add(-operationReconcileDelay), operationReconcileWindow)
 			}
 		}
 	}()
 	return nil
 }
+
+// Reconcile at most one interrupted write after a short quiet period. The
+// recovery path verifies both remote copies before cleaning the source and is
+// idempotent, so an ambiguous provider response can settle without replaying
+// MOVE. Age-bounding avoids probing abandoned operations forever.
+func (s *Service) reconcileNextOperation(ctx context.Context, staleBefore time.Time, maxAge time.Duration) bool {
+	var id, owner, raw string
+	err := s.Store.DB.QueryRow(`
+		SELECT o.id,o.owner,p.payload
+		FROM operations o
+		JOIN operation_plans p ON p.id=o.plan_id
+		WHERE o.state='needs_verification'
+		  AND o.updated_at<=?
+		  AND o.created_at>=?
+		ORDER BY o.updated_at,o.created_at,o.id
+		LIMIT 1`,
+		staleBefore.Unix(), time.Now().Add(-maxAge).Unix(),
+	).Scan(&id, &owner, &raw)
+	if err != nil {
+		return false
+	}
+	var plan Plan
+	if err = json.Unmarshal([]byte(raw), &plan); err != nil {
+		return false
+	}
+	claimed, err := s.Store.DB.Exec(
+		"UPDATE operations SET updated_at=? WHERE id=? AND state='needs_verification' AND updated_at<=?",
+		time.Now().Unix(), id, staleBefore.Unix(),
+	)
+	if err != nil {
+		return false
+	}
+	if n, err := claimed.RowsAffected(); err != nil || n != 1 {
+		return false
+	}
+	slog.Info("自动核验邮件整理结果", "operation_id", id)
+	_, _ = s.Reconcile(ctx, Access{Owner: owner, Version: plan.Version}, id)
+	return true
+}
+
 func (s *Service) runOperation(ctx context.Context, id string) {
 	var raw string
 	var owner string
@@ -670,6 +713,10 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	if e != nil {
 		return e
 	}
+	record := func(r MoveResult) error {
+		_, e := s.Store.DB.Exec("UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?", r.UIDValidity, r.UID, id, pos)
+		return e
+	}
 	if p.Automation != nil {
 		var queuedAt int64
 		if err := s.Store.DB.QueryRow("SELECT created_at FROM operations WHERE id=?", id).Scan(&queuedAt); err != nil {
@@ -677,6 +724,22 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 		}
 		if time.Unix(queuedAt, 0).In(automationLocation).Format("2006-01-02") != time.Now().In(automationLocation).Format("2006-01-02") {
 			return ErrConflict
+		}
+		validate := func(fresh Message) error {
+			fresh.Ref = m.Ref
+			fresh.ChangedAt = m.ChangedAt
+			if messageSignature(fresh) != p.Automation.Signature {
+				return ErrConflict
+			}
+			_, _, err := s.validateAutomationPlan(access, p, fresh)
+			return err
+		}
+		if prepared, ok := s.Remote.(AutomationMoveRemote); ok {
+			result, err := prepared.MoveWithRuleState(ctx, account, pw, m, item.Destination, validate, record)
+			if err != nil {
+				return err
+			}
+			return s.publishMove(id, pos, m, result)
 		}
 		freshRemote, ok := s.Remote.(RuleStateRemote)
 		if !ok {
@@ -686,19 +749,11 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 		if err != nil {
 			return err
 		}
-		fresh.Ref = m.Ref
-		fresh.ChangedAt = m.ChangedAt
-		if messageSignature(fresh) != p.Automation.Signature {
-			return ErrConflict
-		}
-		if _, _, err = s.validateAutomationPlan(access, p, fresh); err != nil {
+		if err = validate(fresh); err != nil {
 			return err
 		}
 	}
-	result, e := remote.Move(ctx, account, pw, m, item.Destination, func(r MoveResult) error {
-		_, e := s.Store.DB.Exec("UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?", r.UIDValidity, r.UID, id, pos)
-		return e
-	})
+	result, e := remote.Move(ctx, account, pw, m, item.Destination, record)
 	if e != nil {
 		return e
 	}

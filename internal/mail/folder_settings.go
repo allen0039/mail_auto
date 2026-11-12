@@ -34,6 +34,12 @@ type WritableRemote interface {
 	Move(context.Context, Account, string, Message, string, func(MoveResult) error) (MoveResult, error)
 	VerifyMove(context.Context, Account, string, Message, MoveResult) error
 }
+type AutomationMoveRemote interface {
+	MoveWithRuleState(context.Context, Account, string, Message, string, func(Message) error, func(MoveResult) error) (MoveResult, error)
+}
+type WriteSessionRemote interface {
+	BeginWriteSession(string) func()
+}
 type MoveReconciler interface {
 	InspectMove(context.Context, Account, string, Message, string) (MoveEvidence, error)
 }

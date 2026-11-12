@@ -14,9 +14,26 @@ type automationRemote struct {
 	flagged bool
 }
 
+type preparedAutomationRemote struct {
+	*automationRemote
+	preparedMoves int
+}
+
 func (r *automationRemote) RuleState(_ context.Context, _ Account, _ string, m Message) (Message, error) {
 	m.Flagged = r.flagged
 	return m, nil
+}
+func (r *preparedAutomationRemote) MoveWithRuleState(_ context.Context, _ Account, _ string, m Message, destination string, validate func(Message) error, record func(MoveResult) error) (MoveResult, error) {
+	r.preparedMoves++
+	m.Flagged = r.flagged
+	if err := validate(m); err != nil {
+		return MoveResult{}, err
+	}
+	result := MoveResult{Folder: destination, UIDValidity: 7, UID: 99}
+	if err := record(result); err != nil {
+		return MoveResult{}, err
+	}
+	return result, nil
 }
 func automationFixture(t *testing.T, mode string) (*Service, *automationRemote, Access, Access, Rule, AutomationPolicy, Message) {
 	t.Helper()
@@ -65,6 +82,32 @@ func decisionFor(b AIBatch) []AIDecision {
 		out = append(out, AIDecision{Ref: item.Message.Ref, Signature: item.Signature, Action: "move", Destination: "Archive", Reason: "满足已配置的保留天数"})
 	}
 	return out
+}
+
+func TestAutomationUsesPreparedMovePath(t *testing.T) {
+	s, remote, _, client, _, _, message := automationFixture(t, "execute")
+	prepared := &preparedAutomationRemote{automationRemote: remote}
+	s.Remote = prepared
+	batch, err := s.ClaimAI(client, AIClaimInput{AccountID: message.AccountID, RunKey: "prepared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err = s.SubmitAI(context.Background(), client, AISubmitInput{BatchID: batch.ID, IdempotencyKey: "prepared", Decisions: decisionFor(batch)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, err := s.ExecuteAI(client, batch.ID, batch.PlanIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.runOperation(context.Background(), operation.ID)
+	operation, err = s.Operation(client, operation.ID)
+	if err != nil || operation.State != "completed" {
+		t.Fatal(operation, err)
+	}
+	if prepared.preparedMoves != 1 || remote.moves != 0 {
+		t.Fatal("automatic move did not use the prepared path", prepared.preparedMoves, remote.moves)
+	}
 }
 
 func TestAutomationRecoveryRechecksPolicyAndProtectedFlags(t *testing.T) {
@@ -258,7 +301,7 @@ func TestAutomationStaleRulesMessagesAndRemoteFlags(t *testing.T) {
 		})
 	}
 }
-func TestAutomationExpiryConcurrencyAndSharedBudget(t *testing.T) {
+func TestAutomationExpiryConcurrencyAndNoDailyBudget(t *testing.T) {
 	s, _, admin, a, _, p, m := automationFixture(t, "execute")
 	p.DailyLimit = 1
 	p.MaxBatch = 1
@@ -302,8 +345,9 @@ func TestAutomationExpiryConcurrencyAndSharedBudget(t *testing.T) {
 	if _, e = s.Store.DB.Exec("UPDATE automation_claims SET expires=0 WHERE batch_id=?", claimed.ID); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.ClaimAI(a, AIClaimInput{AccountID: m.AccountID, RunKey: "third"}); !errors.Is(e, ErrDailyLimit) {
-		t.Fatal("shared daily budget", e)
+	next, e := s.ClaimAI(a, AIClaimInput{AccountID: m.AccountID, RunKey: "third"})
+	if e != nil || len(next.Items) != 1 {
+		t.Fatal("legacy daily limit blocked another batch", next, e)
 	}
 	expired := claimed
 	expired.Expires = time.Now().Unix() - 1

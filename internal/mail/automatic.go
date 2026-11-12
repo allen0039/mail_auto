@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,11 +25,21 @@ type AutomaticStatus struct {
 	Accounts        []AutomaticAccountStatus `json:"accounts"`
 }
 type automaticWorker struct {
-	account Account
-	cancel  context.CancelFunc
-	done    chan struct{}
-	status  AutomaticAccountStatus
+	account       Account
+	cancel        context.CancelFunc
+	done          chan struct{}
+	status        AutomaticAccountStatus
+	activeSession *automaticSessionHandle
 }
+type automaticSessionHandle struct {
+	session AutomaticSession
+	once    sync.Once
+}
+
+func (h *automaticSessionHandle) Close() {
+	h.once.Do(h.session.Close)
+}
+
 type automaticRunner struct {
 	interval time.Duration
 	wake     chan struct{}
@@ -216,6 +227,7 @@ func (s *Service) runAutomatic(ctx context.Context, r *automaticRunner, remote A
 		s.setAutomaticStatus(w, "connecting", "", "", "", false)
 		pw, e := s.password(w.account)
 		var session AutomaticSession
+		preempted := false
 		if e == nil {
 			e = s.automaticRead(ctx, w, "", "", func(uint64) error {
 				var e error
@@ -226,8 +238,32 @@ func (s *Service) runAutomatic(ctx context.Context, r *automaticRunner, remote A
 			e = syncStep("读取邮箱凭据", e)
 		}
 		if e == nil {
-			e = s.followAutomatic(ctx, r, w, session)
-			session.Close()
+			handle := &automaticSessionHandle{session: session}
+			s.mu.Lock()
+			if s.stopping || s.automaticHolds[w.account.ID] > 0 {
+				preempted = true
+				s.mu.Unlock()
+				handle.Close()
+			} else {
+				w.activeSession = handle
+				s.mu.Unlock()
+				e = s.followAutomatic(ctx, r, w, session)
+				handle.Close()
+				s.mu.Lock()
+				if w.activeSession == handle {
+					w.activeSession = nil
+				}
+				s.mu.Unlock()
+			}
+		}
+		if preempted {
+			continue
+		}
+		s.mu.Lock()
+		held := s.automaticHolds[w.account.ID] > 0
+		s.mu.Unlock()
+		if held {
+			continue
 		}
 		if ctx.Err() != nil || errors.Is(e, errAutomaticConfig) {
 			return
