@@ -31,7 +31,8 @@ func (a Access) Allows(account, folder, action string) bool {
 	if a.Owner == "admin" {
 		return true
 	}
-	allowedAction := slices.Contains(a.Actions, action) || (a.automation && slices.Contains(a.Actions, "automation") && slices.Contains([]string{"move", "archive", "trash"}, action))
+	action = permissionFor(action)
+	allowedAction := slices.Contains(a.Actions, action) || (a.automation && slices.Contains(a.Actions, "automation") && slices.Contains([]string{"move", "archive", "trash", "flag"}, action))
 	if !allowedAction || !slices.Contains(a.Accounts, account) {
 		return false
 	}
@@ -140,7 +141,7 @@ func (s *Service) CreateToken(in TokenInput) (Token, string, error) {
 		in.Folders[id] = fs
 	}
 	for _, action := range in.Actions {
-		if !slices.Contains([]string{"read", "folder_manage", "archive", "move", "trash", "restore", "rule_manage", "task_manage", "automation"}, action) {
+		if !slices.Contains([]string{"read", "folder_manage", "archive", "move", "trash", "restore", "flag", "rule_manage", "task_manage", "automation"}, action) {
 			return Token{}, "", ErrInput
 		}
 	}
@@ -202,7 +203,7 @@ func (s *Service) RevokeToken(id string) error {
 	return tx.Commit()
 }
 func (s *Service) Message(ref string) (Message, error) {
-	m, e := scanMessage(s.Store.DB.QueryRow("SELECT * FROM messages WHERE ref=?", ref))
+	m, e := scanMessage(s.Store.DB.QueryRow("SELECT "+messageColumns+" FROM messages WHERE ref=?", ref))
 	if e != nil {
 		return m, e
 	}

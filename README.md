@@ -1,4 +1,4 @@
-# Mail Auto · 0.4.16
+# Mail Auto
 
 Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用，不接入 AI API。
 
@@ -53,9 +53,9 @@ ssh -L 8080:127.0.0.1:8080 user@server
 | 运维 | `/healthz`/`/readyz` 健康检查、脱敏审计、一致性 SQLite 备份、密钥匹配检查、优雅退出 |
 | 整理 | 在原邮箱创建文件夹及分类移动，冻结预览、异步任务、幂等、逐项结果、停止剩余项、核验未知结果、恢复与补偿撤销 |
 | MCP | 官方 Go SDK、Streamable HTTP、OAuth/PKCE、邮箱/文件夹/动作权限、令牌撤销，可视化连接配置；默认关闭 |
-| 自定义规则 | 嵌套条件、优先级、版本、启停、模板、试运行；直接指向原邮箱文件夹 |
+| 自定义规则 | 主题/发件人/收件人/抄送/List-Id/附件/回复等条件，支持包含、不包含、开头、结尾、正则；嵌套组合、优先级、版本、试运行；动作含移动、归档、回收站、标为已读/未读、加/取消星标，并可在移动后附带标记修改 |
 | 外部 AI 任务 | MCP 批次、租约去重、观察/执行、保护和限额、建议与冻结计划、记录；不内置模型；可选外部触发，使用统一任务记录 |
-| 可选定时 | 每小时/每天/每周及时区、未来 5 次预览、持久化日程、漏跑合并；内置定时只运行固定规则，默认暂停观察 |
+| 可选定时 | 每小时/每天/每周、每隔 N 分钟、Cron 表达式、新邮件到达时触发；时区、未来 5 次预览、持久化日程、漏跑合并；内置定时只运行固定规则，默认暂停观察 |
 | Telegram | 加密 Bot Token、可视化检测/测试、按任务选择通知策略、独立投递队列与重试、相同故障 6 小时冷却 |
 | 待后续实现 | CONDSTORE/QRESYNC、客户端私有规则导入、报告、在线密钥轮换 |
 
@@ -107,7 +107,7 @@ go run ./cmd/mail-auto
 go run ./cmd/mail-auto bootstrap show
 
 make build
-make check
+make check   # race 测试、vet、gofmt、staticcheck
 # 可选漏洞扫描
 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 ```
@@ -127,8 +127,7 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 - [备份、恢复、远程访问与升级](docs/operations.md)
 - [当前版本范围、验证结果与已知限制](docs/acceptance-0.4.16.md)
 - [规则与外部 AI 定时任务使用指南](docs/automation-guide.md)
-- [可选定时任务与 Telegram 通知优化计划（未实施）](docs/optional-scheduling-telegram-plan.md)
-- [0.5.0 后续功能与优化方案](docs/optimization-plan-0.5.0.md)
+- [历史验收记录与计划文档](docs/archive/)
 - [MCP 接入与邮件整理](docs/mcp-setup.md)
 - [架构与后续扩展](docs/architecture.md)
 - [依赖与许可证](docs/dependencies.md)

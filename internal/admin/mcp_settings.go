@@ -180,7 +180,6 @@ type mcpCheck struct {
 
 func (s *Server) checkMCP(w http.ResponseWriter, r *http.Request) {
 	state := s.currentMCP()
-	checks := []mcpCheck{}
 	if !state.Enabled || state.PublicURL == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "checks": []mcpCheck{{Name: "服务开关", Detail: "请先填写 HTTPS 地址并保存启用；未配置时可以保持关闭。"}}})
 		return
@@ -188,7 +187,7 @@ func (s *Server) checkMCP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	checks = mcpChecks(ctx, state, client)
+	checks := mcpChecks(ctx, state, client)
 	ok := true
 	for _, c := range checks {
 		ok = ok && c.OK

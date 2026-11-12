@@ -432,7 +432,7 @@ func (s *Service) SubmitAI(ctx context.Context, a Access, in AISubmitInput) (AIB
 	}
 	decisions := map[string]AIDecision{}
 	for _, d := range in.Decisions {
-		if _, ok := decisions[d.Ref]; ok || len(d.Reason) < 1 || len(d.Reason) > 500 || !slices.Contains([]string{"keep", "move", "archive", "trash"}, d.Action) {
+		if _, ok := decisions[d.Ref]; ok || len(d.Reason) < 1 || len(d.Reason) > 500 || !(slices.Contains([]string{"keep", "move", "archive", "trash"}, d.Action) || isFlagAction(d.Action)) {
 			return b, ErrInput
 		}
 		decisions[d.Ref] = d
@@ -479,6 +479,15 @@ func (s *Service) SubmitAI(ctx context.Context, a Access, in AISubmitInput) (AIB
 		if item.Action != "ai" && (d.Action != item.Action || d.Destination != item.Destination) {
 			return b, ErrDenied
 		}
+		also := []string(nil)
+		if item.Action != "ai" {
+			also = item.Also
+		}
+		for _, extra := range also {
+			if !slices.Contains(p.Actions, extra) {
+				return b, ErrDenied
+			}
+		}
 		if d.Action == "move" {
 			if !slices.Contains(p.Destinations, d.Destination) || !a.Allows(b.AccountID, d.Destination, "read") {
 				return b, ErrDenied
@@ -487,7 +496,7 @@ func (s *Service) SubmitAI(ctx context.Context, a Access, in AISubmitInput) (AIB
 			return b, ErrInput
 		}
 		if p.Mode == "execute" {
-			plan, e := s.NewPlan(ctx, a, PlanInput{Refs: []string{d.Ref}, Action: d.Action, Destination: d.Destination})
+			plan, e := s.NewPlan(ctx, a, PlanInput{Refs: []string{d.Ref}, Action: d.Action, Destination: d.Destination, Also: also})
 			if e != nil {
 				return b, e
 			}
@@ -650,6 +659,11 @@ func (s *Service) validateAutomationPlan(a Access, p Plan, m Message) (Access, A
 	}
 	if p.Action == "move" && !slices.Contains(policy.Destinations, p.Items[0].Destination) {
 		return a, policy, ErrDenied
+	}
+	for _, extra := range p.Also {
+		if !slices.Contains(policy.Actions, extra) {
+			return a, policy, ErrDenied
+		}
 	}
 	return a, policy, nil
 }

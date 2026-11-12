@@ -433,12 +433,6 @@ func (s *Service) Mailboxes(id string) ([]Mailbox, error) {
 	}
 	return out, rows.Err()
 }
-func scanMessage(row interface{ Scan(...any) error }) (Message, error) {
-	var m Message
-	e := row.Scan(&m.Ref, &m.AccountID, &m.Folder, &m.UIDValidity, &m.UID, &m.Subject, &m.Sender, &m.SentAt, &m.Unread, &m.Size, &m.ReceivedAt, &m.Flagged, &m.FlagsKnown, &m.ChangedAt, &m.MetadataVersion)
-	m.FolderLabel = FolderLabel(m.Folder)
-	return m, e
-}
 func (s *Service) Search(q Search) ([]Message, int, error) {
 	where := []string{"1=1"}
 	args := []any{}
@@ -528,7 +522,7 @@ func (s *Service) Search(q Search) ([]Message, int, error) {
 		return nil, 0, e
 	}
 	args = append(args, q.Limit, q.Offset)
-	rows, e := s.Store.DB.Query("SELECT * FROM messages WHERE "+clause+" ORDER BY sent_at DESC,ref LIMIT ? OFFSET ?", args...)
+	rows, e := s.Store.DB.Query("SELECT "+messageColumns+" FROM messages WHERE "+clause+" ORDER BY sent_at DESC,ref LIMIT ? OFFSET ?", args...)
 	if e != nil {
 		return nil, 0, e
 	}
@@ -564,7 +558,7 @@ func (s *Service) Read(ctx context.Context, ref string) (Content, error) {
 	return s.read(ctx, ref, nil)
 }
 func (s *Service) read(ctx context.Context, ref string, guard func(Message) error) (Content, error) {
-	m, e := scanMessage(s.Store.DB.QueryRow("SELECT * FROM messages WHERE ref=?", ref))
+	m, e := scanMessage(s.Store.DB.QueryRow("SELECT "+messageColumns+" FROM messages WHERE ref=?", ref))
 	if e != nil {
 		return Content{}, e
 	}
@@ -574,7 +568,7 @@ func (s *Service) read(ctx context.Context, ref string, guard func(Message) erro
 	}
 	defer release()
 	// The configuration may have changed after the first lookup, before acquire.
-	m, e = scanMessage(s.Store.DB.QueryRow("SELECT * FROM messages WHERE ref=?", ref))
+	m, e = scanMessage(s.Store.DB.QueryRow("SELECT "+messageColumns+" FROM messages WHERE ref=?", ref))
 	if e != nil {
 		return Content{}, e
 	}

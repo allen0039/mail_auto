@@ -299,7 +299,7 @@ func fetchMetadata(conn *connection, accountID, folder string, validity uint32, 
 	ch := make(chan *protocol.Message, 16)
 	done := make(chan error, 1)
 	go func() {
-		done <- conn.c.UidFetch(set, []protocol.FetchItem{protocol.FetchUid, protocol.FetchEnvelope, protocol.FetchFlags, protocol.FetchRFC822Size, protocol.FetchInternalDate}, ch)
+		done <- conn.c.UidFetch(set, []protocol.FetchItem{protocol.FetchUid, protocol.FetchEnvelope, protocol.FetchFlags, protocol.FetchRFC822Size, protocol.FetchInternalDate, protocol.FetchBodyStructure, metadataHeaderSection.FetchItem()}, ch)
 	}()
 	batch := mail.Snapshot{UIDValidity: validity, Messages: []mail.Message{}}
 	var decodeErr error
@@ -333,7 +333,9 @@ func fetchMetadata(conn *connection, accountID, folder string, validity uint32, 
 			received = m.InternalDate.Unix()
 		}
 		_, flagsKnown := m.Items[protocol.FetchFlags]
-		batch.Messages = append(batch.Messages, mail.Message{ReceivedAt: received, Flagged: hasFlag(m.Flags, protocol.FlaggedFlag), FlagsKnown: flagsKnown, MetadataVersion: 1, AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size})
+		out := mail.Message{ReceivedAt: received, Flagged: hasFlag(m.Flags, protocol.FlaggedFlag), FlagsKnown: flagsKnown, MetadataVersion: mail.CurrentMetadataVersion, AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size}
+		applyExtendedMetadata(&out, m)
+		batch.Messages = append(batch.Messages, out)
 	}
 	if e := <-done; e != nil {
 		return mail.Snapshot{}, remoteFailure(conn, "读取邮件元数据", e)

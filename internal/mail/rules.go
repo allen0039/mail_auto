@@ -6,10 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"net/mail"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +35,7 @@ type Rule struct {
 	SourceFolders []string  `json:"source_folders"`
 	Match         RuleGroup `json:"match"`
 	Action        string    `json:"action"`
+	Also          []string  `json:"also,omitempty"`
 	Destination   string    `json:"destination"`
 	Instructions  string    `json:"instructions"`
 	UpdatedAt     int64     `json:"updated_at"`
@@ -47,6 +46,7 @@ type RuleEvaluation struct {
 	RuleID       string   `json:"rule_id"`
 	RuleVersion  int      `json:"rule_version"`
 	Action       string   `json:"action"`
+	Also         []string `json:"also,omitempty"`
 	Destination  string   `json:"destination"`
 	Instructions string   `json:"instructions,omitempty"`
 	Status       string   `json:"status"`
@@ -169,34 +169,6 @@ func (s *Service) RuleHistory(a Access, id string) ([]Rule, error) {
 	}
 	return out, rows.Err()
 }
-func validCondition(c RuleCondition) bool {
-	if len(c.Value) > 256 || strings.ContainsAny(c.Value, "\x00\r\n") {
-		return false
-	}
-	switch c.Field {
-	case "subject":
-		return c.Value != "" && slices.Contains([]string{"equals", "contains"}, c.Operator)
-	case "folder":
-		return c.Value != "" && c.Operator == "equals"
-	case "sender":
-		addr, e := mail.ParseAddress(c.Value)
-		return e == nil && addr.Address == c.Value && c.Operator == "equals"
-	case "domain":
-		return c.Value != "" && !strings.ContainsAny(c.Value, "@, \t") && c.Operator == "equals"
-	case "read_state":
-		return c.Operator == "equals" && slices.Contains([]string{"read", "unread"}, c.Value)
-	case "flagged":
-		return c.Operator == "equals" && slices.Contains([]string{"true", "false"}, c.Value)
-	case "received_days", "size":
-		n, e := strconv.ParseInt(c.Value, 10, 64)
-		max := int64(1 << 40)
-		if c.Field == "received_days" {
-			max = 36500
-		}
-		return e == nil && n >= 0 && n <= max && slices.Contains([]string{"gte", "lte"}, c.Operator)
-	}
-	return false
-}
 func validateGroup(g RuleGroup, depth int, total *int) bool {
 	if depth > 3 || !slices.Contains([]string{"all", "any", "not"}, g.Mode) || len(g.Conditions)+len(g.Groups) > 20 {
 		return false
@@ -240,7 +212,7 @@ func (s *Service) SaveRule(a Access, r Rule) (Rule, error) {
 	}
 	r.Name = strings.TrimSpace(r.Name)
 	total := 0
-	if r.Name == "" || len(r.Name) > 120 || r.Priority < 0 || r.Priority > 10000 || len(r.Instructions) > 2000 || len(r.SourceFolders) < 1 || len(r.SourceFolders) > 20 || !validateGroup(r.Match, 0, &total) || !slices.Contains([]string{"move", "archive", "trash", "keep", "ai"}, r.Action) {
+	if r.Name == "" || len(r.Name) > 120 || r.Priority < 0 || r.Priority > 10000 || len(r.Instructions) > 2000 || len(r.SourceFolders) < 1 || len(r.SourceFolders) > 20 || !validateGroup(r.Match, 0, &total) || !(slices.Contains([]string{"move", "archive", "trash", "keep", "ai"}, r.Action) || isFlagAction(r.Action)) || !validAlso(r.Action, r.Also) {
 		return Rule{}, ErrInput
 	}
 	for _, f := range r.SourceFolders {
@@ -346,71 +318,6 @@ func (s *Service) SaveRule(a Access, r Rule) (Rule, error) {
 	}
 	return r, tx.Commit()
 }
-func conditionMatch(c RuleCondition, m Message, now int64) (int, string) {
-	actual := []string{}
-	label := c.Field
-	switch c.Field {
-	case "subject":
-		actual = []string{m.Subject}
-		label = "主题"
-	case "folder":
-		actual = []string{m.Folder}
-		label = "原邮箱目录"
-	case "sender", "domain":
-		addrs, e := mail.ParseAddressList(m.Sender)
-		if e != nil {
-			return -1, "发件地址无法解析"
-		}
-		for _, addr := range addrs {
-			v := addr.Address
-			if c.Field == "domain" {
-				_, v, _ = strings.Cut(v, "@")
-			}
-			actual = append(actual, v)
-		}
-		label = "发件地址/域名"
-	case "read_state":
-		if !m.FlagsKnown {
-			return -1, "已读状态尚未验证"
-		}
-		v := "read"
-		if m.Unread {
-			v = "unread"
-		}
-		actual = []string{v}
-		label = "已读状态"
-	case "flagged":
-		if !m.FlagsKnown {
-			return -1, "星标状态尚未验证"
-		}
-		actual = []string{strconv.FormatBool(m.Flagged)}
-		label = "星标"
-	case "received_days", "size":
-		value := int64(m.Size)
-		if c.Field == "received_days" {
-			if m.ReceivedAt <= 0 {
-				return -1, "收信时间尚未同步"
-			}
-			value = (now - m.ReceivedAt) / 86400
-			label = "收信天数"
-		} else {
-			label = "邮件大小"
-		}
-		n, _ := strconv.ParseInt(c.Value, 10, 64)
-		if (c.Operator == "gte" && value >= n) || (c.Operator == "lte" && value <= n) {
-			return 1, label + "符合条件"
-		}
-		return 0, label + "不符合条件"
-	}
-	for _, v := range actual {
-		v = strings.ToLower(v)
-		want := strings.ToLower(c.Value)
-		if (c.Operator == "equals" && v == want) || (c.Operator == "contains" && strings.Contains(v, want)) {
-			return 1, label + "符合条件"
-		}
-	}
-	return 0, label + "不符合条件"
-}
 func groupMatch(g RuleGroup, m Message, now int64) (int, []string) {
 	values := []int{}
 	reasons := []string{}
@@ -473,11 +380,26 @@ func evaluateRules(m Message, rules []Rule, p AutomationPolicy, now int64) RuleE
 			return out
 		}
 		out.Action = r.Action
+		out.Also = r.Also
 		out.Destination = r.Destination
 		out.Instructions = r.Instructions
 		out.Status = "matched"
 		if r.Action == "keep" {
 			out.Status = "protected"
+		}
+		if isFlagAction(r.Action) {
+			// A flag rule on a message already in the target state needs no write.
+			change, _ := flagChangeFor(append([]string{r.Action}, r.Also...)...)
+			if !m.FlagsKnown {
+				out.Status = "unknown"
+				out.Reasons = append(slices.Clone(reasons), "已读/星标状态尚未验证")
+				return out
+			}
+			if change.Satisfied(m) {
+				out.Status = "satisfied"
+				out.Reasons = append(slices.Clone(reasons), "已是目标标记状态")
+				return out
+			}
 		}
 		if len(reasons) == 0 {
 			out.Reasons = []string{"符合规则限定目录"}
@@ -520,7 +442,7 @@ func (s *Service) ruleCandidates(a Access, accountID string, folders []string, c
 		args = append(args, c.Time, c.Time, c.Ref)
 	}
 	args = append(args, limit)
-	rows, e := s.Store.DB.Query("SELECT * FROM messages WHERE "+where+" ORDER BY sent_at DESC,ref LIMIT ?", args...)
+	rows, e := s.Store.DB.Query("SELECT "+messageColumns+" FROM messages WHERE "+where+" ORDER BY sent_at DESC,ref LIMIT ?", args...)
 	if e != nil {
 		return nil, 0, "", e
 	}

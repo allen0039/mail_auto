@@ -26,7 +26,7 @@ Docker 负责容器运行与重启，应用内调度器负责决定任务何时�
 | 任意脚本、HTTP 作业、其他容器启停 | 未实现 | 当前任务引擎仅 rules/ai，任务必须绑定邮箱与授权目录 |
 | 完整 Cron、每隔数分钟、一次性任务 | 当前内置日程未提供 | 当前仅 hourly/daily/weekly |
 
-已有自动化使用说明见 [automation-guide.md](automation-guide.md)。例如每天凌晨 02:00 执行邮件固定规则，可在「定时与任务」中配置内置定时、daily、02:00、Asia/Shanghai。新任务会强制保存为暂停观察；完成预览、账号授权后才能启用。实际写入还受写入开关、执行授权、额度和授权有效期约束。
+已有自动化使用说明见 [automation-guide.md](../automation-guide.md)。例如每天凌晨 02:00 执行邮件固定规则，可在「定时与任务」中配置内置定时、daily、02:00、Asia/Shanghai。新任务会强制保存为暂停观察；完成预览、账号授权后才能启用。实际写入还受写入开关、执行授权、额度和授权有效期约束。
 
 目前 Docker 主镜像为 distroless 静态 Go 程序，未安装脚本运行时或 cron。Compose 为应用设置 384 MiB / 1 CPU 的上限。运行 Python、Node、浏览器或较重分析任务应使用单独 worker 镜像，并单独设置资源预算。
 

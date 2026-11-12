@@ -3,7 +3,7 @@
   const selected = new Map();
   const folders = new Map();
   let currentPlan = null, pendingPlans = [], oauthID = "", mcpVersion = 0;
-  const actionNames = {read: "读取", folder_manage: "在原邮箱创建文件夹", archive: "归档", move: "分类到文件夹", trash: "移入回收站", restore: "恢复", rule_manage: "创建和调整自定义规则", task_manage: "配置和启停整理任务", automation: "定时任务批次（受自动整理授权约束）"};
+  const actionNames = {read: "读取", folder_manage: "在原邮箱创建文件夹", archive: "归档", move: "分类到文件夹", trash: "移入回收站", restore: "恢复", flag: "修改已读 / 星标", mark_read: "标为已读", mark_unread: "标为未读", unflag: "取消星标", rule_manage: "创建和调整自定义规则", task_manage: "配置和启停整理任务", automation: "定时任务批次（受自动整理授权约束）"};
   const statusNames = {queued: "排队", running: "执行中", completed: "完成", partial: "部分完成", failed: "失败", needs_verification: "待核验", cancelled: "已停止", skipped: "已跳过"};
   const run = fn => async e => {
     if (e) e.preventDefault();
@@ -47,7 +47,7 @@
   $("#clear-selection").addEventListener("click", window.clearMailSelection);
   function showPlan(p) {
     currentPlan = p;
-    $("#plan-summary").textContent = `${actionNames[p.action] || p.action} · ${p.items.length} 封 · 有效期至 ${date(p.expires)}`;
+    $("#plan-summary").textContent = `${(p.action === "flag" ? "加星标" : actionNames[p.action]) || p.action} · ${p.items.length} 封 · 有效期至 ${date(p.expires)}`;
     $("#plan-items").innerHTML = p.items.map(x => `<div class="organizer-item"><strong>${esc(x.message.subject || "（无主题）")}</strong><p>${esc(folderLabel(x.message.folder))}${x.destination ? ` → ${esc(folderLabel(x.destination))}` : ""}${x.skip ? ` · 跳过：${esc(x.skip)}` : ""}</p></div>`).join("");
     $("#execute-plan").disabled = false;
     if (!$("#plan-dialog").open) $("#plan-dialog").showModal();
@@ -179,7 +179,7 @@
     const request = await api(`/api/oauth/requests/${encodeURIComponent(id)}`); oauthID = id;
     $("#oauth-client").textContent = `客户端：${request.client_name || request.client_id}；回调地址：${request.redirect_uri}`;
     $("#oauth-accounts").innerHTML = '<legend>邮箱范围（默认均未选择）</legend>' + state.accounts.map(a => `<label class="checkbox-label"><input name="account" type="checkbox" value="${esc(a.id)}" />${esc(a.name)} · ${esc(a.username)}</label>`).join("");
-    $("#oauth-actions").innerHTML = '<legend>允许动作</legend><p>读取邮件</p>' + (request.scope.split(" ").includes("mail.write") ? Object.entries(actionNames).filter(([k]) => k !== "read").map(([k, v]) => `<label class="checkbox-label"><input name="action" type="checkbox" value="${k}" />${v}</label>`).join("") : "<p>此客户端只申请了读取权限。</p>");
+    $("#oauth-actions").innerHTML = '<legend>允许动作</legend><p>读取邮件</p>' + (request.scope.split(" ").includes("mail.write") ? Object.entries(actionNames).filter(([k]) => !["read", "mark_read", "mark_unread", "unflag"].includes(k)).map(([k, v]) => `<label class="checkbox-label"><input name="action" type="checkbox" value="${k}" />${v}</label>`).join("") : "<p>此客户端只申请了读取权限。</p>");
     $("#oauth-dialog").showModal();
   };
   async function consent(deny) {

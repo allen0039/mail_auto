@@ -42,7 +42,7 @@ func TestSchemaFiveAutomationMigrationPreservesOldMetadata(t *testing.T) {
 	}
 	s.DB.QueryRow("SELECT hex(secret) FROM accounts").Scan(&secret)
 	s.DB.QueryRow("PRAGMA user_version").Scan(&version)
-	if ref != "stable" || secret != "010203" || flagsKnown != 0 || received != 0 || metadata != 0 || version != 7 {
+	if ref != "stable" || secret != "010203" || flagsKnown != 0 || received != 0 || metadata != 0 || version != SchemaVersion {
 		t.Fatal(ref, secret, flagsKnown, received, metadata, version)
 	}
 	var policies int

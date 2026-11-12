@@ -89,7 +89,7 @@ func addAutomation(server *mcp.Server, s *mail.Service, a mail.Access) {
 		c, e := s.AIGet(ctx, a, in.BatchID, in.Ref, in.Body)
 		return map[string]any{"content": c}, e
 	})
-	add(server, s, a, "mail_ai_submit_decisions", "Submit EXACTLY one decision per batch item with the returned signature and a short reason. Actions keep/move/archive/trash only. Reuse the same idempotency_key and identical decisions on retry. Deterministic rules constrain the action; ai rules allow bounded semantic choices. Observe mode records preview only. Execute mode creates frozen plans; inspect them with mail_plan before explicit mail_ai_execute. Does not move mail itself.", false, func(ctx context.Context, in mail.AISubmitInput) (map[string]any, error) {
+	add(server, s, a, "mail_ai_submit_decisions", "Submit EXACTLY one decision per batch item with the returned signature and a short reason. Actions keep/move/archive/trash/mark_read/mark_unread/flag/unflag only; the policy must allow the chosen action. Reuse the same idempotency_key and identical decisions on retry. Deterministic rules constrain the action; ai rules allow bounded semantic choices. Observe mode records preview only. Execute mode creates frozen plans; inspect them with mail_plan before explicit mail_ai_execute. Does not move mail itself.", false, func(ctx context.Context, in mail.AISubmitInput) (map[string]any, error) {
 		b, e := s.SubmitAI(ctx, a, in)
 		return batchOutput(b, 0), e
 	})
@@ -121,7 +121,11 @@ func ruleInputSchema() map[string]any {
 	array := func(items any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	var group func(int) map[string]any
 	group = func(depth int) map[string]any {
-		props := map[string]any{"mode": map[string]any{"type": "string", "enum": []string{"all", "any", "not"}}, "conditions": array(object(map[string]any{"field": str(), "operator": str(), "value": str()}, []string{"field", "operator", "value"}))}
+		props := map[string]any{"mode": map[string]any{"type": "string", "enum": []string{"all", "any", "not"}}, "conditions": array(object(map[string]any{
+			"field":    map[string]any{"type": "string", "enum": []string{"subject", "sender", "domain", "to", "cc", "recipient", "list_id", "folder", "read_state", "flagged", "has_attachment", "is_reply", "received_days", "size"}},
+			"operator": map[string]any{"type": "string", "enum": []string{"equals", "contains", "not_contains", "starts_with", "ends_with", "regex", "gte", "lte"}, "description": "Text fields (subject/sender/domain/to/cc/recipient/list_id) accept equals, contains, not_contains, starts_with, ends_with, regex (RE2, case-insensitive). received_days/size use gte/lte; other fields use equals."},
+			"value":    str(),
+		}, []string{"field", "operator", "value"}))}
 		if depth < 3 {
 			props["groups"] = array(group(depth + 1))
 		} else {
@@ -129,6 +133,6 @@ func ruleInputSchema() map[string]any {
 		}
 		return object(props, []string{"mode", "conditions"})
 	}
-	props := map[string]any{"id": str(), "account_id": str(), "name": str(), "version": map[string]any{"type": "integer"}, "priority": map[string]any{"type": "integer"}, "enabled": map[string]any{"type": "boolean"}, "source_folders": array(str()), "match": group(0), "action": map[string]any{"type": "string", "enum": []string{"keep", "move", "archive", "trash", "ai"}}, "destination": str(), "instructions": str(), "updated_at": map[string]any{"type": "integer"}}
+	props := map[string]any{"id": str(), "account_id": str(), "name": str(), "version": map[string]any{"type": "integer"}, "priority": map[string]any{"type": "integer"}, "enabled": map[string]any{"type": "boolean"}, "source_folders": array(str()), "match": group(0), "action": map[string]any{"type": "string", "enum": []string{"keep", "move", "archive", "trash", "ai", "mark_read", "mark_unread", "flag", "unflag"}}, "also": map[string]any{"type": "array", "maxItems": 2, "items": map[string]any{"type": "string", "enum": []string{"mark_read", "mark_unread", "flag", "unflag"}}, "description": "Optional flag changes applied with move/archive/trash (at the confirmed destination) or a flag action."}, "destination": str(), "instructions": str(), "updated_at": map[string]any{"type": "integer"}}
 	return object(map[string]any{"rule": object(props, []string{"account_id", "name", "version", "priority", "enabled", "source_folders", "match", "action"})}, []string{"rule"})
 }

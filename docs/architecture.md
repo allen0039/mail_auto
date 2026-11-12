@@ -1,10 +1,19 @@
-# 当前架构补充（0.3.0）
+# 当前架构
+
+## schema 8 补充
+
+- 元数据：IMAP 元数据读取在 ENVELOPE 之外加读 BODYSTRUCTURE 和 `BODY.PEEK[HEADER.FIELDS (REFERENCES LIST-ID)]`，得到收件人、抄送、Message-ID、In-Reply-To、References、List-Id 和是否有附件。`metadata_version=2` 表示行内已有这些字段；增量同步把版本较低的行当作需要重新读取的 UID，发布时不更新 `changed_at`。所有读写都用 `messageColumns` 显式列出列名，不使用 `SELECT *`。
+- 规则：条件实现在 `internal/mail/rule_conditions.go`。新增字段对低版本元数据返回“未知”；正则用 RE2 编译并缓存。
+- 标记动作：`internal/mail/flags.go` 定义 `FlagChange` 和 `FlagRemote`，`internal/imap/flags.go` 实现 `SetFlags`：可选的只读复核 → SELECT → UID SEARCH 确认 → UID STORE ±FLAGS.SILENT → FETCH FLAGS 确认。这些步骤只读或幂等，所以整段可以安全重连重试；不发送 EXPUNGE。任务批次期间复用账号写连接池。移动后附带的标记写在已确认的目标 UID 上。权限统一映射为 `flag`。
+- 调度：`internal/mail/schedule.go` 负责每小时/每天/每周、间隔、cron 和 new-mail 触发。增量同步在发布事务中统计真正新增的 UID，提交后只按版本条件更新相关任务的 `next_run_at`，不获取任务锁，避免与 taskTick 形成锁顺序问题。
+
+## 0.3.0 补充
 
 规则和外部 AI 批次复用现有原邮箱操作服务。`rules.go` 负责条件、优先级、未知字段、版本、循环检测及模拟；`automation_policy.go` 负责管理员授权；`automation.go` 负责领取租约、签名、跨客户端去重、结构化决定及观察/执行。后台同步只维护元数据，没有模型调用和独立整理调度循环。
 
 schema 6 增加收信日期、星标、标记完整性和变化时间，以及规则/版本/授权/批次/领取/日额度表。外部 token 新增 rule_manage 和 automation；批次令牌不能通过原始 search/get/plan 绕过范围。提交、入队和实际写入复核权限、规则/策略版本；写入前通过 EXAMINE + FETCH 重新核对原邮箱元数据。Go 进程内自动化互斥锁先于账号锁获取，规则/策略更新与批次执行串行检查；数据库事务保证持久化及限额。原生标签尚未验证。
 
-实际接口、限制和验证见 [使用指南](automation-guide.md) 与 [0.3.0 验收](acceptance-0.3.0.md)。以下保留 0.2.1 原邮箱与 MCP 基础说明。
+实际接口、限制和验证见 [使用指南](automation-guide.md) 与 [0.3.0 验收](archive/acceptance-0.3.0.md)。以下保留 0.2.1 原邮箱与 MCP 基础说明。
 
 Web 与 MCP 复用原邮箱文件夹服务：分类、归档、回收站、恢复都调用 IMAP 并核验实际位置；创建文件夹需要提供商 CREATE 后 LIST 确认，不发布本地替代分类。历史标签表保留，但不再暴露分类入口。
 
@@ -12,7 +21,7 @@ Web 与 MCP 复用原邮箱文件夹服务：分类、归档、回收站、恢�
 
 管理员可视化 MCP 设置保存在 schema 5 的单行 mcp_settings；带版本控制防止并发覆盖。Server 使用不可变运行时快照，保存后切换处理器，无需重启；每个请求使用一致的公开地址。域名更换事务中撤销令牌并清理 OAuth 在途授权，授权载荷绑定 issuer，签发时再次核对运行时和管理员版本。会话、CSRF、原管理 Origin 及新的 HTTPS Origin 均按既有边界校验。MCP 开关和每账号写入开关独立，默认均关闭。
 
-整理仍采用冻结预览、幂等异步任务、逐项状态、补偿和未知结果核验。OAuth 权限绑定邮箱、文件夹和动作（read、folder_manage、move、archive、trash、restore），每次请求与执行重查。无 AI API 调用。验证边界见 [0.2.1 验收](acceptance-0.2.1.md)，接入见 [MCP 指南](mcp-setup.md)。
+整理仍采用冻结预览、幂等异步任务、逐项状态、补偿和未知结果核验。OAuth 权限绑定邮箱、文件夹和动作（read、folder_manage、move、archive、trash、restore），每次请求与执行重查。无 AI API 调用。验证边界见 [0.2.1 验收](archive/acceptance-0.2.1.md)，接入见 [MCP 指南](mcp-setup.md)。
 
 以下为 0.1.0 历史基础，后续能力以上述说明和当前代码为准。
 

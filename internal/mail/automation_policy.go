@@ -116,7 +116,7 @@ func (s *Service) SaveAutomationPolicy(a Access, p AutomationPolicy) (Automation
 	}
 	p.DailyLimit = 0
 	now := time.Now().Unix()
-	if !slices.Contains([]string{"observe", "execute"}, p.Mode) || len(p.SourceFolders) > 20 || len(p.Destinations) > 50 || len(p.Actions) > 3 || p.MaxBatch < 1 || p.MaxBatch > 50 || p.StableSeconds < 0 || p.StableSeconds > 3600 || len(p.ProtectedSenders) > 100 || p.Since < 0 || p.Since > now {
+	if !slices.Contains([]string{"observe", "execute"}, p.Mode) || len(p.SourceFolders) > 20 || len(p.Destinations) > 50 || len(p.Actions) > 7 || p.MaxBatch < 1 || p.MaxBatch > 50 || p.StableSeconds < 0 || p.StableSeconds > 3600 || len(p.ProtectedSenders) > 100 || p.Since < 0 || p.Since > now {
 		return p, ErrInput
 	}
 	if p.Enabled && (len(p.SourceFolders) == 0 || p.Expires <= now || p.Expires > now+90*86400) {
@@ -137,7 +137,7 @@ func (s *Service) SaveAutomationPolicy(a Access, p AutomationPolicy) (Automation
 		}
 	}
 	for _, action := range p.Actions {
-		if !slices.Contains([]string{"move", "archive", "trash"}, action) {
+		if !slices.Contains([]string{"move", "archive", "trash"}, action) && !isFlagAction(action) {
 			return p, ErrInput
 		}
 		if action == "archive" && settings.Archive == "" {

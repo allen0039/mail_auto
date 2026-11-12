@@ -85,6 +85,10 @@ func (s *Service) taskTick(ctx context.Context) {
 				_, e = s.createTaskRun(Access{Owner: t.ServiceOwner, Version: t.AdminVersion}, t, taskRunKey(t, scheduled), "internal", scheduled)
 				if errors.Is(e, ErrBusy) {
 					next, err := nextSchedule(t.Schedule, time.Now())
+					if err == nil && next == 0 {
+						// Event-driven task: retry shortly instead of dropping the arrival.
+						next = time.Now().Unix() + 60
+					}
 					if err == nil {
 						_, _ = s.Store.DB.Exec("UPDATE automation_tasks SET next_run_at=? WHERE id=? AND version=?", next, t.ID, t.Version)
 						_ = store.Audit(s.Store.DB, "mail.task.missed", t.ID, "active_run_coalesced")

@@ -12,6 +12,9 @@ import (
 	"modernc.org/sqlite"
 )
 
+// SchemaVersion is the newest database layout this binary can open.
+const SchemaVersion = 8
+
 type Store struct {
 	DB      *sql.DB
 	reclaim chan struct{}
@@ -69,7 +72,7 @@ func (s *Store) migrate() error {
 	if e := s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil {
 		return e
 	}
-	if version > 7 {
+	if version > SchemaVersion {
 		return errors.New("database schema is newer than this binary")
 	}
 	tx, e := s.DB.Begin()
@@ -118,7 +121,10 @@ func (s *Store) migrate() error {
 	if e = migrateTasks(tx); e != nil {
 		return e
 	}
-	if _, e = tx.Exec("PRAGMA user_version=7"); e != nil {
+	if e = migrateMetadata(tx); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("PRAGMA user_version=8"); e != nil {
 		return e
 	}
 	return tx.Commit()

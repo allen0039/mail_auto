@@ -37,7 +37,24 @@ type Message struct {
 	Unread          bool    `json:"unread"`
 	Size            uint32  `json:"size"`
 	Labels          []Label `json:"labels,omitempty"`
+	// Metadata version 2 fields. Older rows keep empty values until the
+	// automatic sync refreshes them; rules treat them as unknown until then.
+	Recipients    string `json:"recipients,omitempty"`
+	Cc            string `json:"cc,omitempty"`
+	MessageID     string `json:"message_id,omitempty"`
+	InReplyTo     string `json:"in_reply_to,omitempty"`
+	References    string `json:"references,omitempty"`
+	ListID        string `json:"list_id,omitempty"`
+	HasAttachment bool   `json:"has_attachment"`
 }
+
+// CurrentMetadataVersion is the newest metadata layout written by remote reads.
+const CurrentMetadataVersion = 2
+
+// messageColumns lists the messages table in scanMessage order. Never use
+// SELECT * because migrations append columns.
+const messageColumns = "ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment"
+
 type Label struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`

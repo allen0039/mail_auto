@@ -355,3 +355,52 @@ func TestAutomaticReconnectPreservesLastIndex(t *testing.T) {
 		t.Fatal("connection not replaced")
 	}
 }
+
+// Rows written before metadata version 2 are re-read once by the incremental
+// sync, keeping refs and the stability timestamp.
+func TestIncrementalRefreshesLegacyMetadataOnce(t *testing.T) {
+	s, r, a := newAutomaticFixture(t)
+	session := &fixtureSession{r}
+	ctx := context.Background()
+	if e := s.incrementalFolder(ctx, session, a, "INBOX", 0); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.Store.DB.Exec("UPDATE messages SET metadata_version=1,changed_at=123"); e != nil {
+		t.Fatal(e)
+	}
+	before, _, e := s.Search(Search{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	r.boxes["INBOX"] = Snapshot{UIDValidity: 7, Messages: []Message{{UID: 1, Unread: true, Recipients: "me@example.com", ListID: "news.example.com", HasAttachment: true}, {UID: 2, Unread: true}}}
+	fetched := r.metadata
+	if e = s.incrementalFolder(ctx, session, a, "INBOX", 0); e != nil {
+		t.Fatal(e)
+	}
+	if r.metadata-fetched != 2 {
+		t.Fatal("legacy rows not re-read", r.metadata-fetched)
+	}
+	after, _, e := s.Search(Search{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	refs := map[string]bool{}
+	for _, m := range before {
+		refs[m.Ref] = true
+	}
+	for _, m := range after {
+		if !refs[m.Ref] || m.MetadataVersion != CurrentMetadataVersion || m.ChangedAt != 123 {
+			t.Fatalf("refresh changed identity or stability: %+v", m)
+		}
+		if m.UID == 1 && (m.Recipients != "me@example.com" || m.ListID != "news.example.com" || !m.HasAttachment) {
+			t.Fatalf("metadata not stored: %+v", m)
+		}
+	}
+	fetched = r.metadata
+	if e = s.incrementalFolder(ctx, session, a, "INBOX", 0); e != nil {
+		t.Fatal(e)
+	}
+	if r.metadata != fetched {
+		t.Fatal("current rows re-read")
+	}
+}

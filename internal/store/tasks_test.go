@@ -22,7 +22,7 @@ func TestSchemaSixTasksMigrationPreservesExistingPolicy(t *testing.T) {
 	defer s.Close()
 	var version, count int
 	var payload, secret string
-	if e = s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 7 {
+	if e = s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != SchemaVersion {
 		t.Fatal(version, e)
 	}
 	if e = s.DB.QueryRow("SELECT payload FROM automation_policies WHERE account_id='account'").Scan(&payload); e != nil || payload != "existing-policy" {

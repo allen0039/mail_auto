@@ -741,6 +741,13 @@ func TestAutomationRuleStateReadsFreshMetadataWithoutBodyOrFlagsWrites(t *testin
 		t.Fatal("stale UIDVALIDITY", e)
 	}
 	traffic := strings.ToUpper(trace.String())
+	if !strings.Contains(traffic, "BODY.PEEK[HEADER.FIELDS (REFERENCES LIST-ID)]") {
+		t.Fatal("metadata header subset was not peeked", traffic)
+	}
+	// Only the bounded header subset may be read; it is always peeked.
+	for _, allowed := range []string{"BODY.PEEK[HEADER.FIELDS (REFERENCES LIST-ID)]", "BODY[HEADER.FIELDS (REFERENCES LIST-ID)]", "BODY[HEADER.FIELDS (\"REFERENCES\" \"LIST-ID\")]"} {
+		traffic = strings.ReplaceAll(traffic, allowed, "")
+	}
 	if !strings.Contains(traffic, " EXAMINE ") || strings.Contains(traffic, "BODY[") || strings.Contains(traffic, "BODY.PEEK") || strings.Contains(traffic, " STORE ") || strings.Contains(traffic, " EXPUNGE ") {
 		t.Fatal("unexpected metadata read commands")
 	}

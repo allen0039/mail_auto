@@ -37,7 +37,7 @@ func TestOrganizerV2MigrationAndIndependentLabelLifecycle(t *testing.T) {
 		t.Fatal(ref, e)
 	}
 	s.DB.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 7 {
+	if version != SchemaVersion {
 		t.Fatal(version)
 	}
 	if _, e = s.DB.Exec(`INSERT INTO labels VALUES('l','fixture','',1); INSERT INTO message_labels VALUES('stable','l'); DELETE FROM messages WHERE ref='stable';`); e != nil {
@@ -96,7 +96,7 @@ func TestProviderFoldersV4ToV5PreservesState(t *testing.T) {
 	defer s.Close()
 	var version, n, enabled, settingsVersion int
 	var secret, trash string
-	if e = s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 7 {
+	if e = s.DB.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != SchemaVersion {
 		t.Fatal(version, e)
 	}
 	s.DB.QueryRow("SELECT count(*) FROM messages WHERE ref='stable'").Scan(&n)

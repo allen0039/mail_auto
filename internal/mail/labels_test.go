@@ -85,7 +85,7 @@ func TestLabelValidationAndMigrationTables(t *testing.T) {
 		}
 	}
 	var version int
-	if err = st.DB.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 7 {
+	if err = st.DB.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != store.SchemaVersion {
 		t.Fatal("schema version", version, err)
 	}
 }

@@ -27,7 +27,7 @@ func Handler(service *mail.Service, origin string) http.Handler {
 			return
 		}
 		if r.Header.Get("Origin") != "" && r.Header.Get("Origin") != origin {
-			http.Error(w, "origin_not_allowed", 403)
+			http.Error(w, "origin_not_allowed", http.StatusForbidden)
 			return
 		}
 		value := r.Header.Get("Authorization")
@@ -46,7 +46,7 @@ func Handler(service *mail.Service, origin string) http.Handler {
 }
 func unauthorized(w http.ResponseWriter, origin string) {
 	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+origin+`/.well-known/oauth-protected-resource"`)
-	http.Error(w, "authentication_required", 401)
+	http.Error(w, "authentication_required", http.StatusUnauthorized)
 }
 func code(e error) string {
 	switch {
@@ -116,6 +116,7 @@ type PlanInput struct {
 	Search      *mail.SearchInput `json:"search,omitempty"`
 	Action      string            `json:"action,omitempty"`
 	Destination string            `json:"destination,omitempty"`
+	Also        []string          `json:"also,omitempty"`
 }
 type ExecuteInput struct {
 	PlanID         string `json:"plan_id"`
@@ -217,12 +218,12 @@ func New(s *mail.Service, a mail.Access) *mcp.Server {
 		f, e := s.CreateRemoteFolder(ctx, a, in.AccountID, in.Name)
 		return map[string]any{"folder": f, "storage": "provider"}, e
 	})
-	add(server, s, a, "mail_plan", "Preview a frozen set of at most 500 refs OR all matches of a structured search. Search defaults to INBOX; explicitly select any other source folder. Oversize requests fail without truncation. Actions: archive, move, trash, restore. Destination is an actual original-mailbox folder. Plans expire in 10 minutes. Use id and offset to inspect all preview items.", false, func(ctx context.Context, in PlanInput) (map[string]any, error) {
+	add(server, s, a, "mail_plan", "Preview a frozen set of at most 500 refs OR all matches of a structured search. Search defaults to INBOX; explicitly select any other source folder. Oversize requests fail without truncation. Actions: archive, move, trash, restore, mark_read, mark_unread, flag, unflag (flag actions need the flag grant and never move mail). Optional also adds up to two flag changes after a move. Destination is an actual original-mailbox folder. Plans expire in 10 minutes. Use id and offset to inspect all preview items.", false, func(ctx context.Context, in PlanInput) (map[string]any, error) {
 		if in.ID != "" {
 			p, e := s.GetPlan(a, in.ID)
 			return planOutput(p, in.Offset), e
 		}
-		p, e := s.NewPlan(ctx, a, mail.PlanInput{Refs: in.Refs, Search: in.Search, Action: in.Action, Destination: in.Destination})
+		p, e := s.NewPlan(ctx, a, mail.PlanInput{Refs: in.Refs, Search: in.Search, Action: in.Action, Destination: in.Destination, Also: in.Also})
 		return planOutput(p, 0), e
 	})
 	add(server, s, a, "mail_execute", "Execute a saved, unexpired plan asynchronously. Reuse the same idempotency_key only for the same plan. Poll mail_operation; do not repeat uncertain remote writes.", false, func(ctx context.Context, in ExecuteInput) (map[string]any, error) {
