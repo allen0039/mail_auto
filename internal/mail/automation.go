@@ -143,6 +143,18 @@ func (s *Service) AIBatches(a Access, accountID string) ([]AIBatch, error) {
 	}
 	return out, nil
 }
+
+var systemRetryCancelSources = []string{"system:task_timeout", "system:worker_lease_expired"}
+
+func (service *Service) unattemptedCancelledItem(operationID, ref string) (bool, error) {
+	var total, eligible int
+	err := service.Store.DB.QueryRow("SELECT count(*),COALESCE(sum(state='cancelled' AND destination_validity=0 AND destination_uid=0),0) FROM operation_items WHERE operation_id=? AND ref=?", operationID, ref).Scan(&total, &eligible)
+	if err != nil {
+		return false, err
+	}
+	return total > 0 && eligible == total, nil
+}
+
 func (s *Service) claimAvailable(accountID, ref, fingerprint string, now int64) (bool, error) {
 	var oldFingerprint, state, plan string
 	var expires int64
@@ -154,11 +166,21 @@ func (s *Service) claimAvailable(accountID, ref, fingerprint string, now int64) 
 		return false, e
 	}
 	if plan != "" {
-		var opState string
-		e = s.Store.DB.QueryRow("SELECT state FROM operations WHERE plan_id=?", plan).Scan(&opState)
+		var opID, opState, cancelSource string
+		var opCancelled bool
+		e = s.Store.DB.QueryRow("SELECT id,state,cancelled,cancel_source FROM operations WHERE plan_id=?", plan).Scan(&opID, &opState, &opCancelled, &cancelSource)
 		if e == nil {
 			if slices.Contains([]string{"queued", "running", "needs_verification"}, opState) {
 				return false, nil
+			}
+			if opCancelled && slices.Contains(systemRetryCancelSources, cancelSource) {
+				retry, err := s.unattemptedCancelledItem(opID, ref)
+				if err != nil {
+					return false, err
+				}
+				if retry {
+					return true, nil
+				}
 			}
 			return oldFingerprint != fingerprint, nil
 		}
