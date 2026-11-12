@@ -24,7 +24,12 @@
   const now = Math.floor(Date.now() / 1000);
   let activeState = "running";
   let previewFail = false;
+  let delayedPreview = false;
+  let delayedPreviewResolver = null;
+  let delayedPreviewRejecter = null;
+  let t1MaxBatchOverride = null;
   const task = {id: "t1", account_id: "a1", name: "fixture task", version: 7, enabled: true, trigger_mode: "internal", engine: "rules", mode: "execute", source_folders: ["INBOX"], max_batch: 20, schedule: {frequency: "hourly", minute: 0, timezone: "Asia/Shanghai"}, notify: "inherit"};
+  const taskB = {id: "t2", account_id: "a1", name: "second fixture task", version: 7, enabled: true, trigger_mode: "internal", engine: "rules", mode: "execute", source_folders: ["INBOX"], max_batch: 5, schedule: {frequency: "hourly", minute: 0, timezone: "Asia/Shanghai"}, notify: "inherit"};
   const runs = () => [
     {id: "run-done", task_id: "t1", state: "needs_verification", source: "internal", created_at: now - 600, updated_at: now - 500, scanned: 48, claimed: 20, completed: 18, kept: 0, protected: 0, failed: 0, queued: 0, running: 0, unknown: 2, flag_warnings: 1, mode: "execute", has_more: true, error_code: "remote_state_unknown", task_version: 7, policy_version: 7, notification_state: "not_required", finalized: true},
     {id: "run-active", task_id: "t1", state: activeState, source: "manual", created_at: now - 30, updated_at: now, progress_at: now - 5, scanned: 10, claimed: 5, completed: 1, kept: 0, protected: 0, failed: 0, queued: activeState === "running" ? 3 : 0, running: activeState === "running" ? 1 : 0, unknown: 0, mode: "execute", task_version: 7, policy_version: 7, notification_state: "not_required", finalized: activeState !== "running"},
@@ -34,13 +39,25 @@
   window.api = async (url, opts = {}) => {
     calls.push(`${opts.method || "GET"} ${url}${opts.body ? " " + opts.body : ""}`);
     if (url.includes("/preview")) {
+      if (delayedPreview) {
+        return new Promise((resolve, reject) => {
+          delayedPreviewResolver = resolve;
+          delayedPreviewRejecter = reject;
+        });
+      }
       if (previewFail) throw new Error("503 Service Unavailable: IMAP 服务暂时不可用");
+      if (url.includes("/t2/preview")) {
+        return {items: [page(1, 1, 1)[0]], total: 100, scanned: 5, counts: {matched: 1, unmatched: 4}, max_batch: 5, next_cursor: ""};
+      }
+      const effectiveBatch = t1MaxBatchOverride != null ? t1MaxBatchOverride : 20;
       const body = JSON.parse(opts.body || "{}");
-      if (body.only_matched) return {items: [page(26, 1, 26)[0]], total: 600, scanned: 500, counts: {matched: 1, unmatched: 499}, max_batch: 20, next_cursor: "c-500"};
-      return body.cursor ? {items: page(26, 25, 26), total: 600, scanned: 25, counts: {matched: 1, unmatched: 24}, max_batch: 20, next_cursor: "c-50"} : {items: page(1, 25, -1), total: 600, scanned: 25, counts: {unmatched: 25}, max_batch: 20, next_cursor: "c-25"};
+      if (body.only_matched) return {items: [page(26, 1, 26)[0]], total: 600, scanned: 500, counts: {matched: 1, unmatched: 499}, max_batch: effectiveBatch, next_cursor: "c-500"};
+      return body.cursor ? {items: page(26, 25, 26), total: 600, scanned: 25, counts: {matched: 1, unmatched: 24}, max_batch: effectiveBatch, next_cursor: "c-50"} : {items: page(1, 25, -1), total: 600, scanned: 25, counts: {unmatched: 25}, max_batch: effectiveBatch, next_cursor: "c-25"};
     }
     if (url.includes("/runs")) return runs();
-    if (url.startsWith("/api/tasks")) return [task];
+    if (url.startsWith("/api/tasks/t2")) return taskB;
+    if (url.startsWith("/api/tasks/t1")) return task;
+    if (url.startsWith("/api/tasks")) return [task, taskB];
     if (url.startsWith("/api/automation/policy")) return {account_id: "a1", version: 7, enabled: true, allow_internal: true, mode: "execute", source_folders: ["INBOX"], destinations: ["Archive"], actions: ["move"], max_batch: 20};
     if (url.startsWith("/api/rules")) return [];
     if (url.startsWith("/api/operations")) return ops;
@@ -139,6 +156,149 @@
   check("R02: filter retry sends only_matched:true without stale cursor", retryCall && retryCall.includes('"only_matched":true') && !retryCall.includes('"cursor":"c-25"'));
   check("R02: filter retry replaces list with matched items only", document.querySelectorAll("#preview-items .organizer-item").length === 1 && /本次扫描 500 封/.test(summary()));
   previewDialog.close();
+
+  // N01: Late preview response (200 & 503) after closing dialog does not corrupt config detail
+  calls.length = 0;
+  delayedPreview = true;
+  document.querySelector('#tasks-list button[data-task-command="preview"][data-task-id="t1"]')?.click();
+  await wait(100);
+  check("N01: preview dialog opened in pending state", previewDialog?.open);
+  // User closes preview dialog while request is pending
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+  check("N01: preview dialog closed cleanly", !previewDialog?.open);
+
+  // User opens config detail of the SAME task t1
+  document.querySelector('#tasks-list button[data-task-command="detail"][data-task-id="t1"]')?.click();
+  await wait(200);
+  check("N01: config detail opened", previewDialog?.open && document.querySelector("#task-detail-title").textContent.includes("任务配置详情"));
+
+  // Late 200 response arrives for the old preview request
+  if (delayedPreviewResolver) delayedPreviewResolver({items: page(1, 20, -1), total: 600, scanned: 20, counts: {unmatched: 20}, max_batch: 20});
+  await wait(100);
+  check("N01: late 200 response does not overwrite config detail title", document.querySelector("#task-detail-title").textContent.includes("任务配置详情") && !document.querySelector("#task-detail-title").textContent.includes("预览影响"));
+  check("N01: late 200 response does not overwrite config detail body", !document.querySelector("#preview-items") && !document.querySelector("#preview-summary"));
+
+  // Close config detail
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+
+  // Test late 503 failure while config detail is open
+  delayedPreview = true;
+  document.querySelector('#tasks-list button[data-task-command="preview"][data-task-id="t1"]')?.click();
+  await wait(100);
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+
+  document.querySelector('#tasks-list button[data-task-command="detail"][data-task-id="t1"]')?.click();
+  await wait(200);
+  check("N01: config detail open before late 503", previewDialog?.open && document.querySelector("#task-detail-title").textContent.includes("任务配置详情"));
+
+  // Late 503 rejection arrives for the old preview request
+  if (delayedPreviewRejecter) delayedPreviewRejecter(new Error("503 Service Unavailable: IMAP 服务暂时不可用"));
+  await wait(100);
+  check("N01: late 503 rejection does not inject error into config detail", !document.querySelector("#task-detail-dialog .form-error") && !document.querySelector("#preview-retry") && document.querySelector("#task-detail-title").textContent.includes("任务配置详情"));
+
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+  delayedPreview = false;
+
+  // N02: Switching tasks and policy tightening updates max_batch accurately (20 -> 5 -> 3 -> 20)
+  // Step 1: Preview Task A (t1, max_batch: 20)
+  document.querySelector('#tasks-list button[data-task-command="preview"][data-task-id="t1"]')?.click();
+  await wait(300);
+  check("N02: Task A preview displays configured/response limit 20", document.querySelector("#preview-max-batch")?.textContent.trim() === "20 封");
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+
+  // Step 2: Switch to Task B (t2, max_batch: 5)
+  document.querySelector('#tasks-list button[data-task-command="preview"][data-task-id="t2"]')?.click();
+  await wait(300);
+  check("N02: Task B preview displays limit 5 without stale 20 from previous task", document.querySelector("#preview-max-batch")?.textContent.trim() === "5 封");
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+
+  // Step 3: Switch back to Task A with policy tightening (backend returns max_batch: 3)
+  t1MaxBatchOverride = 3;
+  document.querySelector('#tasks-list button[data-task-command="preview"][data-task-id="t1"]')?.click();
+  await wait(300);
+  check("N02: Task A updates limit to tightened backend value 3", document.querySelector("#preview-max-batch")?.textContent.trim() === "3 封");
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+
+  // Step 4: Switch back to Task A normal 20
+  t1MaxBatchOverride = null;
+  document.querySelector('#tasks-list button[data-task-command="preview"][data-task-id="t1"]')?.click();
+  await wait(300);
+  check("N02: Task A returns to limit 20", document.querySelector("#preview-max-batch")?.textContent.trim() === "20 封");
+  document.querySelector("#close-task-detail").click();
+  await wait(100);
+
+  const previewApi = window.api;
+  const pendingPreviews = [];
+  window.api = (url, options = {}) => {
+    if (!url.includes("/preview")) return previewApi(url, options);
+    return new Promise((resolve, reject) => {
+      pendingPreviews.push({resolve, reject, signal: options.signal, body: JSON.parse(options.body)});
+    });
+  };
+  const previewResult = (onlyMatched) => ({
+    items: onlyMatched ? page(26, 1, 26) : page(1, 25, -1),
+    total: 600,
+    scanned: onlyMatched ? 500 : 25,
+    counts: onlyMatched ? {matched: 1, unmatched: 499} : {unmatched: 25},
+    max_batch: onlyMatched ? 3 : 20,
+    next_cursor: onlyMatched ? "c-500" : "c-25",
+  });
+  const selectMatched = (checked) => {
+    const checkbox = requiredElement("#preview-only-matched");
+    checkbox.checked = checked;
+    checkbox.dispatchEvent(new Event("change", {bubbles: true}));
+  };
+
+  requiredElement('#tasks-list button[data-task-command="preview"][data-task-id="t1"]').click();
+  await wait(100);
+  selectMatched(true);
+  await wait(100);
+  check("N03: changing filter aborts the superseded preview request", pendingPreviews[0]?.signal?.aborted && pendingPreviews[1]?.body.only_matched);
+  pendingPreviews[1].resolve(previewResult(true));
+  await wait(100);
+  pendingPreviews[0].resolve(previewResult(false));
+  await wait(100);
+  check("N03: late success cannot replace the latest filter results or batch limit", requiredElement("#preview-only-matched").checked && document.querySelectorAll("#preview-items .organizer-item").length === 1 && /本次扫描 500 封/.test(summary()) && requiredElement("#preview-max-batch").textContent.trim() === "3 封");
+  requiredElement("#close-task-detail").click();
+  await wait(100);
+
+  requiredElement('#tasks-list button[data-task-command="preview"][data-task-id="t1"]').click();
+  await wait(100);
+  selectMatched(true);
+  await wait(100);
+  pendingPreviews[3].resolve(previewResult(true));
+  await wait(100);
+  pendingPreviews[2].reject(new Error("服务响应异常，请稍后重试"));
+  await wait(100);
+  check("N03: stale converted abort error cannot inject retry into the latest results", !document.querySelector("#preview-retry") && document.querySelectorAll("#preview-items .organizer-item").length === 1 && /本次扫描 500 封/.test(summary()));
+  requiredElement("#close-task-detail").click();
+  await wait(100);
+
+  requiredElement('#tasks-list button[data-task-command="preview"][data-task-id="t1"]').click();
+  await wait(100);
+  selectMatched(true);
+  await wait(100);
+  pendingPreviews[5].reject(new Error("503 current filter unavailable"));
+  await wait(100);
+  pendingPreviews[4].resolve(previewResult(false));
+  await wait(100);
+  check("N03: stale success cannot erase the current filter error", !!document.querySelector("#preview-retry") && requiredElement("#preview-footer").textContent.includes("503 current filter unavailable"));
+  document.querySelector("#preview-retry")?.click();
+  await wait(100);
+  check("N03: retry keeps the latest filter and starts without a stale cursor", pendingPreviews[6]?.body.only_matched === true && pendingPreviews[6]?.body.cursor === "");
+  pendingPreviews[6]?.resolve(previewResult(true));
+  await wait(100);
+  check("N03: current filter retry restores only the matched results", document.querySelectorAll("#preview-items .organizer-item").length === 1 && /本次扫描 500 封/.test(summary()));
+  requiredElement("#close-task-detail").click();
+  await wait(100);
+  window.api = previewApi;
 
   // R03: Account status badge in-place updates without stale TLS connection badge
   state.view = "accounts";
