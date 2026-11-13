@@ -6,10 +6,12 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"mail-auto/internal/credentials"
+	"mail-auto/internal/interaction"
 	"mail-auto/internal/store"
 )
 
@@ -36,14 +38,23 @@ type AgentGrant struct {
 	CreatedAt    int64               `json:"created_at"`
 	UpdatedAt    int64               `json:"updated_at"`
 	Stale        bool                `json:"stale_admin_version"`
+	AllFolders   []string            `json:"all_folders"`
 }
+
+// AgentGrantInput states folder scope explicitly per account: an account
+// listed in AllFolders gets every folder (stored as an empty list, the
+// existing Access meaning); any other account must name at least one folder.
+// An empty selection is rejected instead of silently meaning "all". The admin
+// HTTP API requires AllFolders to be present; only in-process callers that
+// leave it nil keep the earlier contract (empty list = all folders).
 type AgentGrantInput struct {
-	Version  int                 `json:"version"`
-	Enabled  bool                `json:"enabled"`
-	Days     int                 `json:"days"`
-	Accounts []string            `json:"accounts"`
-	Folders  map[string][]string `json:"folders"`
-	Actions  []string            `json:"actions"`
+	Version    int                 `json:"version"`
+	Enabled    bool                `json:"enabled"`
+	Days       int                 `json:"days"`
+	Accounts   []string            `json:"accounts"`
+	AllFolders []string            `json:"all_folders"`
+	Folders    map[string][]string `json:"folders"`
+	Actions    []string            `json:"actions"`
 }
 
 func scanGrant(row interface{ Scan(...any) error }) (AgentGrant, error) {
@@ -73,6 +84,12 @@ func (s *Service) CurrentAgentGrant(a Access) (AgentGrant, error) {
 		return g, e
 	}
 	g.Stale = g.AdminVersion != a.Version
+	g.AllFolders = []string{}
+	for _, id := range g.Accounts {
+		if len(g.Folders[id]) == 0 {
+			g.AllFolders = append(g.AllFolders, id)
+		}
+	}
 	return g, nil
 }
 func (s *Service) agentGrant(id string) (AgentGrant, error) {
@@ -113,13 +130,18 @@ func (s *Service) SaveAgentGrant(a Access, in AgentGrantInput) (AgentGrant, erro
 			return AgentGrant{}, ErrInput
 		}
 	}
+	for _, id := range in.AllFolders {
+		if !slices.Contains(in.Accounts, id) || len(in.Folders[id]) > 0 {
+			return AgentGrant{}, ErrInput
+		}
+	}
 	for _, id := range in.Accounts {
 		account, e := s.Account(id)
 		if e != nil {
 			return AgentGrant{}, ErrInput
 		}
 		fs := in.Folders[id]
-		if len(fs) > 100 {
+		if len(fs) > 100 || (in.AllFolders != nil && len(fs) == 0 && !slices.Contains(in.AllFolders, id)) {
 			return AgentGrant{}, ErrInput
 		}
 		for _, f := range fs {
@@ -165,8 +187,15 @@ func (s *Service) SaveAgentGrant(a Access, in AgentGrantInput) (AgentGrant, erro
 	if e != nil {
 		return g, e
 	}
-	if e = invalidateAgentWork(tx, g.ID, "grant_changed", false); e != nil {
+	if e = invalidateAgentWork(tx, g.ID, g.Version, "grant_changed", false); e != nil {
 		return g, e
+	}
+	if b, err := interaction.ActiveBinding(tx); err == nil && b.GrantID == g.ID && s.Vault != nil {
+		// A notice without mailbox data, produced under the new version.
+		conv, _ := interaction.ConversationOf(tx, b.ID)
+		if e = interaction.Enqueue(tx, s.Vault, b, interaction.Reply{SemanticKey: "grant:" + g.ID + ":" + strconv.Itoa(g.Version), Text: "Agent 授权已由管理员更新：此前的对话上下文和未发送的回复已作废，待确认卡片已失效。请重新发送需要的指令。", GrantVersion: g.Version, ContextEpoch: conv.ContextEpoch}); e != nil {
+			return g, e
+		}
 	}
 	if e = store.Audit(tx, "agent.grant.save", g.ID, "ok"); e != nil {
 		return g, e
@@ -196,7 +225,7 @@ func (s *Service) RevokeAgentGrant(a Access) error {
 	if _, e = tx.Exec("UPDATE agent_grants SET revoked=1,enabled=0,updated_at=? WHERE id=?", time.Now().Unix(), id); e != nil {
 		return e
 	}
-	if e = invalidateAgentWork(tx, id, "grant_revoked", true); e != nil {
+	if e = invalidateAgentWork(tx, id, -1, "grant_revoked", true); e != nil {
 		return e
 	}
 	if e = store.Audit(tx, "agent.grant.revoke", id, "ok"); e != nil {
@@ -205,19 +234,34 @@ func (s *Service) RevokeAgentGrant(a Access) error {
 	return tx.Commit()
 }
 
-// invalidateAgentWork fences agent work that depended on a grant. Pending and
-// accepted-but-not-applying proposals become invalid; queued turns are
-// cancelled. When revokeBinding is set the active binding is revoked too.
-func invalidateAgentWork(tx *sql.Tx, grantID, reason string, revokeBinding bool) error {
+// invalidateAgentWork fences everything that depended on the previous grant
+// version, inside the grant transaction (the linearization point): pending,
+// accepted and applying proposals become invalid; queued and running turns
+// are cancelled (a running turn re-checks before its next request or write);
+// the conversation context epoch advances so results obtained under the old
+// scope are never sent to the model again; and unsent replies produced under
+// another grant version are suppressed. When revokeBinding is set the active
+// binding is revoked too.
+func invalidateAgentWork(tx *sql.Tx, grantID string, grantVersion int, reason string, revokeBinding bool) error {
 	now := time.Now().Unix()
-	if _, e := tx.Exec("UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE grant_id=? AND state IN ('pending','accepted')", reason, now, grantID); e != nil {
-		return e
-	}
-	if _, e := tx.Exec("UPDATE agent_turns SET state='cancelled',error_code=?,updated_at=? WHERE state='queued' AND conversation_id IN (SELECT c.id FROM agent_conversations c JOIN telegram_bindings b ON b.id=c.binding_id WHERE b.grant_id=?)", reason, now, grantID); e != nil {
-		return e
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{"UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE grant_id=? AND state IN ('pending','accepted','applying')", []any{reason, now, grantID}},
+		{"UPDATE agent_turns SET state='cancelled',error_code=?,updated_at=? WHERE state IN ('queued','running') AND conversation_id IN (SELECT c.id FROM agent_conversations c JOIN telegram_bindings b ON b.id=c.binding_id WHERE b.grant_id=?)", []any{reason, now, grantID}},
+		{"UPDATE agent_conversations SET context_epoch=context_epoch+1,grant_version=?,updated_at=? WHERE binding_id IN (SELECT id FROM telegram_bindings WHERE grant_id=?)", []any{grantVersion, now, grantID}},
+		{"UPDATE telegram_reply_outbox SET state='suppressed',error_code=?,updated_at=? WHERE grant_id=? AND grant_version<>? AND state IN ('pending','retry','sending')", []any{reason, now, grantID, grantVersion}},
+	} {
+		if _, e := tx.Exec(q.sql, q.args...); e != nil {
+			return e
+		}
 	}
 	if revokeBinding {
 		if _, e := tx.Exec("UPDATE telegram_bindings SET state='revoked',revoked_at=?,revoke_reason=? WHERE grant_id=? AND state='active'", now, reason, grantID); e != nil {
+			return e
+		}
+		if _, e := tx.Exec("UPDATE telegram_reply_outbox SET state='suppressed',error_code=?,updated_at=? WHERE grant_id=? AND state IN ('pending','retry','sending')", reason, now, grantID); e != nil {
 			return e
 		}
 	}
@@ -263,9 +307,29 @@ func auditActor(a Access) string {
 // Mutation is a server-assigned idempotency key for a business write. Kind is
 // a fixed label; the digest binds the key to the caller's normalized input.
 type Mutation struct {
-	ID     string
-	Kind   string
+	ID   string
+	Kind string
+	// Guard, when set, runs inside the business transaction before the
+	// write commits. It is the linearization point between an agent write
+	// and lifecycle changes (grant, stop, provider, binding): those commit
+	// in their own transactions, so the guard sees either the state before
+	// them (and the write precedes them) or after them (and it fails).
+	Guard  func(*sql.Tx) error
 	digest string
+}
+
+// ErrFenced reports that a lifecycle fence (stop, grant/binding/provider
+// change, interaction off) stopped an agent write before it committed.
+var ErrFenced = errors.New("execution_fenced")
+
+func runGuard(tx *sql.Tx, guard func(*sql.Tx) error) error {
+	if guard == nil {
+		return nil
+	}
+	if e := guard(tx); e != nil {
+		return ErrFenced
+	}
+	return nil
 }
 
 func mutationDigest(kind string, args any) string { return digest([]any{kind, args}) }
@@ -297,6 +361,9 @@ func (s *Service) mutationResult(m *Mutation, args any, out any) (bool, error) {
 	return true, nil
 }
 func recordMutation(tx *sql.Tx, m Mutation, a Access, target string, version int, result any) error {
+	if e := runGuard(tx, m.Guard); e != nil {
+		return e
+	}
 	raw, _ := json.Marshal(result)
 	_, e := tx.Exec("INSERT INTO agent_mutations(mutation_id,kind,actor,args_digest,target_id,target_version,result,created_at) VALUES(?,?,?,?,?,?,?,?)", m.ID, m.Kind, a.Owner, m.digest, target, version, string(raw), time.Now().Unix())
 	return e
@@ -401,6 +468,11 @@ func (s *Service) AgentTaskRuns(a Access, taskID string) ([]TaskRun, error) {
 // items. It never changes the run owner, takes over its lease, or executes
 // its frozen plan. AI batches of other owners are not cancelled here.
 func (s *Service) AgentCancelTaskRun(a Access, runID string) (TaskRun, error) {
+	return s.AgentCancelTaskRunGuarded(a, runID, nil)
+}
+
+// AgentCancelTaskRunGuarded applies guard inside the cancellation transaction.
+func (s *Service) AgentCancelTaskRunGuarded(a Access, runID string, guard func(*sql.Tx) error) (TaskRun, error) {
 	a, r, t, e := s.agentRunScope(a, runID)
 	if e != nil {
 		return r, e
@@ -426,6 +498,9 @@ func (s *Service) AgentCancelTaskRun(a Access, runID string) (TaskRun, error) {
 		return r, e
 	}
 	defer tx.Rollback()
+	if e = runGuard(tx, guard); e != nil {
+		return r, e
+	}
 	r.State = "cancelled"
 	r.ErrorCode = ""
 	r.Finalized = false

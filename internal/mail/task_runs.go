@@ -2,6 +2,7 @@ package mail
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,6 +146,12 @@ func (s *Service) TaskRuns(a Access, taskID string) ([]TaskRun, error) {
 	return out, nil
 }
 func (s *Service) RunTask(a Access, in TaskRunInput, source string) (TaskRun, error) {
+	return s.RunTaskGuarded(a, in, source, nil)
+}
+
+// RunTaskGuarded is RunTask with guard checked inside the run-creation
+// transaction. A retry with an existing run key returns that run.
+func (s *Service) RunTaskGuarded(a Access, in TaskRunInput, source string, guard func(*sql.Tx) error) (TaskRun, error) {
 	s.taskMu.Lock()
 	defer s.taskMu.Unlock()
 	a, e := s.CheckAccess(a)
@@ -175,9 +182,12 @@ func (s *Service) RunTask(a Access, in TaskRunInput, source string) (TaskRun, er
 	if _, _, e = s.authorizedAutomation(a, t.AccountID); e != nil {
 		return TaskRun{}, e
 	}
-	return s.createTaskRun(a, t, in.RunKey, source, 0)
+	return s.createTaskRunGuarded(a, t, in.RunKey, source, 0, guard)
 }
 func (s *Service) createTaskRun(a Access, t Task, key, source string, scheduled int64) (TaskRun, error) {
+	return s.createTaskRunGuarded(a, t, key, source, scheduled, nil)
+}
+func (s *Service) createTaskRunGuarded(a Access, t Task, key, source string, scheduled int64, guard func(*sql.Tx) error) (TaskRun, error) {
 	now := time.Now().Unix()
 	owner := a.Owner
 	if owner == "admin" || source == "internal" {
@@ -217,6 +227,9 @@ func (s *Service) createTaskRun(a Access, t Task, key, source string, scheduled 
 	}
 	if version != t.Version {
 		return r, ErrConflict
+	}
+	if e = runGuard(tx, guard); e != nil {
+		return r, e
 	}
 	_, e = tx.Exec("INSERT INTO task_runs(id,task_id,account_id,owner,run_key,task_version,source,state,payload,created_at,updated_at,expires) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", r.ID, t.ID, t.AccountID, owner, key, t.Version, source, r.State, runJSON(r), now, now, r.Expires)
 	if e != nil {

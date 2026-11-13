@@ -22,6 +22,7 @@ type Agent interface {
 	NewSession(bindingID string) string
 	Status(bindingID string) string
 	CancelRun(bindingID, runID string) string
+	RunCommand(bindingID, inputID, taskRef string) string
 }
 
 // Service owns interaction settings, bindings, the poller, the inbox
@@ -167,6 +168,15 @@ func (s *Service) SetEnabled(ctx context.Context, a mail.Access, version int, en
 		next.BotID, next.BotUsername, next.credGen = bot.ID, bot.Username, gen
 		next.Epoch = old.Epoch + 1
 		next.ActivationTime = now
+		// Same bot and credential: the active binding is carried into the new
+		// receive epoch, so inbound, execution and outbound agree. Work and
+		// replies from before were cancelled/suppressed when interaction was
+		// turned off and keep their old epoch, so they are never revived.
+		if old.BotID == bot.ID && old.credGen == gen {
+			if _, err = tx.Exec("UPDATE telegram_bindings SET epoch=? WHERE state='active' AND bot_id=?", next.Epoch, bot.ID); err != nil {
+				return old, err
+			}
+		}
 		next.State, next.ErrorCode = "starting", ""
 		if _, err = tx.Exec("INSERT OR IGNORE INTO telegram_poll_state(bot_id) VALUES(?)", bot.ID); err != nil {
 			return old, err
@@ -210,7 +220,7 @@ func cancelInteractionWork(tx *sql.Tx, reason string) error {
 		// A running turn re-checks its state before every model request and
 		// write, so cancelling it here stops it at the next boundary.
 		"UPDATE agent_turns SET state='cancelled',error_code=?,updated_at=? WHERE state IN ('queued','running')",
-		"UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE state IN ('pending','accepted')",
+		"UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE state IN ('pending','accepted','applying')",
 		"UPDATE telegram_inbox SET state='stale',error_code=?,payload=NULL,updated_at=? WHERE state='pending'",
 		"UPDATE telegram_reply_outbox SET state='suppressed',error_code=?,updated_at=? WHERE state IN ('pending','retry')",
 	} {

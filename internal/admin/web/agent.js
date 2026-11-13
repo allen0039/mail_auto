@@ -65,9 +65,10 @@
       ? accounts.map((a) => {
           const on = current.accounts.includes(a.id);
           const scoped = current.folders?.[a.id] || [];
+          const allScope = on && (current.all_folders ? current.all_folders.includes(a.id) : scoped.length === 0);
           const list = folders[a.id] || [];
           return `<fieldset data-account="${esc(a.id)}"><legend><label class="checkbox-label"><input type="checkbox" data-role="account" ${on ? "checked" : ""} />${esc(a.name)} · ${esc(a.username)}</label></legend>
-            <label class="checkbox-label"><input type="checkbox" data-role="all" ${scoped.length === 0 ? "checked" : ""} />全部文件夹</label>
+            <label class="checkbox-label"><input type="checkbox" data-role="all" ${allScope || !on ? "checked" : ""} />全部文件夹</label>
             <div class="agent-folders">${list.map((f) => `<label class="checkbox-label"><input type="checkbox" data-role="folder" value="${esc(f.name)}" ${scoped.includes(f.name) ? "checked" : ""} />${esc(f.name)}</label>`).join("")}</div></fieldset>`;
         }).join("")
       : '<p class="muted">请先添加邮箱。</p>';
@@ -147,21 +148,49 @@
     if (e.target.dataset.role === "all" && e.target.checked) $$('[data-role="folder"]', box).forEach((x) => (x.checked = false));
   });
 
-  $("#agent-grant-form").addEventListener("submit", wrap(async (e) => {
+  // Folder scope is explicit per account: "全部文件夹" goes to all_folders;
+  // otherwise at least one folder must be ticked. An empty selection is never
+  // sent (the stored empty list means "all folders").
+  function grantBody() {
     const chosen = $$("fieldset[data-account]").filter((f) => $('[data-role="account"]', f).checked);
-    const body = {
-      version: grant?.version || 0,
-      enabled: $("#agent-grant-enabled").checked,
-      days: Number($("#agent-grant-days").value) || 30,
-      accounts: chosen.map((f) => f.dataset.account),
-      folders: Object.fromEntries(chosen.map((f) => [f.dataset.account, $('[data-role="all"]', f).checked ? [] : $$('[data-role="folder"]:checked', f).map((x) => x.value)])),
-      actions: $$(".agent-actions input").filter((x) => x.checked).map((x) => x.value),
+    if (!chosen.length) return { error: "请至少选择一个账号。" };
+    const all = [], folders = {};
+    for (const f of chosen) {
+      const id = f.dataset.account;
+      if ($('[data-role="all"]', f).checked) {
+        all.push(id);
+        folders[id] = [];
+        continue;
+      }
+      const picked = $$('[data-role="folder"]:checked', f).map((x) => x.value);
+      if (!picked.length) return { error: "未勾选“全部文件夹”的账号必须至少选择一个具体文件夹。" };
+      folders[id] = picked;
+    }
+    return {
+      body: {
+        version: grant?.version || 0,
+        enabled: $("#agent-grant-enabled").checked,
+        days: Number($("#agent-grant-days").value) || 30,
+        accounts: chosen.map((f) => f.dataset.account),
+        all_folders: all,
+        folders,
+        actions: $$(".agent-actions input").filter((x) => x.checked).map((x) => x.value),
+      },
     };
+  }
+
+  $("#agent-grant-form").addEventListener("submit", wrap(async (e) => {
+    const { body, error } = grantBody();
+    if (error) {
+      $("#agent-grant-status").textContent = error;
+      notify(error, true);
+      return;
+    }
     await busy($('button[type="submit"]', e.currentTarget), "保存中…", async () => {
       grant = await request("/api/agent/grant", "PUT", body);
       renderGrant();
       renderCapabilities();
-      notify("授权已保存；待确认的方案已失效");
+      notify("授权已保存；待确认的方案和旧对话已失效");
     });
   }));
 

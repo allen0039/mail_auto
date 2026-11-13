@@ -127,6 +127,7 @@ type stubAgent struct {
 	mu        sync.Mutex
 	submitted []string
 	confirms  []string
+	runs      int
 }
 
 func (a *stubAgent) Submit(bindingID, inputID, text string) (int, error) {
@@ -145,6 +146,12 @@ func (a *stubAgent) Stop(string) string              { return "stopped" }
 func (a *stubAgent) NewSession(string) string        { return "new" }
 func (a *stubAgent) Status(string) string            { return "agent status" }
 func (a *stubAgent) CancelRun(string, string) string { return "cancel" }
+func (a *stubAgent) RunCommand(string, string, string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.runs++
+	return "run"
+}
 
 type tgEnv struct {
 	f     *agenttest.Fixture

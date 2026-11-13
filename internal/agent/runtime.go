@@ -262,29 +262,36 @@ type session struct {
 	outcomes []string
 }
 
-// alive re-reads the turn, conversation, binding, grant and provider. Any
-// stop, cancellation, epoch, grant, admin or config change ends the turn
-// before the next model request or business write.
+// alive checks the turn against the shared execution fence (binding, grant,
+// admin, Agent enabled/config version, stop epoch), its running state and
+// context epoch, and that the provider is still ready. Any change ends the
+// turn before the next model request; business writes additionally run the
+// same fence inside their transaction (turnGuard).
 func (r *Runtime) alive(s *session) error {
-	var state string
-	if err := r.Store.DB.QueryRow("SELECT state FROM agent_turns WHERE id=?", s.turn.ID).Scan(&state); err != nil || state != "running" {
-		return errTurnStopped
-	}
-	conv, err := interaction.ConversationOf(r.Store.DB, s.binding.ID)
-	if err != nil || conv.StopEpoch != s.turn.StopEpoch || conv.ContextEpoch != s.conv.ContextEpoch {
-		return errTurnStopped
-	}
-	b, err := interaction.BindingByID(r.Store.DB, s.binding.ID)
-	if err != nil || b.State != "active" {
+	x := execution{BindingID: s.binding.ID, GrantID: s.binding.GrantID, GrantVersion: s.grant.Version, AdminVersion: s.binding.AdminVersion, ConfigVersion: s.provider.version, ConvID: s.conv.ID, StopEpoch: s.turn.StopEpoch}
+	switch fenceReason(r.Store.DB, x, time.Now().Unix()) {
+	case "":
+	case "binding_changed":
 		return errBindingRevoked
-	}
-	a, g, err := r.Mail.AgentIdentity(b.GrantID)
-	if err != nil || g.Version != s.grant.Version {
+	case "grant_changed":
 		return errGrantChanged
+	case "agent_disabled":
+		return ErrNotReady
+	default:
+		return errTurnStopped
+	}
+	var state string
+	var epoch int64
+	if err := r.Store.DB.QueryRow("SELECT t.state,c.context_epoch FROM agent_turns t JOIN agent_conversations c ON c.id=t.conversation_id WHERE t.id=?", s.turn.ID).Scan(&state, &epoch); err != nil || state != "running" || epoch != s.conv.ContextEpoch {
+		return errTurnStopped
 	}
 	p, err := r.loadProvider()
 	if err != nil || p.version != s.provider.version || !p.ready() {
 		return ErrNotReady
+	}
+	a, _, err := r.Mail.AgentIdentity(s.binding.GrantID)
+	if err != nil {
+		return errGrantChanged
 	}
 	s.access = a
 	return nil
@@ -314,7 +321,7 @@ func (r *Runtime) finishTurn(s *session, state, code, text string) {
 		if len(s.outcomes) > 0 {
 			text += "\n\n操作记录（以服务端实际结果为准）：\n" + strings.Join(s.outcomes, "\n")
 		}
-		if err = interaction.Enqueue(tx, r.Vault, s.binding, interaction.Reply{SemanticKey: "turn:" + s.turn.ID + ":final", Text: text, ContextEpoch: s.conv.ContextEpoch}); err != nil {
+		if err = interaction.Enqueue(tx, r.Vault, s.binding, interaction.Reply{SemanticKey: "turn:" + s.turn.ID + ":final", Text: text, ContextEpoch: s.conv.ContextEpoch, GrantVersion: s.grant.Version}); err != nil {
 			return
 		}
 	}
@@ -551,7 +558,7 @@ func (r *Runtime) executeCall(ctx context.Context, s *session, ordinal int, call
 		setState("skipped", err.Error(), "")
 		return toolError("turn_stopped", "本轮已停止")
 	}
-	res, encoded, err := r.Tools.Invoke(ctx, mailtools.Call{Service: r.Mail, Access: s.access, ActionID: action}, call.Name, canonical)
+	res, encoded, err := r.Tools.Invoke(ctx, mailtools.Call{Service: r.Mail, Access: s.access, ActionID: action, Guard: r.turnGuard(s)}, call.Name, canonical)
 	var proposalID string
 	if err == nil && res.Proposal != nil {
 		proposalID, err = r.createProposal(s, res.Proposal)
@@ -720,16 +727,17 @@ func (r *Runtime) resetContext(convID string, grantVersion int, reason string) e
 // user is told which writes completed. Accepted proposals resume through
 // their idempotent steps unless a stop marker supersedes them.
 func (r *Runtime) recover() {
-	rows, err := r.Store.DB.Query("SELECT t.id,t.conversation_id,c.binding_id,c.context_epoch FROM agent_turns t JOIN agent_conversations c ON c.id=t.conversation_id WHERE t.state='running'")
+	rows, err := r.Store.DB.Query("SELECT t.id,t.conversation_id,c.binding_id,c.context_epoch,t.grant_version FROM agent_turns t JOIN agent_conversations c ON c.id=t.conversation_id WHERE t.state='running'")
 	if err == nil {
 		type item struct {
 			id, conv, binding string
 			epoch             int64
+			grant             int
 		}
 		items := []item{}
 		for rows.Next() {
 			var it item
-			if rows.Scan(&it.id, &it.conv, &it.binding, &it.epoch) == nil {
+			if rows.Scan(&it.id, &it.conv, &it.binding, &it.epoch, &it.grant) == nil {
 				items = append(items, it)
 			}
 		}
@@ -751,7 +759,7 @@ func (r *Runtime) recover() {
 							text += "\n没有已完成的写入。"
 						}
 						text += "\n如需继续，请重新发送明确指令。"
-						_ = interaction.Enqueue(tx, r.Vault, b, interaction.Reply{SemanticKey: "turn:" + it.id + ":interrupted", Text: text, ContextEpoch: it.epoch})
+						_ = interaction.Enqueue(tx, r.Vault, b, interaction.Reply{SemanticKey: "turn:" + it.id + ":interrupted", Text: text, ContextEpoch: it.epoch, GrantVersion: it.grant})
 					}
 				}
 			}
@@ -765,23 +773,26 @@ func (r *Runtime) recover() {
 	r.resumeProposals()
 }
 
+// completedWrites lists the committed writes of a turn with one query. The
+// store has a single connection: no other query may run while rows are open,
+// so the mutation targets are joined here instead of looked up per row.
 func (r *Runtime) completedWrites(turnID string) []string {
-	rows, err := r.Store.DB.Query("SELECT name,action_id FROM agent_tool_calls WHERE turn_id=? AND state='done' AND risk IN ('draft','run') ORDER BY ordinal", turnID)
+	rows, err := r.Store.DB.Query("SELECT t.name,COALESCE(m.target_id,''),COALESCE(m.target_version,0) FROM agent_tool_calls t LEFT JOIN agent_mutations m ON m.mutation_id='action:'||t.action_id WHERE t.turn_id=? AND t.state='done' AND t.risk IN ('draft','run') ORDER BY t.ordinal", turnID)
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
 	out := []string{}
 	for rows.Next() {
-		var name, action string
-		if rows.Scan(&name, &action) == nil {
-			target, version, ok, _ := r.Mail.MutationTarget("action:" + action)
-			if ok {
+		var name, target string
+		var version int
+		if rows.Scan(&name, &target, &version) == nil {
+			if target != "" {
 				out = append(out, fmt.Sprintf("· %s → %s（版本 %d）", name, target, version))
 			} else {
 				out = append(out, "· "+name)
 			}
 		}
 	}
+	rows.Close()
 	return out
 }

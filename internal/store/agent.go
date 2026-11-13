@@ -43,6 +43,33 @@ CREATE INDEX IF NOT EXISTS telegram_reply_due ON telegram_reply_outbox(state,nex
 	return e
 }
 
+// migrateAgentFences adds the schema 11 fence columns. Rows written by a
+// schema 10 binary get conservative defaults: version 0 never matches a live
+// grant or provider version, so old proposals cannot be confirmed or applied
+// and old queued replies are never sent. Unfinished ones are closed here
+// explicitly as well, so nothing from before the upgrade is revived.
+func migrateAgentFences(tx *sql.Tx, current int) error {
+	if current >= 11 {
+		return nil
+	}
+	for _, c := range []struct{ table, column string }{{"agent_proposals", "config_version"}, {"telegram_reply_outbox", "grant_version"}, {"telegram_inbox", "control"}} {
+		var n int
+		if e := tx.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", c.table, c.column).Scan(&n); e != nil {
+			return e
+		}
+		if n == 0 {
+			if _, e := tx.Exec("ALTER TABLE " + c.table + " ADD COLUMN " + c.column + " INTEGER NOT NULL DEFAULT 0"); e != nil {
+				return e
+			}
+		}
+	}
+	_, e := tx.Exec(`
+CREATE INDEX IF NOT EXISTS telegram_inbox_control ON telegram_inbox(state,control,received_at);
+UPDATE agent_proposals SET state='invalidated',error_code='schema_upgrade' WHERE state IN ('pending','accepted','applying');
+UPDATE telegram_reply_outbox SET state='suppressed',error_code='schema_upgrade' WHERE state IN ('pending','retry','sending');`)
+	return e
+}
+
 // cleanupAgent applies the agent/Telegram retention: conversation and reply
 // payloads after 7 days, idempotency and minimal records after 60 days. It
 // only touches terminal records; pending proposals, queued or running turns,

@@ -107,7 +107,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.5.0</span>
+          <span class="badge badge-subtle app-version-label">v0.5.1</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -119,7 +119,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.5.0</span>
+            <span class="app-version-label">v0.5.1</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -202,7 +202,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.5.0</span>
+            个人邮件工作台 <span class="app-version-label">v0.5.1</span>
           </div>
         </div>
 
@@ -909,7 +909,7 @@
 
             <article class="panel organizer-card">
               <h2>Agent 授权</h2>
-              <p class="muted small">Agent 使用独立、可撤销的身份，与管理员自动化策略取交集，不能扩大策略。默认只勾选“查询”。执行任务需要授权覆盖策略中的全部来源文件夹及目的文件夹（建议“全部文件夹”）。</p>
+              <p class="muted small">每个账号须明确选择“全部文件夹”或至少一个具体文件夹，空选择不能保存。Agent 使用独立、可撤销的身份，与管理员自动化策略取交集，不能扩大策略。默认只勾选“查询”。执行任务需要授权覆盖策略中的全部来源文件夹及目的文件夹（建议“全部文件夹”）。</p>
               <form id="agent-grant-form" class="rules-form margin-t-16">
                 <div id="agent-grant-accounts" class="agent-grant-accounts"></div>
                 <fieldset class="agent-actions">
@@ -938,7 +938,7 @@
 
             <article class="panel organizer-card">
               <h2>Telegram 私聊交互</h2>
-              <p class="muted small">复用「TG 通知」中保存的 Bot Token；交互开关与通知开关相互独立，通知仍发往原通知 Chat。仅支持长轮询；若 Bot 已设置 webhook 会报告冲突且不会删除。Telegram 服务端最多保留 24 小时更新，离线超过该时间的消息无法补齐。</p>
+              <p class="muted small">复用「TG 通知」中保存的 Bot Token；交互开关与通知开关相互独立，通知仍发往原通知 Chat。仅支持长轮询；若 Bot 已设置 webhook 会报告冲突且不会删除。Telegram 服务端最多保留 24 小时更新，离线超过该时间的消息无法补齐。对话中请求执行任务只会发送确认卡片；<code>/run &lt;task_id&gt;</code> 可直接运行一次已启用任务。关闭后用同一 Bot 重新开启会保留绑定。</p>
               <div id="agent-telegram-state" class="margin-t-12"></div>
               <div class="organizer-inline margin-t-12">
                 <button id="agent-telegram-toggle" type="button" class="primary">开启交互</button>
@@ -1031,7 +1031,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.5.0</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.5.1</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>

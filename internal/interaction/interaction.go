@@ -117,6 +117,10 @@ func SplitText(text string, max int) []string {
 
 // Reply is a queued Telegram reply.
 type Reply struct {
+	// GrantVersion is the grant version under which the content was
+	// produced. Delivery requires the live grant to still have it; replies
+	// to unbound chats (no binding) carry 0 and contain no mailbox data.
+	GrantVersion  int
 	SemanticKey   string
 	Text          string
 	Buttons       []Button
@@ -157,7 +161,7 @@ func Enqueue(q Querier, vault *credentials.Vault, b Binding, r Reply) error {
 		if err != nil {
 			return err
 		}
-		if _, err = q.Exec("INSERT OR IGNORE INTO telegram_reply_outbox(id,semantic_key,part,bot_id,chat_id,binding_id,grant_id,admin_version,epoch,context_epoch,payload,edit_message_id,state,next_attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)", id, r.SemanticKey, i, b.BotID, b.ChatID, b.ID, b.GrantID, b.AdminVersion, b.Epoch, r.ContextEpoch, sealed, r.EditMessageID, now, now, now); err != nil {
+		if _, err = q.Exec("INSERT OR IGNORE INTO telegram_reply_outbox(id,semantic_key,part,bot_id,chat_id,binding_id,grant_id,grant_version,admin_version,epoch,context_epoch,payload,edit_message_id,state,next_attempt,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?)", id, r.SemanticKey, i, b.BotID, b.ChatID, b.ID, b.GrantID, r.GrantVersion, b.AdminVersion, b.Epoch, r.ContextEpoch, sealed, r.EditMessageID, now, now, now); err != nil {
 			return err
 		}
 	}
@@ -175,4 +179,35 @@ func DecodeReply(vault *credentials.Vault, id string, sealed []byte) (string, []
 		return "", nil, err
 	}
 	return p.Text, p.Buttons, nil
+}
+
+// CurrentGrantVersion returns the live version of a grant (0 if missing),
+// for replies produced right now under the current grant.
+func CurrentGrantVersion(q Querier, grantID string) int {
+	var v int
+	_ = q.QueryRow("SELECT version FROM agent_grants WHERE id=? AND revoked=0", grantID).Scan(&v)
+	return v
+}
+
+// Deliverable is the final check before a bound reply leaves the process.
+// It requires the binding to be active and unchanged, and the live grant to
+// be enabled, unexpired, unrevoked, at the frozen version and bound to the
+// current administrator version.
+func Deliverable(q Querier, bindingID, grantID string, grantVersion, adminVersion int, chatID int64, now int64) string {
+	b, err := BindingByID(q, bindingID)
+	if err != nil || b.State != "active" || b.GrantID != grantID || b.AdminVersion != adminVersion || b.ChatID != chatID {
+		return "binding_changed"
+	}
+	var version, gAdmin, enabled, revoked, admin int
+	var expires int64
+	if q.QueryRow("SELECT version,admin_version,enabled,revoked,expires FROM agent_grants WHERE id=?", grantID).Scan(&version, &gAdmin, &enabled, &revoked, &expires) != nil {
+		return "grant_changed"
+	}
+	if q.QueryRow("SELECT version FROM admin WHERE id=1").Scan(&admin) != nil {
+		return "grant_changed"
+	}
+	if version != grantVersion || enabled != 1 || revoked != 0 || expires <= now || gAdmin != adminVersion || admin != adminVersion {
+		return "grant_changed"
+	}
+	return ""
 }

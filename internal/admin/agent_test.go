@@ -103,3 +103,43 @@ func TestAgentAPIBoundaryAndRedaction(t *testing.T) {
 		t.Fatal("agent.js not served", w.Code)
 	}
 }
+
+// AT-AUD-08: folder scope must be explicit; an empty selection is refused
+// and never stored as "all folders".
+func TestAgentGrantFolderScopeIsExplicit(t *testing.T) {
+	b, server := loggedIn(t)
+	db := server.Auth.Store.DB
+	if _, err := db.Exec("INSERT INTO accounts VALUES('acc','fixture','qq','f@qq.com','imap.qq.com',993,'[]',X'01','',1); INSERT INTO mailboxes VALUES('acc','INBOX',7,1),('acc','Archive',7,1)"); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"legacy body without all_folders": `{"version":0,"enabled":true,"accounts":["acc"],"folders":{"acc":[]},"actions":["read"]}`,
+		"empty selection":                 `{"version":0,"enabled":true,"accounts":["acc"],"all_folders":[],"folders":{"acc":[]},"actions":["read"]}`,
+		"all plus folders":                `{"version":0,"enabled":true,"accounts":["acc"],"all_folders":["acc"],"folders":{"acc":["INBOX"]},"actions":["read"]}`,
+	} {
+		if w := b.request("PUT", "/api/agent/grant", body, true); w.Code != 400 {
+			t.Fatal(name, "accepted", w.Code, w.Body)
+		}
+	}
+	var grants int
+	_ = db.QueryRow("SELECT count(*) FROM agent_grants").Scan(&grants)
+	if grants != 0 {
+		t.Fatal("refused request stored a grant")
+	}
+	w := b.request("PUT", "/api/agent/grant", `{"version":0,"enabled":true,"accounts":["acc"],"all_folders":[],"folders":{"acc":["Archive"]},"actions":["read"]}`, true)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	w = b.request("GET", "/api/agent/grant", "", false)
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"folders":{"acc":["Archive"]}`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"all_folders":[]`)) {
+		t.Fatal("partial scope echo", w.Body)
+	}
+	w = b.request("PUT", "/api/agent/grant", `{"version":1,"enabled":true,"accounts":["acc"],"all_folders":["acc"],"folders":{"acc":[]},"actions":["read"]}`, true)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	w = b.request("GET", "/api/agent/grant", "", false)
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"all_folders":["acc"]`)) {
+		t.Fatal("all-folder scope echo", w.Body)
+	}
+}

@@ -141,12 +141,9 @@ func TestEndToEndTelegramAgentWorkflow(t *testing.T) {
 		t.Fatal("no result message", joined)
 	}
 	// Explicit run request; the same update redelivered creates no second run.
-	run := textUpdate(23, 42, 42, "private", "立即执行刚才的任务", time.Now().Unix())
-	e.bot.push(run)
+	// A natural-language execution request only yields a confirmation card.
+	e.bot.push(textUpdate(23, 42, 42, "private", "立即执行刚才的任务", time.Now().Unix()))
 	if _, err = e.tg.PollOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err = e.tg.Ingest(mustSettings(t, e), credGen(t, e), lease(t, e), []json.RawMessage{mustRaw(run)}); err != nil {
 		t.Fatal(err)
 	}
 	e.drain(t)
@@ -155,12 +152,27 @@ func TestEndToEndTelegramAgentWorkflow(t *testing.T) {
 	e.drain(t)
 	var runs int
 	_ = e.f.Store.DB.QueryRow("SELECT count(*) FROM task_runs").Scan(&runs)
+	if runs != 0 {
+		t.Fatal("natural-language request queued a run without confirmation", runs)
+	}
+	// The deterministic /run command is the user's explicit execution
+	// intent; the same update redelivered does not create a second run.
+	run := textUpdate(24, 42, 42, "private", "/run "+taskID[:8], time.Now().Unix())
+	e.bot.push(run)
+	if _, err = e.tg.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.tg.Ingest(mustSettings(t, e), credGen(t, e), lease(t, e), []json.RawMessage{mustRaw(run)}); err != nil {
+		t.Fatal(err)
+	}
+	e.drain(t)
+	_ = e.f.Store.DB.QueryRow("SELECT count(*) FROM task_runs").Scan(&runs)
 	if runs != 1 {
 		t.Fatal("runs", runs)
 	}
 	var link int
 	_ = e.f.Store.DB.QueryRow("SELECT count(*) FROM agent_run_links").Scan(&link)
-	if link != 1 || !strings.Contains(strings.Join(e.bot.texts(), "\n"), "已入队运行") {
+	if link != 1 || !strings.Contains(strings.Join(e.bot.texts(), "\n"), "已按 /run 指令入队一次运行") {
 		t.Fatal("run not linked or reported", link)
 	}
 }

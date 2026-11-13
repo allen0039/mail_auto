@@ -288,11 +288,21 @@ func TestSplittingPlainText429AndUnknownDelivery(t *testing.T) {
 	e := newTGEnv(t, nil)
 	e.bind(t)
 	b, _ := interaction.ActiveBinding(e.f.Store.DB)
-	if err := interaction.Enqueue(e.f.Store.DB, e.f.Vault, b, interaction.Reply{SemanticKey: "long", Text: "<b>不解析</b> " + long}); err != nil {
+	if err := interaction.Enqueue(e.f.Store.DB, e.f.Vault, b, interaction.Reply{SemanticKey: "long", Text: "<b>不解析</b> " + long, GrantVersion: interaction.CurrentGrantVersion(e.f.Store.DB, b.GrantID)}); err != nil {
+		t.Fatal(err)
+	}
+	// A bound reply without the grant version it was produced under is
+	// never delivered.
+	if err := interaction.Enqueue(e.f.Store.DB, e.f.Vault, b, interaction.Reply{SemanticKey: "unversioned", Text: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	e.bot.rateLimit = 1
 	e.drain(t)
+	var unversioned string
+	_ = e.f.Store.DB.QueryRow("SELECT state FROM telegram_reply_outbox WHERE semantic_key='unversioned'").Scan(&unversioned)
+	if unversioned != "suppressed" {
+		t.Fatal("unversioned bound reply was not suppressed", unversioned)
+	}
 	time.Sleep(1100 * time.Millisecond)
 	e.drain(t)
 	var retried int
@@ -312,7 +322,7 @@ func TestSplittingPlainText429AndUnknownDelivery(t *testing.T) {
 	}
 	// A send that times out is retried and then marked unknown; it is only
 	// a message, never a business operation.
-	if err := interaction.Enqueue(e.f.Store.DB, e.f.Vault, b, interaction.Reply{SemanticKey: "slow", Text: "x"}); err != nil {
+	if err := interaction.Enqueue(e.f.Store.DB, e.f.Vault, b, interaction.Reply{SemanticKey: "slow", Text: "x", GrantVersion: interaction.CurrentGrantVersion(e.f.Store.DB, b.GrantID)}); err != nil {
 		t.Fatal(err)
 	}
 	e.bot.sendTimeout, e.bot.block = 3, 2500*time.Millisecond

@@ -87,7 +87,7 @@ func draftTools(r *Registry) {
 			return Result{}, err
 		}
 		rule.Enabled = false
-		saved, err := c.Service.SaveRuleWithMutation(c.Access, rule, mail.Mutation{ID: "action:" + c.ActionID, Kind: "rule.save"})
+		saved, err := c.Service.SaveRuleWithMutation(c.Access, rule, mail.Mutation{ID: "action:" + c.ActionID, Kind: "rule.save", Guard: c.Guard})
 		if err != nil {
 			return Result{}, err
 		}
@@ -124,7 +124,7 @@ func draftTools(r *Registry) {
 			return Result{}, err
 		}
 		t.NextTimes, t.LastState = nil, ""
-		saved, err := c.Service.SaveTaskWithMutation(c.Access, t, mail.Mutation{ID: "action:" + c.ActionID, Kind: "task.save"})
+		saved, err := c.Service.SaveTaskWithMutation(c.Access, t, mail.Mutation{ID: "action:" + c.ActionID, Kind: "task.save", Guard: c.Guard})
 		if err != nil {
 			return Result{}, err
 		}
@@ -149,31 +149,12 @@ func proposalTools(r *Registry) {
 }
 
 func runTools(r *Registry) {
-	def(r, "run_task", RiskRun, true, "Run a fixed-rule task once because the user explicitly asked to execute it now. An enabled task at its current version is queued directly; a paused task returns a confirmation card. Returns the real run ID; poll get_task_run for results.", `{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`, func(ctx context.Context, c Call, in taskIDIn) (Result, error) {
-		t, err := c.Service.Task(c.Access, in.TaskID)
+	def(r, "run_task", RiskProposal, false, "Prepare a confirmation card to run a fixed-rule task once. It NEVER queues a run by itself: the run starts only after the user presses the card's confirm button. The user can also run an enabled task directly with the command /run <task_id>.", `{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`, func(ctx context.Context, c Call, in taskIDIn) (Result, error) {
+		prop, err := RunProposal(c.Service, c.Access, in.TaskID)
 		if err != nil {
 			return Result{}, err
 		}
-		if t.Engine != "rules" {
-			return Result{}, fail("capability_unavailable", "首版内置 Agent 不触发 AI 引擎任务；请改用固定条件规则任务")
-		}
-		if !t.Enabled {
-			p, err := c.Service.EffectivePolicy(c.Access, t.AccountID)
-			if err != nil {
-				return Result{}, err
-			}
-			digest, err := c.Service.AccountStateDigest(t.AccountID)
-			if err != nil {
-				return Result{}, err
-			}
-			prop := &Proposal{Kind: "run_task", AccountID: t.AccountID, Title: "执行暂停中的任务一次", Summary: "任务当前为暂停状态。确认后只手动运行一次，不改变暂停状态。\n" + DescribeTask(t, p), Steps: []Step{{Kind: "task_run", TaskID: t.ID, Version: t.Version, FromStep: -1, DraftRuleStep: -1}}, StateDigest: digest}
-			return Result{Data: map[string]any{"status": "confirmation_required", "task_id": t.ID}, Proposal: prop}, nil
-		}
-		run, err := c.Service.RunTask(c.Access, mail.TaskRunInput{TaskID: t.ID, Version: t.Version, RunKey: "agent:" + c.ActionID}, "manual")
-		if err != nil {
-			return Result{}, err
-		}
-		return Result{Data: map[string]any{"status": "queued", "run": RunView(run), "note": "已入队；结果以运行记录为准，未知结果不算成功"}}, nil
+		return Result{Data: map[string]any{"status": "confirmation_required", "task_id": in.TaskID, "summary": prop.Summary}, Proposal: prop}, nil
 	})
 	def(r, "pause_task", RiskRun, true, "Pause a task immediately at its current version. Already started writes are not rolled back.", `{"type":"object","properties":{"task_id":{"type":"string"}},"required":["task_id"],"additionalProperties":false}`, func(ctx context.Context, c Call, in taskIDIn) (Result, error) {
 		t, err := c.Service.Task(c.Access, in.TaskID)
@@ -183,14 +164,14 @@ func runTools(r *Registry) {
 		if !t.Enabled {
 			return Result{Data: map[string]any{"status": "already_paused", "task_id": t.ID, "version": t.Version}}, nil
 		}
-		saved, err := c.Service.SetTaskEnabledWithMutation(c.Access, t.ID, t.Version, false, mail.Mutation{ID: "action:" + c.ActionID, Kind: "task.enabled"})
+		saved, err := c.Service.SetTaskEnabledWithMutation(c.Access, t.ID, t.Version, false, mail.Mutation{ID: "action:" + c.ActionID, Kind: "task.enabled", Guard: c.Guard})
 		if err != nil {
 			return Result{}, err
 		}
 		return Result{Data: map[string]any{"status": "paused", "task_id": saved.ID, "version": saved.Version, "note": "已暂停；已完成的邮件动作保留"}}, nil
 	})
 	def(r, "cancel_task_run", RiskRun, true, "Stop the not-yet-started items of an active fixed-rule run. Completed moves remain; this is not a rollback.", `{"type":"object","properties":{"run_id":{"type":"string"}},"required":["run_id"],"additionalProperties":false}`, func(ctx context.Context, c Call, in runIDIn) (Result, error) {
-		run, err := c.Service.AgentCancelTaskRun(c.Access, in.RunID)
+		run, err := c.Service.AgentCancelTaskRunGuarded(c.Access, in.RunID, c.Guard)
 		if err != nil {
 			return Result{}, err
 		}
@@ -383,4 +364,39 @@ func proposeTaskChange(c Call, in taskChangeIn) (Result, error) {
 	summary := strings.Join(lines, "\n")
 	prop := &Proposal{Kind: "task_change", AccountID: old.AccountID, Title: "修改任务", Summary: summary, Steps: []Step{{Kind: "task_save", Task: &next, FromStep: -1, DraftRuleStep: -1}}, StateDigest: digest}
 	return Result{Data: map[string]any{"status": "confirmation_required", "summary": summary}, Proposal: prop}, nil
+}
+
+// RunProposal builds the server-side confirmation for running a fixed-rule
+// task once at its current version. Model-originated execution always goes
+// through it; only the deterministic /run command may queue directly.
+func RunProposal(svc *mail.Service, a mail.Access, taskID string) (*Proposal, error) {
+	t, err := svc.Task(a, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if t.Engine != "rules" {
+		return nil, fail("capability_unavailable", "首版内置 Agent 不触发 AI 引擎任务；请改用固定条件规则任务")
+	}
+	if !hasAction(a, t.AccountID, "automation") {
+		return nil, mail.ErrDenied
+	}
+	p, err := svc.EffectivePolicy(a, t.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	digest, err := svc.AccountStateDigest(t.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	state := "任务已启用。确认后立即手动运行一次（不改变日程）。"
+	title := "运行任务一次"
+	if !t.Enabled {
+		state = "任务当前为暂停状态。确认后只手动运行一次，不改变暂停状态。"
+		title = "执行暂停中的任务一次"
+	}
+	mode := "观察模式：只记录候选，不写原邮箱。"
+	if t.Mode == "execute" {
+		mode = "执行模式：将按规则实际写入原邮箱（受每批上限和保护约束）。"
+	}
+	return &Proposal{Kind: "run_task", AccountID: t.AccountID, Title: title, Summary: state + "\n" + mode + "\n" + DescribeTask(t, p), Steps: []Step{{Kind: "task_run", TaskID: t.ID, Version: t.Version, FromStep: -1, DraftRuleStep: -1}}, StateDigest: digest}, nil
 }

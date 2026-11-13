@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the newest database layout this binary can open.
-const SchemaVersion = 10
+const SchemaVersion = 11
 
 type Store struct {
 	DB      *sql.DB
@@ -130,7 +130,10 @@ func (s *Store) migrate() error {
 	if e = migrateAgent(tx); e != nil {
 		return e
 	}
-	if _, e = tx.Exec("PRAGMA user_version=10"); e != nil {
+	if e = migrateAgentFences(tx, current); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("PRAGMA user_version=11"); e != nil {
 		return e
 	}
 	return tx.Commit()

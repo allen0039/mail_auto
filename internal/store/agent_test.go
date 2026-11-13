@@ -43,7 +43,7 @@ INSERT INTO notification_channel VALUES(1,4,'{"enabled":true,"chat_id":"1","poli
 	}
 	var version int
 	_ = s.DB.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 10 || SchemaVersion != 10 {
+	if version != 11 || SchemaVersion != 11 {
 		t.Fatal("schema", version)
 	}
 	var policy, task, channel string
@@ -148,4 +148,38 @@ INSERT INTO agent_run_links(task_run_id,conversation_id,binding_id,last_state,cr
 
 func openRaw(dir string) (*sql.DB, error) {
 	return sql.Open("sqlite", "file:"+filepath.Join(dir, "mail-auto.db"))
+}
+
+// Schema 10 → 11 adds the fence columns with conservative defaults and
+// closes unfinished proposals and unsent replies from the old binary.
+func TestSchema10To11ClosesOldAgentWork(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`ALTER TABLE agent_proposals DROP COLUMN config_version; ALTER TABLE telegram_reply_outbox DROP COLUMN grant_version; DROP INDEX telegram_inbox_control; ALTER TABLE telegram_inbox DROP COLUMN control;
+INSERT INTO agent_proposals(id,conversation_id,binding_id,turn_id,token_hash,kind,state,state_digest,grant_id,grant_version,admin_version,intent_epoch,context_epoch,stop_epoch,expires,created_at,updated_at) VALUES('p','c','b','t','h','workflow','applying','d','g',1,1,1,1,0,9999999999,1,1);
+INSERT INTO telegram_reply_outbox(id,semantic_key,part,bot_id,chat_id,binding_id,admin_version,epoch,payload,state,next_attempt,created_at,updated_at) VALUES('o','k',0,1,1,'b',1,1,X'00','pending',0,1,1);
+PRAGMA user_version=10;`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if s, err = Open(dir); err != nil {
+		t.Fatal(err)
+	}
+	var version, gv int
+	var pState, oState string
+	_ = s.DB.QueryRow("PRAGMA user_version").Scan(&version)
+	_ = s.DB.QueryRow("SELECT state FROM agent_proposals WHERE id='p'").Scan(&pState)
+	_ = s.DB.QueryRow("SELECT state,grant_version FROM telegram_reply_outbox WHERE id='o'").Scan(&oState, &gv)
+	if version != 11 || pState != "invalidated" || oState != "suppressed" || gv != 0 {
+		t.Fatal(version, pState, oState, gv)
+	}
+	s.Close()
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal("re-open after upgrade", err)
+	}
+	reopened.Close()
 }

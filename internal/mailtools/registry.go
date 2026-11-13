@@ -39,6 +39,8 @@ type Call struct {
 	Service  *mail.Service
 	Access   mail.Access
 	ActionID string
+	// Guard is checked inside each business transaction (see mail.Mutation).
+	Guard func(*sql.Tx) error
 }
 
 // Result is a tool outcome. Proposal is set when the requested change needs
@@ -75,6 +77,8 @@ func CodeOf(e error) *Error {
 		return nil
 	case errors.As(e, &te):
 		return te
+	case errors.Is(e, mail.ErrFenced):
+		return &Error{Code: "execution_fenced", Hint: "本轮或方案已被停止、授权/绑定/模型配置已变化，或交互已关闭；未提交的写入已停止"}
 	case errors.Is(e, mail.ErrDenied):
 		return &Error{Code: "permission_denied", Hint: "当前 Agent 授权或自动化策略不允许该操作；如需扩大范围请由管理员在 Web 调整"}
 	case errors.Is(e, mail.ErrConflict):

@@ -269,6 +269,7 @@ func (s *Service) Ingest(st Settings, credGen int, lease int64, raw []json.RawMe
 		date    int64
 		payload *inboxPayload
 		text    bool
+		control bool
 	}
 	events := []event{}
 	var maxID int64 = -1
@@ -305,6 +306,8 @@ func (s *Service) Ingest(st Settings, credGen int, lease int64, raw []json.RawMe
 				default:
 					ev.state, ev.code, ev.payload = "pending", "", &inboxPayload{Text: m.Text}
 					ev.text = !strings.HasPrefix(m.Text, "/")
+					cmd, _ := validCommand(m.Text)
+					ev.control = isControl(cmd)
 				}
 			case u.CallbackQuery != nil:
 				q := u.CallbackQuery
@@ -319,6 +322,7 @@ func (s *Service) Ingest(st Settings, credGen int, lease int64, raw []json.RawMe
 				default:
 					ev.chat, ev.message = q.Message.Chat.ID, q.Message.MessageID
 					ev.state, ev.code, ev.payload = "pending", "", &inboxPayload{Data: q.Data, CallbackID: q.ID}
+					ev.control = true
 				}
 			}
 		}
@@ -364,7 +368,11 @@ func (s *Service) Ingest(st Settings, credGen int, lease int64, raw []json.RawMe
 				return err
 			}
 		}
-		res, err := tx.Exec("INSERT OR IGNORE INTO telegram_inbox(id,bot_id,update_id,epoch,binding_id,kind,user_id,chat_id,message_id,payload,received_at,event_at,state,error_code,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, st.BotID, ev.id, st.Epoch, bindingID, ev.kind, ev.user, ev.chat, ev.message, sealed, now, ev.date, ev.state, ev.code, now)
+		// Control events (stop/cancel/status/help and button presses) of the
+		// bound user are flagged at receipt so they are dispatched ahead of
+		// natural-language work without decrypting the inbox to find them.
+		control := ev.control && bindingID != ""
+		res, err := tx.Exec("INSERT OR IGNORE INTO telegram_inbox(id,bot_id,update_id,epoch,binding_id,kind,user_id,chat_id,message_id,payload,received_at,event_at,state,error_code,updated_at,control) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, st.BotID, ev.id, st.Epoch, bindingID, ev.kind, ev.user, ev.chat, ev.message, sealed, now, ev.date, ev.state, ev.code, now, control)
 		if err != nil {
 			return err
 		}
@@ -391,17 +399,18 @@ func (s *Service) Ingest(st Settings, credGen int, lease int64, raw []json.RawMe
 }
 
 type inboxRow struct {
-	ID        string
-	BotID     int64
-	UpdateID  int64
-	Epoch     int64
-	BindingID string
-	Kind      string
-	UserID    int64
-	ChatID    int64
-	MessageID int64
-	Payload   []byte
-	EventAt   int64
+	ID         string
+	BotID      int64
+	UpdateID   int64
+	Epoch      int64
+	BindingID  string
+	Kind       string
+	UserID     int64
+	ChatID     int64
+	MessageID  int64
+	Payload    []byte
+	EventAt    int64
+	ReceivedAt int64
 }
 
 func (s *Service) finishInbox(id, state, code string) {
@@ -413,7 +422,7 @@ func (s *Service) finishInbox(id, state, code string) {
 // an agent turn. Unbound input never reaches the model.
 func (s *Service) ProcessOne(ctx context.Context) bool {
 	var r inboxRow
-	err := s.Store.DB.QueryRow("SELECT id,bot_id,update_id,epoch,binding_id,kind,user_id,chat_id,message_id,payload,event_at FROM telegram_inbox WHERE state='pending' ORDER BY received_at,update_id LIMIT 1").Scan(&r.ID, &r.BotID, &r.UpdateID, &r.Epoch, &r.BindingID, &r.Kind, &r.UserID, &r.ChatID, &r.MessageID, &r.Payload, &r.EventAt)
+	err := s.Store.DB.QueryRow("SELECT id,bot_id,update_id,epoch,binding_id,kind,user_id,chat_id,message_id,payload,event_at,received_at FROM telegram_inbox WHERE state='pending' ORDER BY control DESC,received_at,update_id LIMIT 1").Scan(&r.ID, &r.BotID, &r.UpdateID, &r.Epoch, &r.BindingID, &r.Kind, &r.UserID, &r.ChatID, &r.MessageID, &r.Payload, &r.EventAt, &r.ReceivedAt)
 	if err != nil {
 		return false
 	}
@@ -450,8 +459,15 @@ func (s *Service) ProcessOne(ctx context.Context) bool {
 		return true
 	}
 	cmd, arg := validCommand(p.Text)
+	// Snapshot the grant version and context epoch BEFORE any command result
+	// is produced, and stamp every reply with that snapshot. If the grant
+	// changes while /status, /run, /cancel etc. build their text (which may
+	// contain task or run details), the reply carries the old version and
+	// delivery suppresses it; it can never acquire the new version.
+	grantVersion := interaction.CurrentGrantVersion(s.Store.DB, b.GrantID)
+	contextEpoch := s.contextEpoch(b.ID)
 	reply := func(text string) {
-		_ = interaction.Enqueue(s.Store.DB, s.Vault, b, interaction.Reply{SemanticKey: "inbox:" + r.ID, Text: text, ContextEpoch: s.contextEpoch(b.ID)})
+		_ = interaction.Enqueue(s.Store.DB, s.Vault, b, interaction.Reply{SemanticKey: "inbox:" + r.ID, Text: text, ContextEpoch: contextEpoch, GrantVersion: grantVersion})
 	}
 	switch cmd {
 	case "/help", "/start":
@@ -459,9 +475,26 @@ func (s *Service) ProcessOne(ctx context.Context) bool {
 	case "/status":
 		reply(s.statusText(st) + "\n" + s.Agent.Status(b.ID))
 	case "/new":
-		reply(s.Agent.NewSession(b.ID))
+		text := s.Agent.NewSession(b.ID)
+		// The acknowledgement contains no mailbox data and belongs to the new
+		// session: stamp it with the context epoch after the reset (the grant
+		// version stays the pre-command snapshot).
+		contextEpoch = s.contextEpoch(b.ID)
+		reply(text)
 	case "/stop":
 		reply(s.Agent.Stop(b.ID))
+		// Natural-language events received before this /stop and still
+		// waiting (for example behind a full queue) are dropped, so they
+		// cannot start once capacity frees up.
+		_, _ = s.Store.DB.Exec("UPDATE telegram_inbox SET state='stale',error_code='stopped',payload=NULL,updated_at=? WHERE state='pending' AND binding_id=? AND control=0 AND kind='message' AND (received_at<? OR (received_at=? AND update_id<?))", time.Now().Unix(), b.ID, r.ReceivedAt, r.ReceivedAt, r.UpdateID)
+	case "/run":
+		// An execution intent is only accepted while fresh, like plain text:
+		// a /run left unprocessed (for example while offline) is not run.
+		if time.Since(time.Unix(r.EventAt, 0)) > TextMaxAge {
+			reply("这条 /run 指令已超过 10 分钟未处理，为安全起见不会执行。如仍需要，请重新发送。")
+			break
+		}
+		reply(s.Agent.RunCommand(b.ID, r.ID, arg))
 	case "/cancel":
 		reply(s.Agent.CancelRun(b.ID, arg))
 	case "/bind":
@@ -475,7 +508,7 @@ func (s *Service) ProcessOne(ctx context.Context) bool {
 		if err != nil {
 			if err.Error() == "agent_queue_full" {
 				// Keep the event pending: accepted work is not dropped.
-				_ = interaction.Enqueue(s.Store.DB, s.Vault, b, interaction.Reply{SemanticKey: "busy:" + r.ID, Text: "当前排队较多，已保留你的消息，稍后自动处理。"})
+				_ = interaction.Enqueue(s.Store.DB, s.Vault, b, interaction.Reply{SemanticKey: "busy:" + r.ID, Text: "当前排队较多，已保留你的消息，稍后自动处理。/stop、/status 等命令不受影响。", ContextEpoch: contextEpoch, GrantVersion: grantVersion})
 				return false
 			}
 			reply("无法处理：Agent 授权或绑定已失效，请管理员在 Web 检查。")
@@ -498,6 +531,7 @@ const helpText = `可用命令：
 /new 开始新会话（清除对话上下文，待确认卡片失效）
 /stop 停止当前 Agent 处理和未开始的方案（不是回滚）
 /cancel <run_id> 停止某次任务运行的剩余项
+/run <task_id> 立即运行一次已启用的固定规则任务（明确执行指令；对话中请求执行会先发确认卡片）
 也可以直接用中文描述整理需求，例如：把 某发件人 超过 30 天的邮件移到回收站，每周五 20 点执行。`
 
 func (s *Service) contextEpoch(bindingID string) int64 {
@@ -662,9 +696,9 @@ func (s *Service) SendOne(ctx context.Context) bool {
 	now := time.Now().Unix()
 	var id, bindingID, grantID string
 	var botID, chatID, editID, epoch, ctxEpoch int64
-	var admin, attempts int
+	var admin, attempts, grantVersion int
 	var sealed []byte
-	err := s.Store.DB.QueryRow("SELECT id,binding_id,grant_id,bot_id,chat_id,edit_message_id,epoch,context_epoch,admin_version,attempts,payload FROM telegram_reply_outbox WHERE (state IN ('pending','retry') AND next_attempt<=?) OR (state='sending' AND lease_until<?) ORDER BY next_attempt,created_at,part LIMIT 1", now, now).Scan(&id, &bindingID, &grantID, &botID, &chatID, &editID, &epoch, &ctxEpoch, &admin, &attempts, &sealed)
+	err := s.Store.DB.QueryRow("SELECT id,binding_id,grant_id,grant_version,bot_id,chat_id,edit_message_id,epoch,context_epoch,admin_version,attempts,payload FROM telegram_reply_outbox WHERE (state IN ('pending','retry') AND next_attempt<=?) OR (state='sending' AND lease_until<?) ORDER BY next_attempt,created_at,part LIMIT 1", now, now).Scan(&id, &bindingID, &grantID, &grantVersion, &botID, &chatID, &editID, &epoch, &ctxEpoch, &admin, &attempts, &sealed)
 	if err != nil {
 		return false
 	}
@@ -678,24 +712,30 @@ func (s *Service) SendOne(ctx context.Context) bool {
 	finish := func(state, code string, message int64, next int64) {
 		_, _ = s.Store.DB.Exec("UPDATE telegram_reply_outbox SET state=?,error_code=?,message_id=CASE WHEN ?>0 THEN ? ELSE message_id END,attempts=attempts+1,next_attempt=?,lease_until=0,updated_at=? WHERE id=?", state, code, message, message, next, time.Now().Unix(), id)
 	}
+	// Rate pacing first: every check below runs after the wait, as the last
+	// step before the message leaves the process, so an authorization or
+	// lifecycle change during the wait suppresses the reply.
+	if tglimit.Wait(ctx, strconv.FormatInt(chatID, 10)) != nil {
+		finish("retry", "shutdown", 0, now)
+		return false
+	}
 	st, err := s.load(s.Store.DB)
 	if err != nil || !st.Enabled || st.BotID != botID || st.Epoch != epoch {
 		finish("suppressed", "interaction_changed", 0, 0)
 		return true
 	}
 	if bindingID != "" {
-		b, err := interaction.BindingByID(s.Store.DB, bindingID)
-		if err != nil || b.State != "active" || b.GrantID != grantID || b.AdminVersion != admin || b.ChatID != chatID {
+		if reason := interaction.Deliverable(s.Store.DB, bindingID, grantID, grantVersion, admin, chatID, time.Now().Unix()); reason != "" {
+			finish("suppressed", reason, 0, 0)
+			return true
+		}
+		b, _ := interaction.BindingByID(s.Store.DB, bindingID)
+		if b.Epoch != epoch {
 			finish("suppressed", "binding_changed", 0, 0)
 			return true
 		}
 		if conv, err := interaction.ConversationOf(s.Store.DB, bindingID); err == nil && ctxEpoch != 0 && conv.ContextEpoch != ctxEpoch {
 			finish("suppressed", "context_reset", 0, 0)
-			return true
-		}
-		var gAdmin, gRevoked int
-		if s.Store.DB.QueryRow("SELECT admin_version,revoked FROM agent_grants WHERE id=?", grantID).Scan(&gAdmin, &gRevoked) != nil || gAdmin != admin || gRevoked != 0 {
-			finish("suppressed", "grant_changed", 0, 0)
 			return true
 		}
 	}
@@ -708,10 +748,6 @@ func (s *Service) SendOne(ctx context.Context) bool {
 	if err != nil || gen != st.credGen {
 		finish("suppressed", "credential_changed", 0, 0)
 		return true
-	}
-	if tglimit.Wait(ctx, strconv.FormatInt(chatID, 10)) != nil {
-		finish("retry", "shutdown", 0, now)
-		return false
 	}
 	client := s.NewClient(token)
 	sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -746,4 +782,10 @@ func (s *Service) SendOne(ctx context.Context) bool {
 		finish("failed", code, 0, 0)
 	}
 	return ctx.Err() == nil
+}
+
+// isControl reports deterministic commands that must not wait behind
+// natural-language work.
+func isControl(cmd string) bool {
+	return cmd == "/stop" || cmd == "/cancel" || cmd == "/status" || cmd == "/help" || cmd == "/start"
 }

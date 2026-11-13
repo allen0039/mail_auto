@@ -33,7 +33,7 @@ func agentError(w http.ResponseWriter, e error) {
 	case errors.Is(e, mail.ErrConflict):
 		writeJSON(w, 409, map[string]string{"code": "state_conflict", "error": "配置已被修改，请刷新后重试"})
 	case errors.Is(e, mail.ErrInput):
-		writeJSON(w, 400, map[string]string{"code": "invalid_input", "error": "参数无效，请检查后重试"})
+		writeJSON(w, 400, map[string]string{"code": "invalid_input", "error": "参数无效，请检查后重试（未勾选“全部文件夹”时至少选择一个具体文件夹）"})
 	case errors.Is(e, mail.ErrDenied):
 		writeJSON(w, 403, map[string]string{"code": "permission_denied", "error": "当前操作未授权"})
 	case errors.Is(e, sql.ErrNoRows):
@@ -90,6 +90,12 @@ func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) bool {
 	case path == "/api/agent/grant" && r.Method == http.MethodPut:
 		var in mail.AgentGrantInput
 		if decode(w, r, &in) {
+			// Folder scope must be explicit: all_folders names accounts with
+			// every folder; others need at least one folder.
+			if in.AllFolders == nil {
+				writeJSON(w, 400, map[string]string{"code": "folder_scope_required", "error": "请为每个账号选择“全部文件夹”或至少一个具体文件夹"})
+				return true
+			}
 			respond(s.Mail.SaveAgentGrant(a, in))
 		}
 	case path == "/api/agent/grant/revoke" && r.Method == http.MethodPost:

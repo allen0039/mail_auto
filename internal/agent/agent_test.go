@@ -510,17 +510,26 @@ func TestRunTaskLinksRealRunAndReportsVerifiedResult(t *testing.T) {
 			return call("r1", "run_task", map[string]any{"task_id": task.ID}), nil
 		},
 		func(req modelprovider.Request) (modelprovider.Response, error) {
-			if lastTool(req)["status"] != "queued" {
+			if lastTool(req)["status"] != "confirmation_required" {
 				t.Error(lastTool(req))
 			}
-			return modelprovider.Response{Content: "已开始执行"}, nil
+			return modelprovider.Response{Content: "已生成运行确认卡片"}, nil
 		},
 	}
 	e.say(t, "立即执行测试任务")
+	// A model-originated run request only produces a card.
 	var runs int
 	_ = e.f.Store.DB.QueryRow("SELECT count(*) FROM task_runs").Scan(&runs)
+	if runs != 0 {
+		t.Fatal("model run_task queued a run without confirmation", runs)
+	}
+	accept, _ := e.deliverCard(t, 900)
+	if out := e.rt.Confirm(context.Background(), e.binding, 900, accept); !strings.Contains(out, "已确认") {
+		t.Fatal(out)
+	}
+	_ = e.f.Store.DB.QueryRow("SELECT count(*) FROM task_runs").Scan(&runs)
 	if runs != 1 {
-		t.Fatal("runs", runs)
+		t.Fatal("runs after confirmation", runs)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	e.f.Service.Context = ctx

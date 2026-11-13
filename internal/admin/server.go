@@ -26,7 +26,7 @@ import (
 //go:embed web/*
 var web embed.FS
 
-const Version = "0.5.0"
+const Version = "0.5.1"
 const sessionCookie = "mail_auto_session"
 const csrfCookie = "mail_auto_csrf"
 

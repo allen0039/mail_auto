@@ -39,13 +39,16 @@ func (r *Runtime) Stop(bindingID string) string {
 		return "暂时无法停止，请重试。"
 	}
 	turns, _ := res.RowsAffected()
-	res, err = tx.Exec("UPDATE agent_proposals SET state='cancelled',error_code='stopped',updated_at=? WHERE conversation_id=? AND state IN ('pending','accepted')", now, conv.ID)
+	var applying int
+	_ = tx.QueryRow("SELECT count(*) FROM agent_proposals WHERE conversation_id=? AND state='applying'", conv.ID).Scan(&applying)
+	// Applying proposals are cancelled too: their next step's guard sees the
+	// new stop epoch and the cancelled state and does not commit.
+	res, err = tx.Exec("UPDATE agent_proposals SET state='cancelled',error_code='stopped',updated_at=? WHERE conversation_id=? AND state IN ('pending','accepted','applying')", now, conv.ID)
 	if err != nil {
 		return "暂时无法停止，请重试。"
 	}
 	proposals, _ := res.RowsAffected()
-	var applying int
-	_ = tx.QueryRow("SELECT count(*) FROM agent_proposals WHERE conversation_id=? AND state='applying'", conv.ID).Scan(&applying)
+	proposals -= int64(applying)
 	if err = store_audit(tx, "agent.stop", conv.ID); err != nil {
 		return "暂时无法停止，请重试。"
 	}
@@ -62,7 +65,7 @@ func (r *Runtime) Stop(bindingID string) string {
 	r.mu.Unlock()
 	text := fmt.Sprintf("已停止 Agent 处理：取消 %d 个排队或进行中的轮次、%d 个待确认或未开始的方案。", turns, proposals)
 	if applying > 0 {
-		text += fmt.Sprintf("\n%d 个方案正在执行中，将在当前步骤后停止，未开始的步骤不再执行。", applying)
+		text += fmt.Sprintf("\n%d 个正在执行的方案已停止：已提交的步骤保留，未开始的步骤不再执行。", applying)
 	}
 	return text + "\n已完成的邮件动作和已启动的任务运行不受影响；停止某次运行的剩余项请用 /cancel <run_id>。这不是回滚。"
 }
@@ -235,10 +238,10 @@ func (r *Runtime) MonitorRuns() {
 			_, _ = r.Store.DB.Exec("UPDATE agent_run_links SET last_state='final:unbound',updated_at=? WHERE task_run_id=?", time.Now().Unix(), l.run)
 			continue
 		}
-		access, _, err := r.Mail.AgentIdentity(b.GrantID)
+		access, g, err := r.Mail.AgentIdentity(b.GrantID)
 		if err != nil {
 			_, _ = r.Store.DB.Exec("UPDATE agent_run_links SET last_state='final:unauthorized',updated_at=? WHERE task_run_id=?", time.Now().Unix(), l.run)
-			_ = interaction.Enqueue(r.Store.DB, r.Vault, b, interaction.Reply{SemanticKey: "run:" + l.run + ":unauthorized", Text: "Agent 授权已变化，不再推送该运行的结果。请在 Web 查看。", ContextEpoch: l.epoch})
+			_ = interaction.Enqueue(r.Store.DB, r.Vault, b, interaction.Reply{SemanticKey: "run:" + l.run + ":unauthorized", Text: "Agent 授权已变化，不再推送该运行的结果。请在 Web 查看。", ContextEpoch: l.epoch, GrantVersion: interaction.CurrentGrantVersion(r.Store.DB, b.GrantID)})
 			continue
 		}
 		run, err := r.Mail.AgentTaskRun(access, l.run)
@@ -256,7 +259,7 @@ func (r *Runtime) MonitorRuns() {
 			res, err := tx.Exec("UPDATE agent_run_links SET last_state=?,updated_at=? WHERE task_run_id=? AND last_state=?", state, time.Now().Unix(), l.run, l.last)
 			if err == nil {
 				if n, _ := res.RowsAffected(); n == 1 && !duplicate {
-					err = interaction.Enqueue(tx, r.Vault, b, interaction.Reply{SemanticKey: "run:" + l.run + ":final", Text: "运行结束\n" + runSummary(run), ContextEpoch: l.epoch})
+					err = interaction.Enqueue(tx, r.Vault, b, interaction.Reply{SemanticKey: "run:" + l.run + ":final", Text: "运行结束\n" + runSummary(run), ContextEpoch: l.epoch, GrantVersion: g.Version})
 				}
 			}
 			if err == nil {
@@ -268,7 +271,7 @@ func (r *Runtime) MonitorRuns() {
 		}
 		if run.State != l.last && run.State == "running" {
 			_, _ = r.Store.DB.Exec("UPDATE agent_run_links SET last_state=?,updated_at=? WHERE task_run_id=?", run.State, time.Now().Unix(), l.run)
-			_ = interaction.Enqueue(r.Store.DB, r.Vault, b, interaction.Reply{SemanticKey: "run:" + l.run + ":running", Text: "运行开始\n" + runSummary(run), ContextEpoch: l.epoch})
+			_ = interaction.Enqueue(r.Store.DB, r.Vault, b, interaction.Reply{SemanticKey: "run:" + l.run + ":running", Text: "运行开始\n" + runSummary(run), ContextEpoch: l.epoch, GrantVersion: g.Version})
 		}
 	}
 }
@@ -284,4 +287,71 @@ func (r *Runtime) notifiedElsewhere(b interaction.Binding, runID string) bool {
 func store_audit(tx *sql.Tx, action, target string) error {
 	_, err := tx.Exec("INSERT INTO audits(at,action,target,outcome) VALUES(?,?,?,?)", time.Now().Unix(), action, target, "ok")
 	return err
+}
+
+// RunCommand handles the deterministic "/run <task_id>" command: the user's
+// own Telegram command is the server-side execution intent. It runs an
+// enabled fixed-rule task once at its current version; the run key is bound
+// to the inbox event, so a redelivered update returns the same run and a new
+// /run message is a new run. Paused tasks are refused (confirmation via a
+// card is required for them). Model-originated execution never comes here.
+func (r *Runtime) RunCommand(bindingID, inputID, taskRef string) string {
+	taskRef = strings.TrimSpace(taskRef)
+	if len(taskRef) < 6 || len(taskRef) > 64 || strings.ContainsAny(taskRef, " \t\r\n") {
+		return "用法：/run <task_id>（任务 ID 至少 6 位，可在 /status、Web 或对话中查看）"
+	}
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	b, err := interaction.BindingByID(r.Store.DB, bindingID)
+	if err != nil || b.State != "active" {
+		return "绑定无效。"
+	}
+	access, g, err := r.Mail.AgentIdentity(b.GrantID)
+	if err != nil {
+		return "Agent 授权已失效，请管理员在 Web 重新授权。"
+	}
+	p, err := r.loadProvider()
+	if err != nil || !p.enabled {
+		return "Agent 已停用，不能从 Telegram 执行任务。"
+	}
+	conv, err := interaction.EnsureConversation(r.Store.DB, bindingID, g.Version)
+	if err != nil {
+		return "暂时无法处理，请重试。"
+	}
+	var matches []mail.Task
+	for _, account := range g.Accounts {
+		tasks, err := r.Mail.Tasks(access, account)
+		if err != nil {
+			continue
+		}
+		for _, t := range tasks {
+			if strings.HasPrefix(t.ID, taskRef) {
+				matches = append(matches, t)
+			}
+		}
+	}
+	if len(matches) != 1 {
+		return "找不到唯一匹配的任务，请提供更完整的任务 ID。"
+	}
+	t := matches[0]
+	if t.Engine != "rules" {
+		return "首版不从 Telegram 触发 AI 引擎任务。"
+	}
+	if !t.Enabled {
+		return "任务「" + t.Name + "」当前暂停。执行暂停任务需要确认卡片：请用文字描述需求，确认后执行；或在 Web 手动运行。"
+	}
+	x := execution{BindingID: b.ID, GrantID: b.GrantID, GrantVersion: g.Version, AdminVersion: b.AdminVersion, ConfigVersion: p.version, ConvID: conv.ID, StopEpoch: conv.StopEpoch}
+	guard := func(tx *sql.Tx) error {
+		if fenceReason(tx, x, time.Now().Unix()) != "" {
+			return errFenced
+		}
+		return nil
+	}
+	run, err := r.Mail.RunTaskGuarded(access, mail.TaskRunInput{TaskID: t.ID, Version: t.Version, RunKey: "agent:cmd:" + inputID}, "manual", guard)
+	if err != nil {
+		return "无法运行：" + mailtools.CodeOf(err).Code
+	}
+	now := time.Now().Unix()
+	_, _ = r.Store.DB.Exec("INSERT OR IGNORE INTO agent_run_links(task_run_id,conversation_id,binding_id,created_at,updated_at) VALUES(?,?,?,?,?)", run.ID, conv.ID, bindingID, now, now)
+	return "已按 /run 指令入队一次运行：\n" + runSummary(run) + "\n完成后推送真实结果；未知结果不算成功。"
 }

@@ -3,12 +3,14 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/interaction"
+	"mail-auto/internal/mail"
 	"mail-auto/internal/mailtools"
 )
 
@@ -34,7 +36,7 @@ func (r *Runtime) createProposal(s *session, p *mailtools.Proposal) (string, err
 		return "", err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec("INSERT INTO agent_proposals(id,conversation_id,binding_id,turn_id,token_hash,kind,state,payload,state_digest,grant_id,grant_version,admin_version,intent_epoch,context_epoch,stop_epoch,expires,chat_id,created_at,updated_at) VALUES(?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?)", id, s.conv.ID, s.binding.ID, s.turn.ID, credentials.Digest(token), p.Kind, sealed, p.StateDigest, s.binding.GrantID, s.grant.Version, s.binding.AdminVersion, s.turn.IntentEpoch, s.conv.ContextEpoch, s.turn.StopEpoch, expires, s.binding.ChatID, now.Unix(), now.Unix()); err != nil {
+	if _, err = tx.Exec("INSERT INTO agent_proposals(id,conversation_id,binding_id,turn_id,token_hash,kind,state,payload,state_digest,grant_id,grant_version,admin_version,intent_epoch,context_epoch,stop_epoch,config_version,expires,chat_id,created_at,updated_at) VALUES(?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?)", id, s.conv.ID, s.binding.ID, s.turn.ID, credentials.Digest(token), p.Kind, sealed, p.StateDigest, s.binding.GrantID, s.grant.Version, s.binding.AdminVersion, s.turn.IntentEpoch, s.conv.ContextEpoch, s.turn.StopEpoch, s.provider.version, expires, s.binding.ChatID, now.Unix(), now.Unix()); err != nil {
 		return "", err
 	}
 	for i, st := range p.Steps {
@@ -44,7 +46,7 @@ func (r *Runtime) createProposal(s *session, p *mailtools.Proposal) (string, err
 	}
 	text := "【待确认】" + p.Title + "\n" + p.Summary + "\n\n有效期 10 分钟。补充条件或发送新消息会使本卡片失效；点击“确认执行”后按上述顺序生效。"
 	buttons := []interaction.Button{{Text: "确认执行", Data: callbackAccept + token}, {Text: "取消", Data: callbackReject + token}}
-	if err = interaction.Enqueue(tx, r.Vault, s.binding, interaction.Reply{SemanticKey: "proposal:" + id, Text: text, Buttons: buttons, ContextEpoch: s.conv.ContextEpoch}); err != nil {
+	if err = interaction.Enqueue(tx, r.Vault, s.binding, interaction.Reply{SemanticKey: "proposal:" + id, Text: text, Buttons: buttons, ContextEpoch: s.conv.ContextEpoch, GrantVersion: s.grant.Version}); err != nil {
 		return "", err
 	}
 	if err = tx.Commit(); err != nil {
@@ -54,28 +56,29 @@ func (r *Runtime) createProposal(s *session, p *mailtools.Proposal) (string, err
 }
 
 type proposalRow struct {
-	ID           string
-	ConvID       string
-	BindingID    string
-	TurnID       string
-	Kind         string
-	State        string
-	Payload      []byte
-	Digest       string
-	GrantID      string
-	GrantVersion int
-	AdminVersion int
-	IntentEpoch  int64
-	ContextEpoch int64
-	StopEpoch    int64
-	Expires      int64
+	ID            string
+	ConvID        string
+	BindingID     string
+	TurnID        string
+	Kind          string
+	State         string
+	Payload       []byte
+	Digest        string
+	GrantID       string
+	GrantVersion  int
+	AdminVersion  int
+	IntentEpoch   int64
+	ContextEpoch  int64
+	StopEpoch     int64
+	ConfigVersion int
+	Expires       int64
 }
 
-const proposalColumns = "id,conversation_id,binding_id,turn_id,kind,state,payload,state_digest,grant_id,grant_version,admin_version,intent_epoch,context_epoch,stop_epoch,expires"
+const proposalColumns = "id,conversation_id,binding_id,turn_id,kind,state,payload,state_digest,grant_id,grant_version,admin_version,intent_epoch,context_epoch,stop_epoch,config_version,expires"
 
 func scanProposal(row *sql.Row) (proposalRow, error) {
 	var p proposalRow
-	err := row.Scan(&p.ID, &p.ConvID, &p.BindingID, &p.TurnID, &p.Kind, &p.State, &p.Payload, &p.Digest, &p.GrantID, &p.GrantVersion, &p.AdminVersion, &p.IntentEpoch, &p.ContextEpoch, &p.StopEpoch, &p.Expires)
+	err := row.Scan(&p.ID, &p.ConvID, &p.BindingID, &p.TurnID, &p.Kind, &p.State, &p.Payload, &p.Digest, &p.GrantID, &p.GrantVersion, &p.AdminVersion, &p.IntentEpoch, &p.ContextEpoch, &p.StopEpoch, &p.ConfigVersion, &p.Expires)
 	return p, err
 }
 
@@ -143,20 +146,24 @@ func proposalStateLabel(s string) string {
 	return map[string]string{"accepted": "已确认", "applying": "执行中", "applied": "已完成", "partial": "部分完成", "failed": "失败", "rejected": "已取消", "expired": "已过期", "invalidated": "已失效", "cancelled": "已停止"}[s]
 }
 func staleLabel(code string) string {
-	return map[string]string{"expired": "已超过有效期", "superseded": "之后收到了新的消息或补充条件", "context_reset": "会话已重置", "stopped": "已执行 /stop", "grant_changed": "Agent 授权已变化", "binding_changed": "绑定已变化", "state_changed": "规则、任务、策略或文件夹映射已被修改"}[code]
+	return map[string]string{"expired": "已超过有效期", "superseded": "之后收到了新的消息或补充条件", "context_reset": "会话已重置", "stopped": "已执行 /stop", "grant_changed": "Agent 授权已变化", "binding_changed": "绑定或 Telegram 交互已变化", "agent_disabled": "Agent 已停用或其模型配置已修改", "state_changed": "规则、任务、策略或文件夹映射已被修改", "config_changed": "Agent 模型配置已修改", "interaction_disabled": "Telegram 交互已关闭", "grant_revoked": "Agent 授权已撤销"}[code]
 }
 
-// proposalStale returns a reason when the proposal may no longer be applied.
+// proposalStale returns a reason when the proposal may no longer be
+// confirmed: expiry, the shared execution fence (binding, grant, admin,
+// Agent enabled/config, stop), context reset, a newer instruction, and any
+// change of the frozen account configuration.
 func (r *Runtime) proposalStale(p proposalRow) string {
-	if p.Expires <= time.Now().Unix() {
+	now := time.Now().Unix()
+	if p.Expires <= now {
 		return "expired"
+	}
+	if reason := fenceReason(r.Store.DB, p.execution(), now); reason != "" {
+		return reason
 	}
 	conv, err := interaction.ConversationOf(r.Store.DB, p.BindingID)
 	if err != nil {
 		return "binding_changed"
-	}
-	if conv.StopEpoch != p.StopEpoch {
-		return "stopped"
 	}
 	if conv.ContextEpoch != p.ContextEpoch {
 		return "context_reset"
@@ -168,14 +175,6 @@ func (r *Runtime) proposalStale(p proposalRow) string {
 	_ = r.Store.DB.QueryRow("SELECT count(*) FROM agent_turns WHERE conversation_id=? AND state='queued'", conv.ID).Scan(&waiting)
 	if waiting > 0 {
 		return "superseded"
-	}
-	b, err := interaction.BindingByID(r.Store.DB, p.BindingID)
-	if err != nil || b.State != "active" || b.AdminVersion != p.AdminVersion {
-		return "binding_changed"
-	}
-	_, g, err := r.Mail.AgentIdentity(p.GrantID)
-	if err != nil || g.Version != p.GrantVersion {
-		return "grant_changed"
 	}
 	var prop mailtools.Proposal
 	if r.open("agent-proposal", p.ID, p.Payload, &prop) != nil {
@@ -202,13 +201,15 @@ func (r *Runtime) closeCard(p proposalRow, note string) {
 	if err != nil {
 		return
 	}
-	_ = interaction.Enqueue(r.Store.DB, r.Vault, b, interaction.Reply{SemanticKey: "proposal:" + p.ID + ":closed", Text: "【方案】" + note, EditMessageID: message, ContextEpoch: p.ContextEpoch})
+	_ = interaction.Enqueue(r.Store.DB, r.Vault, b, interaction.Reply{SemanticKey: "proposal:" + p.ID + ":closed", Text: "【方案】" + note, EditMessageID: message, ContextEpoch: p.ContextEpoch, GrantVersion: p.GrantVersion})
 }
 
-// apply executes an accepted proposal step by step. Each step re-checks the
-// stop marker and identity and uses a server mutation ID, so a crash and
-// replay returns committed results instead of writing again. Completed steps
-// are never rolled back.
+// apply executes an accepted proposal step by step. Each step's business
+// transaction runs proposalGuard, so a step commits only while the frozen
+// grant/binding/admin/Agent-config/stop conditions hold and the proposal is
+// still applying; lifecycle changes linearize against it in SQLite. Steps use
+// server mutation IDs, so a crash and replay returns committed results
+// instead of writing again. Completed steps are never rolled back.
 func (r *Runtime) apply(ctx context.Context, id string) {
 	p, err := scanProposal(r.Store.DB.QueryRow("SELECT "+proposalColumns+" FROM agent_proposals WHERE id=?", id))
 	if err != nil || (p.State != "accepted" && p.State != "applying") {
@@ -222,25 +223,23 @@ func (r *Runtime) apply(ctx context.Context, id string) {
 	_, _ = r.Store.DB.Exec("UPDATE agent_proposals SET state='applying',updated_at=? WHERE id=? AND state IN ('accepted','applying')", time.Now().Unix(), p.ID)
 	results := []mailtools.StepResult{}
 	lines := []string{}
-	failedCode := ""
+	failedCode, fenced := "", ""
+	guard := r.proposalGuard(p)
 	for i := range prop.Steps {
 		r.writeMu.Lock()
-		conv, err := interaction.ConversationOf(r.Store.DB, p.BindingID)
-		var state string
-		_ = r.Store.DB.QueryRow("SELECT state FROM agent_proposals WHERE id=?", p.ID).Scan(&state)
-		if err != nil || conv.StopEpoch != p.StopEpoch || state != "applying" {
-			r.writeMu.Unlock()
-			failedCode = "stopped"
-			break
-		}
 		access, _, err := r.Mail.AgentIdentity(p.GrantID)
 		if err != nil {
 			r.writeMu.Unlock()
-			failedCode = "grant_expired"
+			fenced = r.fencedReason(p)
 			break
 		}
-		sr, err := mailtools.ApplyStep(ctx, r.Mail, access, p.ID, prop.Steps, i, results)
+		sr, err := mailtools.ApplyStepGuarded(ctx, r.Mail, access, p.ID, prop.Steps, i, results, guard)
 		now := time.Now().Unix()
+		if errors.Is(err, mail.ErrFenced) {
+			r.writeMu.Unlock()
+			fenced = r.fencedReason(p)
+			break
+		}
 		if err != nil {
 			code := mailtools.CodeOf(err).Code
 			_, _ = r.Store.DB.Exec("UPDATE agent_proposal_steps SET state='failed',error_code=?,updated_at=? WHERE proposal_id=? AND ordinal=?", code, now, p.ID, i)
@@ -257,18 +256,25 @@ func (r *Runtime) apply(ctx context.Context, id string) {
 		results = append(results, sr)
 		lines = append(lines, stepOutcome(prop.Steps[i], sr))
 	}
-	final := "applied"
-	header := "方案已全部执行："
-	if failedCode != "" {
-		final = "failed"
-		header = "方案未完成："
+	final, code, header := "applied", "", "方案已全部执行："
+	switch {
+	case fenced != "":
+		code = fenced
+		final = "invalidated"
+		if fenced == "stopped" {
+			final = "cancelled"
+		}
+		header = "方案已中止（" + staleLabel(fenced) + "），未开始的步骤不再执行。"
+		if len(results) > 0 {
+			final = "partial"
+			header = fmt.Sprintf("方案在第 %d 步前中止（%s）：已完成的步骤保留，未自动回滚，未开始的步骤不再执行。", len(results)+1, staleLabel(fenced))
+		}
+	case failedCode != "":
+		code = failedCode
+		final, header = "failed", "方案未完成："
 		if len(results) > 0 {
 			final = "partial"
 			header = "方案部分完成（已完成的步骤保留，未自动回滚；请查看后发送新的明确指令）："
-		}
-		if failedCode == "stopped" {
-			final = "cancelled"
-			header = "方案已按 /stop 停止，未开始的步骤不再执行："
 		}
 	}
 	tx, err := r.Store.DB.Begin()
@@ -276,7 +282,9 @@ func (r *Runtime) apply(ctx context.Context, id string) {
 		return
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec("UPDATE agent_proposals SET state=?,error_code=?,updated_at=? WHERE id=? AND state='applying'", final, failedCode, time.Now().Unix(), p.ID)
+	// A lifecycle change may already have moved the proposal to
+	// invalidated/cancelled; the final state still records completed steps.
+	res, err := tx.Exec("UPDATE agent_proposals SET state=?,error_code=?,updated_at=? WHERE id=? AND state IN ('applying','invalidated','cancelled')", final, code, time.Now().Unix(), p.ID)
 	if err != nil {
 		return
 	}
@@ -284,11 +292,16 @@ func (r *Runtime) apply(ctx context.Context, id string) {
 		return
 	}
 	if b, err := interaction.BindingByID(tx, p.BindingID); err == nil && b.State == "active" {
-		text := header + "\n" + strings.Join(lines, "\n")
+		text := header
+		if len(lines) > 0 {
+			text += "\n" + strings.Join(lines, "\n")
+		}
 		if final == "applied" {
 			text += "\n可在 Web 管理界面查看一致的规则与任务状态。"
 		}
-		_ = interaction.Enqueue(tx, r.Vault, b, interaction.Reply{SemanticKey: "proposal:" + p.ID + ":result", Text: text, ContextEpoch: p.ContextEpoch})
+		// Produced under the confirmed grant version; if the grant changed,
+		// delivery suppresses it and the grant-change notice applies instead.
+		_ = interaction.Enqueue(tx, r.Vault, b, interaction.Reply{SemanticKey: "proposal:" + p.ID + ":result", Text: text, ContextEpoch: p.ContextEpoch, GrantVersion: p.GrantVersion})
 	}
 	_ = tx.Commit()
 }

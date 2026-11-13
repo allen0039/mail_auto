@@ -228,6 +228,19 @@ func (r *Runtime) SaveProvider(a mail.Access, in ProviderInput) (ProviderSetting
 	if err != nil {
 		return old.view(), err
 	}
+	// Every configuration save is a new Agent generation: proposals frozen
+	// under another version can no longer be confirmed or applied. Disabling
+	// also cancels queued and running turns. Fixed tasks enabled on their own
+	// keep running under their own authorization.
+	now := time.Now().Unix()
+	if _, err = tx.Exec("UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE state IN ('pending','accepted','applying') AND config_version<>?", map[bool]string{true: "config_changed", false: "agent_disabled"}[next.enabled], now, next.version); err != nil {
+		return old.view(), err
+	}
+	if !next.enabled {
+		if _, err = tx.Exec("UPDATE agent_turns SET state='cancelled',error_code='agent_disabled',updated_at=? WHERE state IN ('queued','running')", now); err != nil {
+			return old.view(), err
+		}
+	}
 	if err = store.Audit(tx, "agent.provider.save", "chat_completions", map[bool]string{true: "enabled", false: "disabled"}[next.enabled]); err != nil {
 		return old.view(), err
 	}

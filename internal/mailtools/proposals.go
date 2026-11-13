@@ -2,6 +2,7 @@ package mailtools
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strconv"
@@ -43,14 +44,23 @@ type StepResult struct {
 	Run      *mail.TaskRun
 }
 
+// ApplyStep is ApplyStepGuarded without a lifecycle guard (tests and
+// non-agent callers). The agent runtime always uses ApplyStepGuarded.
+func ApplyStep(ctx context.Context, svc *mail.Service, a mail.Access, proposalID string, steps []Step, i int, prior []StepResult) (StepResult, error) {
+	return ApplyStepGuarded(ctx, svc, a, proposalID, steps, i, prior, nil)
+}
+
 // MutationID is the server idempotency key of step i of a proposal.
 func MutationID(proposalID string, i int) string { return proposalID + ":" + strconv.Itoa(i) }
 
 // ApplyStep executes step i. Re-running a committed step returns its stored
 // result without writing again, so recovery may replay steps from 0.
-func ApplyStep(ctx context.Context, svc *mail.Service, a mail.Access, proposalID string, steps []Step, i int, prior []StepResult) (StepResult, error) {
+//
+// guard runs inside each step's business transaction; it must reject the
+// write when the proposal's frozen execution conditions no longer hold.
+func ApplyStepGuarded(ctx context.Context, svc *mail.Service, a mail.Access, proposalID string, steps []Step, i int, prior []StepResult, guard func(*sql.Tx) error) (StepResult, error) {
 	st := steps[i]
-	m := mail.Mutation{ID: MutationID(proposalID, i)}
+	m := mail.Mutation{ID: MutationID(proposalID, i), Guard: guard}
 	switch st.Kind {
 	case "rule_save":
 		m.Kind = "rule.save"
@@ -114,7 +124,7 @@ func ApplyStep(ctx context.Context, svc *mail.Service, a mail.Access, proposalID
 			}
 			id, version = prior[st.FromStep].TargetID, prior[st.FromStep].Version
 		}
-		run, err := svc.RunTask(a, mail.TaskRunInput{TaskID: id, Version: version, RunKey: "agent:proposal:" + proposalID}, "manual")
+		run, err := svc.RunTaskGuarded(a, mail.TaskRunInput{TaskID: id, Version: version, RunKey: "agent:proposal:" + proposalID}, "manual", guard)
 		if err != nil {
 			return StepResult{}, err
 		}
