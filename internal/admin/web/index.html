@@ -108,7 +108,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.6.0</span>
+          <span class="badge badge-subtle app-version-label">v0.6.1</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -120,7 +120,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.6.0</span>
+            <span class="app-version-label">v0.6.1</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -203,7 +203,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.6.0</span>
+            个人邮件工作台 <span class="app-version-label">v0.6.1</span>
           </div>
         </div>
 
@@ -1039,7 +1039,7 @@
               <form id="network-profile-form" class="rules-form margin-t-16">
                 <input id="proxy-id" type="hidden" />
                 <div class="rules-grid">
-                  <label>名称<input id="proxy-name" type="text" maxlength="80" required placeholder="例如：NAS 代理" /></label>
+                  <label>名称<input id="proxy-name" type="text" maxlength="80" required placeholder="例如：我的代理" /></label>
                   <label>协议<select id="proxy-protocol"><option value="socks5">SOCKS5（代理解析域名）</option><option value="http">HTTP CONNECT</option><option value="https">HTTPS CONNECT</option></select></label>
                   <label>主机或 IP<input id="proxy-host" type="text" maxlength="253" required placeholder="例如：192.168.1.20 或 proxy" /></label>
                   <label>端口<input id="proxy-port" type="number" min="1" max="65535" required placeholder="例如：7890" /></label>
@@ -1073,9 +1073,9 @@
             </article>
 
             <article class="panel organizer-card">
-              <h2>NAS 连接提示</h2>
-              <p class="muted small">优先使用现有代理：同一 Docker 网络中的代理用服务名，路由器或其他设备用局域网 IP。普通 bridge 容器中的 127.0.0.1 指向容器自身。宿主机代理需监听容器可达地址，并只允许可信网段访问。</p>
-              <p class="muted small">推荐：全局直连，TG 指定代理；连接不佳的邮箱单独指定代理。管理页面、入站 MCP 与本地健康检查不受上述业务代理策略影响。</p>
+              <h2>代理连接提示</h2>
+              <p class="muted small">适用于 VPS、NAS 和其他部署环境。填写应用运行环境能访问的代理地址：远程代理使用域名或 IP；同一 Docker 网络中的代理可使用服务名。普通 bridge 容器中的 127.0.0.1 指向容器自身，宿主机代理需监听容器可达地址，并限制访问来源。</p>
+              <p class="muted small">建议先用直连诊断；仅为需要代理的 TG、邮箱或 Agent 单独指定代理。管理页面、入站 MCP 与本地健康检查不受上述业务代理策略影响。</p>
             </article>
           </div>
         </section>
@@ -1121,7 +1121,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.6.0</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.6.1</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>

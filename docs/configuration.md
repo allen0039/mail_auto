@@ -2,7 +2,7 @@
 
 ## 网络与代理（0.6.0）
 
-在「网络与代理」保存代理配置和全局默认，再在邮箱编辑、TG 通知、Agent 页面选择独立连接方式。支持 HTTP、HTTPS CONNECT 与 SOCKS5；默认全局直连，代理失败不自动直连。配置保存在 SQLite，密码用独立密钥卷加密；不增加 YAML 或环境变量。升级前使用 `HTTPS_PROXY` 的实例须在页面显式配置。完整设置、诊断及 NAS 示例见 [网络与代理](network-proxy.md)。
+在「网络与代理」保存代理配置和全局默认，再在邮箱编辑、TG 通知、Agent 页面选择独立连接方式。支持 HTTP、HTTPS CONNECT 与 SOCKS5；默认全局直连，代理失败不自动直连。配置保存在 SQLite，密码用独立密钥卷加密；不增加 YAML 或环境变量。升级前使用 `HTTPS_PROXY` 的实例须在页面显式配置。完整设置、诊断及 VPS/NAS 示例见 [网络与代理](network-proxy.md)。
 
 ## 部署配置
 

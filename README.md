@@ -12,7 +12,7 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.6.0`，可使用固定镜像标签 `allen0039/mail-auto:0.6.0`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级至本版前请备份数据库和主密钥；0.6.0 迁移到 schema 12（0.5.1 为 schema 11），旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.6.1`，可使用固定镜像标签 `allen0039/mail-auto:0.6.1`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥；0.6.0 迁移到 schema 12（0.5.1 为 schema 11），旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
 
 在运行 Docker 的主机执行：
 
@@ -125,7 +125,7 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 - [配置与邮箱接入](docs/configuration.md)
 - [备份、恢复、远程访问与升级](docs/operations.md)
-- [网络与代理、NAS 配置及诊断](docs/network-proxy.md)
+- [网络与代理、VPS/NAS 配置及诊断](docs/network-proxy.md)
 - [0.6.0 版本范围、验证结果与已知限制](docs/acceptance-0.6.0.md)
 - [0.5.0 版本范围、验证结果与已知限制](docs/acceptance-0.5.0.md)
 - [内置 Agent 与 Telegram 交互管理](docs/agent-telegram.md)
