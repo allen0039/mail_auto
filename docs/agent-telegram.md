@@ -29,7 +29,7 @@
 - 工具白名单（18 个，`run_task` 只生成确认卡片）：`list_accounts`、`list_folders`、`get_policy`、`list_rules`、`get_rule`、`list_tasks`、`get_task`、`list_task_runs`、`get_task_run`、`preview_task`、`save_rule_draft`、`save_task_draft`、`propose_workflow`、`propose_rule_change`、`propose_task_change`、`run_task`、`pause_task`、`cancel_task_run`。不提供策略修改、管理员/API/Bot 凭据、原始 IMAP、`mail_execute`、`mail_ai_*`、发信或永久删除。
 - 工具参数严格校验：未知工具、未知字段、尾随 JSON、类型错误、过深嵌套、超过 32 KiB 的参数一律拒绝；被截断或无效的模型响应不会触发任何写入。工具结果超过 32 KiB 时报错而不是静默截断。
 - 邮件主题、发件人、规则名称作为不可信数据，不会被当作指令。首版不读取正文。
-- 模型地址仅允许 HTTPS 公网：连接时校验实际 IP（DNS 重绑定、IPv6、IPv4 映射地址），拒绝回环、私网、链路本地/元数据、CGNAT、文档与 NAT64/6to4 前缀；不跟随重定向；不读取 `HTTP(S)_PROXY`。如需本地模型或代理，需要后续版本显式实现白名单。
+- 模型地址仅允许 HTTPS 公网：直连时校验实际 IP（DNS 重绑定、IPv6、IPv4 映射地址），拒绝回环、私网、链路本地/元数据、CGNAT、文档与 NAT64/6to4 前缀；不跟随重定向；不读取环境代理。0.6.0 支持显式代理，默认本地验证全部 DNS 结果后经代理连接已校验的公网 IP；显式信任远端 DNS 时由可信代理负责最终 IP 限制。有效出口变化会暂停 Agent 并要求重新检测，详见 [代理配置](network-proxy.md)。本地模型仍不支持。
 - API Key、Bot Token、邮箱凭据不进入模型上下文、Telegram 回复、普通日志或 API 响应。对话、工具结果、方案与回复载荷用主密钥加密（AAD 绑定记录 ID）。
 - 单次工作上限：单次模型请求 10–120 秒（默认 60），单轮 120 秒、最多 8 次模型请求与 20 次工具调用，上下文最多 20 轮、约 64 KiB，全局同时一个模型轮次、最多 100 个排队轮次。这些是单次工作上限，不是每日邮件额度；系统不设置每日处理额度。
 

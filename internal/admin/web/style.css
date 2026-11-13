@@ -2226,3 +2226,32 @@ dialog::backdrop {
   user-select: all;
 }
 .agent-record { border-top: 1px solid var(--border, #e5e7eb); padding: 8px 0; overflow-wrap: anywhere; }
+.network-inline {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.network-inline label {
+  flex: 1 1 220px;
+}
+.network-profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border-main);
+}
+.network-profile > div:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.network-diagnostic {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}

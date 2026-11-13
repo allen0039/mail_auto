@@ -1,0 +1,93 @@
+(async () => {
+  if (location.hostname !== "127.0.0.1" || location.port !== "18600") {
+    throw new Error("Run only on the isolated proxy acceptance instance at 127.0.0.1:18600");
+  }
+  const results = [];
+  const check = (name, ok) => {
+    results.push({name, ok: !!ok});
+    if (!ok) throw new Error(name);
+  };
+  const waitUntil = async (condition) => {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await condition()) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Timed out waiting for UI operation");
+  };
+  const submit = (selector) => $(selector).requestSubmit();
+  const initial = await api("/api/network");
+  check("global defaults to direct", initial.global.mode === "direct");
+  await showView("network");
+  check("global excludes inherit", ![...$("#network-global").options].some((option) => option.value === "inherit"));
+  check("TG and Agent default inherit", $("#network-telegram").value === "inherit" && $("#network-agent").value === "inherit");
+  $("#proxy-name").value = "NAS QA";
+  $("#proxy-protocol").value = "http";
+  $("#proxy-host").value = "127.0.0.1";
+  $("#proxy-port").value = "1";
+  $("#proxy-username").value = "qa-user";
+  $("#proxy-password").value = "synthetic-proxy-password";
+  submit("#network-profile-form");
+  await waitUntil(() => $("#network-profiles").textContent.includes("NAS QA"));
+  check("adding profile remains unsaved", (await api("/api/network")).profiles.length === 0);
+  submit("#network-policy-form");
+  await waitUntil(async () => (await api("/api/network")).profiles.length === 1);
+  await waitUntil(() => !$("#network-policy-form button[type=submit]").disabled);
+  const saved = await api("/api/network");
+  const proxyID = saved.profiles[0].id;
+  check("password redacted from response", saved.profiles[0].password_set && !Object.hasOwn(saved.profiles[0], "password"));
+  check("password cleared from editor", $("#proxy-password").value === "");
+  $("#network-global").value = `proxy:${proxyID}`;
+  $("#network-agent").value = "direct";
+  $("#network-policy-form").dispatchEvent(new Event("change", {bubbles: true}));
+  submit("#network-policy-form");
+  await waitUntil(async () => (await api("/api/network")).global.mode === "proxy");
+  await waitUntil(() => !$("#network-policy-form button[type=submit]").disabled);
+  await window.loadNetwork();
+  check("policy survives reload", $("#network-global").value === `proxy:${proxyID}` && $("#network-agent").value === "direct");
+  await showView("notifications");
+  check("TG picker loads profiles", [...$("#telegram-network-policy").options].some((option) => option.value === `proxy:${proxyID}`));
+  $("#telegram-network-policy").value = "direct";
+  $('[data-network-save="telegram"]').click();
+  await waitUntil(async () => (await api("/api/network")).telegram.mode === "direct");
+  await waitUntil(() => !$('[data-network-save="telegram"]').disabled);
+  await showView("agent");
+  $("#agent-network-policy").value = `proxy:${proxyID}`;
+  $('[data-network-save="agent"]').click();
+  await waitUntil(async () => (await api("/api/network")).agent.mode === "proxy");
+  await waitUntil(() => !$('[data-network-save="agent"]').disabled);
+  check("Agent picker saves independently", (await api("/api/network")).telegram.mode === "direct");
+  await showView("accounts");
+  openAccount();
+  check("new mailbox inherits global", $("#account-network-policy").value === "inherit");
+  $("#account-form").elements.name.value = "Proxy QA Mail";
+  $("#account-form").elements.username.value = "proxy-qa@qq.com";
+  $("#account-form").elements.password.value = "synthetic-imap-credential";
+  $("#account-network-policy").value = "direct";
+  submit("#account-form");
+  await waitUntil(() => !$("#account-dialog").open);
+  await refresh();
+  const account = state.accounts.find((item) => item.name === "Proxy QA Mail");
+  check("mailbox overrides global", account?.proxy.mode === "direct" && account.network_label === "直连");
+  openAccount(account);
+  check("mailbox picker round trips", $("#account-network-policy").value === "direct");
+  $("#account-network-policy").value = `proxy:${proxyID}`;
+  submit("#account-form");
+  await waitUntil(() => !$("#account-dialog").open);
+  await refresh();
+  check("mailbox proxy saved and shown", state.accounts.find((item) => item.id === account.id).network_label.includes("NAS QA"));
+  await showView("network");
+  $("#network-check-target").value = `account:${account.id}`;
+  $("#network-check-route").value = `proxy:${proxyID}`;
+  submit("#network-diagnose-form");
+  await waitUntil(() => $("#network-diagnose-results").textContent.includes("连接失败"));
+  check("failed proxy diagnostic is actionable", $("#network-diagnose-results").textContent.includes("无法连接代理"));
+  check("failed proxy does not fallback", $("#network-diagnose-results").textContent.includes("未自动切换出口"));
+  $("#network-check-target").value = "global";
+  $("#network-check-route").value = `proxy:${proxyID}`;
+  $("#network-compare").click();
+  await waitUntil(() => $("#network-diagnose-results").querySelectorAll(".network-diagnostic").length === 2);
+  check("comparison renders separate direct and proxy results", $("#network-diagnose-results").textContent.includes("直连") && $("#network-diagnose-results").textContent.includes("NAS QA"));
+  const final = await api("/api/network");
+  check("diagnostic preserves saved policy", final.global.mode === "proxy" && final.telegram.mode === "direct" && final.agent.mode === "proxy");
+  return {pass: results.every((item) => item.ok), results};
+})()

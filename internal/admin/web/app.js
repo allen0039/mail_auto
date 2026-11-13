@@ -12,6 +12,7 @@ const state = {
   limit: 50,
   editingAccount: null,
   version: "",
+  network: null,
 };
 const esc = (value) =>
   String(value ?? "").replace(
@@ -147,6 +148,7 @@ async function checkSession() {
   $("#login-form").hidden = !!state.session;
   $("#setup-form").hidden = !state.session || normal;
   if (!normal) {
+    if (window.resetNetwork) window.resetNetwork();
     if (window.clearMailSelection) window.clearMailSelection();
     clearTimeout(syncPollTimer);
     resetCredentials();
@@ -163,14 +165,16 @@ async function checkSession() {
   if (window.checkOAuthConsent) await window.checkOAuthConsent();
 }
 async function refresh() {
-  const [accounts, status] = await Promise.all([
+  const [accounts, status, network] = await Promise.all([
     api("/api/accounts"),
     api("/api/status"),
+    api("/api/network"),
   ]);
   const accountsChanged = JSON.stringify(state.accounts) !== JSON.stringify(accounts);
   const indexChanged = accountsChanged || state.status.index_revision !== status.index_revision || state.status.messages !== status.messages || state.status.unread !== status.unread;
   state.accounts = accounts;
   state.status = status;
+  state.network = network;
 
   if (status.version) {
     state.version = status.version;
@@ -462,6 +466,7 @@ const views = {
   agent: ["AGENT & TELEGRAM", "Agent 与 Telegram", "配置内置管理 Agent 的模型、授权与 Telegram 私聊交互；默认关闭。"],
   notifications: ["TASK NOTIFICATIONS", "TG 通知", "按需接收任务结果，成功时可以保持安静。"],
   audit: ["ACTIVITY LOG", "操作记录", "查看登录、同步和配置变更的足迹。"],
+  network: ["OUTBOUND CONNECTIONS", "网络与代理", "管理全局、邮箱、TG 与 Agent 的出口，查看真实连接诊断。"],
   system: [
     "SYSTEM SETTINGS",
     "系统设置",
@@ -496,6 +501,8 @@ async function showView(view) {
   if (view === "tasks" && window.loadTasks) await window.loadTasks();
   if (view === "notifications" && window.loadNotifications) await window.loadNotifications();
   if (view === "agent" && window.loadAgent) await window.loadAgent();
+  if (view === "network" && window.loadNetwork) await window.loadNetwork();
+  if ((view === "agent" || view === "notifications") && window.loadNetworkPolicies) await window.loadNetworkPolicies();
 }
 
 function empty(title, description, action) {
@@ -594,6 +601,7 @@ function renderAccounts() {
               <dl>
                 <div><dt>服务商</dt><dd>${esc(providerNames[a.provider] || a.provider)}</dd></div>
                 <div><dt>连接地址</dt><dd>${esc(a.host)}:${esc(a.port)} · TLS</dd></div>
+                <div><dt>网络出口</dt><dd>${esc(a.network_label || "直连")}${a.proxy?.mode === "inherit" ? " · 跟随全局" : ""}</dd></div>
                 <div><dt>允许文件夹</dt><dd>${a.folders.length ? a.folders.map((f) => esc(folderLabel(f))).join(" / ") : "全部可读取文件夹"}</dd></div>
                 <div><dt>凭据加密</dt><dd>${a.credential_source === "external" ? `外部 secret · ${esc(a.secret_file)}` : "本地加密保存"}</dd></div>
               </dl>
@@ -697,6 +705,7 @@ function openAccount(account = null) {
   updateProvider();
   if (account) form.elements.host.value = account.host;
   updateCredentialMode();
+  if (window.fillAccountNetwork) window.fillAccountNetwork(account);
   $("#account-dialog").showModal();
 }
 
@@ -868,6 +877,7 @@ $("#account-form").addEventListener("submit", async (e) => {
     .map((f) => f.trim())
     .filter(Boolean);
   data.port = Number(data.port);
+  if (window.accountNetworkPolicy) data.proxy = window.accountNetworkPolicy();
   const editingID = state.editingAccount;
   $("#account-error").textContent = "";
   try {
@@ -910,6 +920,10 @@ $("#account-list").addEventListener("click", async (e) => {
       });
     } else if (button.dataset.action === "diagnose") {
       await busy(button, "诊断中…", async () => {
+        if (window.diagnoseAccountNetwork) {
+          await window.diagnoseAccountNetwork(id, $(".diagnosis", card));
+          return;
+        }
         const result = await api(`/api/accounts/${id}/diagnose`, {
           method: "POST",
           body: "{}",

@@ -114,7 +114,16 @@ func (s *Service) automaticAccounts(ctx context.Context) ([]Account, error) {
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	rows.Close()
+	for index := range out {
+		if e = s.accountNetwork(&out[index]); e != nil {
+			return nil, e
+		}
+	}
+	return out, nil
 }
 func (s *Service) superviseAutomatic(ctx context.Context, r *automaticRunner, remote AutomaticRemote) {
 	ticker := time.NewTicker(5 * time.Second)

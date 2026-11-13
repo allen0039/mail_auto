@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mail-auto/internal/interaction"
+	"mail-auto/internal/network"
 	"mail-auto/internal/tglimit"
 )
 
@@ -50,13 +51,14 @@ func codeOf(err error) string {
 // Client calls the Bot API. BaseURL is https://api.telegram.org in
 // production; tests point it at a fake server.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	BaseURL     string
+	Token       string
+	HTTP        *http.Client
+	ResolveHTTP func() (*http.Client, error)
 }
 
 func NewClient(token string) *Client {
-	return &Client{BaseURL: "https://api.telegram.org", Token: token, HTTP: &http.Client{Timeout: 40 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &Client{BaseURL: "https://api.telegram.org", Token: token, HTTP: network.HTTPClient((network.Route{}).Transport(), 40*time.Second)}
 }
 
 type envelope struct {
@@ -79,7 +81,14 @@ func (c *Client) call(ctx context.Context, method string, body any, out any) err
 		return &APIError{Code: CodeBadRequest}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTP.Do(req)
+	client := c.HTTP
+	if c.ResolveHTTP != nil {
+		client, err = c.ResolveHTTP()
+		if err != nil {
+			return &APIError{Code: "network_config_invalid"}
+		}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		// The *url.Error carries the token URL; only a fixed code escapes.
 		if ctx.Err() != nil {

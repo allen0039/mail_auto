@@ -290,6 +290,18 @@ func (a Adapter) moveWithRuleStatePooled(
 	record func(mail.MoveResult) error,
 ) (mail.MoveResult, error) {
 	pool := a.pool
+	if a.Network != nil {
+		route, err := a.Network.Resolve("account", account.ID)
+		if err != nil {
+			return mail.MoveResult{}, err
+		}
+		pool.mu.Lock()
+		if old := pool.conns[account.ID]; old != nil && old.networkKey != route.Key {
+			old.close()
+			delete(pool.conns, account.ID)
+		}
+		pool.mu.Unlock()
+	}
 	pool.mu.Lock()
 	if pool.active[account.ID] <= 0 {
 		pool.mu.Unlock()

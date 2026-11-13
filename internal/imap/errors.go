@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mail-auto/internal/network"
 	"net"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type remoteError struct {
 	reason    string
 	retryable bool
 	attempts  int
+	code      string
 }
 
 func (e *remoteError) Error() string {
@@ -35,6 +37,9 @@ func (e *remoteError) Error() string {
 func (e *remoteError) PublicMessage() string { return e.Error() }
 func (e *remoteError) Unwrap() error         { return ErrRemote }
 func (e *remoteError) OperationErrorCode() string {
+	if e.code != "" {
+		return e.code
+	}
 	switch e.reason {
 	case "等待邮箱服务器响应超时（45 秒）":
 		return "provider_timeout"
@@ -53,7 +58,11 @@ func remoteFailure(conn *connection, operation string, err error) error {
 	}
 	e := &remoteError{operation: operation, reason: "服务器拒绝请求或返回无效响应"}
 	var netErr net.Error
+	var proxyErr *network.Error
 	switch {
+	case errors.As(err, &proxyErr):
+		e.reason, e.code = "网络连接失败（"+proxyErr.Stage+" / "+proxyErr.Code+"）", proxyErr.Code
+		e.retryable = proxyErr.Retryable()
 	case errors.Is(err, errResponseLimit):
 		e.reason = "服务器响应超过 32 MiB 限制"
 	case errors.As(err, &netErr) && netErr.Timeout():

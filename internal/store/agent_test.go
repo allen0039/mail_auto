@@ -43,7 +43,7 @@ INSERT INTO notification_channel VALUES(1,4,'{"enabled":true,"chat_id":"1","poli
 	}
 	var version int
 	_ = s.DB.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 11 || SchemaVersion != 11 {
+	if version != SchemaVersion {
 		t.Fatal("schema", version)
 	}
 	var policy, task, channel string
@@ -173,7 +173,7 @@ PRAGMA user_version=10;`); err != nil {
 	_ = s.DB.QueryRow("PRAGMA user_version").Scan(&version)
 	_ = s.DB.QueryRow("SELECT state FROM agent_proposals WHERE id='p'").Scan(&pState)
 	_ = s.DB.QueryRow("SELECT state,grant_version FROM telegram_reply_outbox WHERE id='o'").Scan(&oState, &gv)
-	if version != 11 || pState != "invalidated" || oState != "suppressed" || gv != 0 {
+	if version != SchemaVersion || pState != "invalidated" || oState != "suppressed" || gv != 0 {
 		t.Fatal(version, pState, oState, gv)
 	}
 	s.Close()

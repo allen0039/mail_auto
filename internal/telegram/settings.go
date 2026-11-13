@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -50,8 +51,16 @@ type Service struct {
 }
 
 func New(st *store.Store, v *credentials.Vault, m *mail.Service, a Agent) *Service {
-	return &Service{Store: st, Vault: v, Mail: m, Agent: a, NewClient: NewClient, PollTimeout: 25, workerID: credentials.Random(12), wake: make(chan struct{}, 1), attempts: map[int64][]time.Time{}, notices: map[int64]time.Time{}}
+	service := &Service{Store: st, Vault: v, Mail: m, Agent: a, PollTimeout: 25, workerID: credentials.Random(12), wake: make(chan struct{}, 1), attempts: map[int64][]time.Time{}, notices: map[int64]time.Time{}}
+	service.NewClient = func(token string) *Client {
+		client := NewClient(token)
+		client.ResolveHTTP = func() (*http.Client, error) { return m.TelegramHTTP(40 * time.Second) }
+		return client
+	}
+	return service
 }
+
+func (s *Service) NetworkChanged() { s.restartPoll() }
 
 // Settings is the interaction state shown to administrators. The token is
 // never returned; it lives in the notification settings only.

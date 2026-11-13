@@ -38,6 +38,7 @@
   const page = (start, n, matchAt) => Array.from({length: n}, (_, i) => ({message: {subject: `m${start + i}`, folder: "INBOX"}, action: "move", destination: "Archive", status: start + i === matchAt ? "matched" : "unmatched", reasons: ["fixture"]}));
   window.api = async (url, opts = {}) => {
     calls.push(`${opts.method || "GET"} ${url}${opts.body ? " " + opts.body : ""}`);
+    if (url === "/api/network") return {version: 0, global: {mode: "direct", proxy_id: ""}, telegram: {mode: "inherit", proxy_id: ""}, agent: {mode: "inherit", proxy_id: ""}, profiles: []};
     if (url.includes("/preview")) {
       if (delayedPreview) {
         return new Promise((resolve, reject) => {
@@ -66,6 +67,7 @@
     return {};
   };
   state.accounts = [{id: "a1", name: "fixture", username: "fixture@example.com", provider: "netease", host: "imap.163.com", port: 993, folders: ["INBOX"], synced_folders: ["INBOX"], credential_source: "encrypted"}];
+  renderAccounts();
   state.session = {};
   // Show the workspace as a signed-in session would; hidden elements cannot
   // take keyboard focus, which would invalidate the focus checks.

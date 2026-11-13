@@ -3,7 +3,6 @@ package imap
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"log"
@@ -21,6 +20,8 @@ import (
 	"github.com/emersion/go-message/charset"
 	"mail-auto/internal/mail"
 	mailmime "mail-auto/internal/mime"
+	"mail-auto/internal/network"
+	"mail-auto/internal/version"
 )
 
 // UIDBatchSize bounds each protocol response, not the total number of messages.
@@ -32,6 +33,7 @@ var ErrStale = errors.New("邮件引用已失效，请重新同步后查询")
 type Adapter struct {
 	connect func(context.Context, mail.Account, string) (*connection, error)
 	pool    *writePool
+	Network *network.Manager
 }
 
 type writePool struct {
@@ -49,7 +51,15 @@ func (a Adapter) open(ctx context.Context, account mail.Account, password string
 	if a.connect != nil {
 		return a.connect(ctx, account, password)
 	}
-	return dial(ctx, account, password)
+	route := network.Route{Key: "direct"}
+	if a.Network != nil {
+		var err error
+		route, err = a.Network.Resolve("account", account.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return dialRoute(ctx, account, password, route)
 }
 
 // Each connection has an absolute deadline and read budget, including protocol metadata.
@@ -91,18 +101,18 @@ func (c *boundedConn) Read(p []byte) (int, error) {
 }
 
 type connection struct {
-	budget *boundedConn
-	c      *client.Client
-	raw    net.Conn
-	stop   func() bool
-	once   sync.Once
+	budget     *boundedConn
+	c          *client.Client
+	raw        net.Conn
+	stop       func() bool
+	once       sync.Once
+	networkKey string
 }
 
-func dial(ctx context.Context, a mail.Account, password string) (*connection, error) {
+func dialRoute(ctx context.Context, a mail.Account, password string, route network.Route) (*connection, error) {
 	initCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	d := tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: &tls.Config{ServerName: a.Host, MinVersion: tls.VersionTLS12}}
-	raw, e := d.DialContext(initCtx, "tcp", net.JoinHostPort(a.Host, strconv.Itoa(a.Port)))
+	raw, e := route.DialTLS(initCtx, net.JoinHostPort(a.Host, strconv.Itoa(a.Port)), a.Host)
 	if e != nil {
 		cancel()
 		return nil, remoteFailure(nil, "建立 TLS 连接", e)
@@ -121,7 +131,7 @@ func dial(ctx context.Context, a mail.Account, password string) (*connection, er
 	}
 	c.Timeout = 45 * time.Second
 	c.ErrorLog = log.New(io.Discard, "", 0)
-	conn := &connection{c: c, raw: raw, budget: bc, stop: stop}
+	conn := &connection{c: c, raw: raw, budget: bc, stop: stop, networkKey: route.Key}
 	// ID is required by some NetEase deployments. Ignore only an unsupported capability.
 	conn.resetBudget()
 	if supported, e := c.Support("ID"); e != nil {
@@ -130,7 +140,7 @@ func dial(ctx context.Context, a mail.Account, password string) (*connection, er
 		return nil, err
 	} else if supported {
 		conn.resetBudget()
-		if _, e = id.NewClient(c).ID(id.ID{"name": "mail-auto", "version": "0.1.0"}); e != nil {
+		if _, e = id.NewClient(c).ID(id.ID{"name": "mail-auto", "version": version.Current}); e != nil {
 			err := remoteFailure(conn, "发送客户端标识", e)
 			conn.close()
 			return nil, err
@@ -188,6 +198,13 @@ func (adapter Adapter) folders(ctx context.Context, a mail.Account, password str
 	}
 	sort.Strings(folders)
 	return folders, nil
+}
+
+func (adapter Adapter) DiagnoseRoute(ctx context.Context, account mail.Account, password string, route network.Route) ([]string, error) {
+	adapter.connect = func(ctx context.Context, account mail.Account, password string) (*connection, error) {
+		return dialRoute(ctx, account, password, route)
+	}
+	return adapter.folders(ctx, account, password)
 }
 
 func (adapter Adapter) selectFolder(ctx context.Context, a mail.Account, password, folder string) (*connection, *protocol.MailboxStatus, error) {

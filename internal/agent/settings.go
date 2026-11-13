@@ -16,6 +16,7 @@ import (
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
 	"mail-auto/internal/modelprovider"
+	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 )
 
@@ -257,6 +258,18 @@ func (r *Runtime) SaveProvider(a mail.Access, in ProviderInput) (ProviderSetting
 var ErrToolLoopUnverified = errors.New("tool_call_unsupported")
 
 func (r *Runtime) providerClient(p storedProvider) (modelprovider.Provider, error) {
+	route := network.Route{Key: "direct"}
+	if r.Mail.Network != nil {
+		var err error
+		route, err = r.Mail.Network.Resolve("agent", "")
+		if err != nil {
+			return nil, &modelprovider.Error{Code: modelprovider.CodeConfig}
+		}
+	}
+	return r.providerClientRoute(p, route)
+}
+
+func (r *Runtime) providerClientRoute(p storedProvider, route network.Route) (modelprovider.Provider, error) {
 	if len(p.secret) == 0 {
 		return nil, &modelprovider.Error{Code: modelprovider.CodeConfig}
 	}
@@ -268,7 +281,7 @@ func (r *Runtime) providerClient(p storedProvider) (modelprovider.Provider, erro
 	if r.NewProvider != nil {
 		return r.NewProvider(s)
 	}
-	return modelprovider.NewChatCompletions(s, nil)
+	return modelprovider.NewChatCompletions(s, modelprovider.ProxyTransport(route))
 }
 
 // CheckProvider runs the chat or tool_loop test. Only the local echo tool is
@@ -294,7 +307,7 @@ func (r *Runtime) CheckProvider(ctx context.Context, a mail.Access, kind string)
 		defer cancel()
 		if base, _, e := modelprovider.NormalizeBaseURL(p.cfg.BaseURL); e != nil {
 			err = e
-		} else if r.NewProvider == nil {
+		} else if r.NewProvider == nil && r.Mail.Network == nil {
 			err = modelprovider.CheckResolution(ctx, base)
 		}
 		if err == nil {

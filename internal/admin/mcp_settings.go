@@ -16,6 +16,7 @@ import (
 
 	"mail-auto/internal/mail"
 	"mail-auto/internal/mcpserver"
+	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 )
 
@@ -186,7 +187,7 @@ func (s *Server) checkMCP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := network.HTTPClient((network.Route{}).Transport(), 5*time.Second)
 	checks := mcpChecks(ctx, state, client)
 	ok := true
 	for _, c := range checks {

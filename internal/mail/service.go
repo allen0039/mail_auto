@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mail-auto/internal/credentials"
+	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 )
 
@@ -27,6 +28,7 @@ type Service struct {
 	Store                 *store.Store
 	Vault                 *credentials.Vault
 	Remote                Remote
+	Network               *network.Manager
 	SecretDir             string
 	Context               context.Context
 	cancel                context.CancelFunc
@@ -51,14 +53,15 @@ type Service struct {
 	revision              atomic.Uint64
 }
 type AccountInput struct {
-	Name       string   `json:"name"`
-	Provider   string   `json:"provider"`
-	Username   string   `json:"username"`
-	Host       string   `json:"host"`
-	Port       int      `json:"port"`
-	Folders    []string `json:"folders"`
-	Password   string   `json:"password"`
-	SecretFile string   `json:"secret_file"`
+	Name       string          `json:"name"`
+	Provider   string          `json:"provider"`
+	Username   string          `json:"username"`
+	Host       string          `json:"host"`
+	Port       int             `json:"port"`
+	Folders    []string        `json:"folders"`
+	Password   string          `json:"password"`
+	SecretFile string          `json:"secret_file"`
+	Proxy      *network.Policy `json:"proxy,omitempty"`
 }
 
 var ErrLabelInput = errors.New("标签配置无效")
@@ -216,6 +219,13 @@ func validateAccount(a *AccountInput, keepCredential bool) error {
 	if len(a.Password) > 4096 {
 		return errors.New("授权码过长")
 	}
+	if a.Proxy != nil {
+		policy, err := network.NormalizePolicy(*a.Proxy, true)
+		if err != nil {
+			return network.ErrConfig
+		}
+		a.Proxy = &policy
+	}
 	return nil
 }
 func (s *Service) Create(a AccountInput) (Account, error) {
@@ -251,6 +261,11 @@ func (s *Service) Create(a AccountInput) (Account, error) {
 	}
 	if _, e = tx.Exec("INSERT INTO accounts VALUES(?,?,?,?,?,?,?,?,?,?)", id, a.Name, a.Provider, a.Username, a.Host, a.Port, string(folders), cipher, a.SecretFile, now); e != nil {
 		return Account{}, e
+	}
+	if a.Proxy != nil {
+		if e = network.SetAccount(tx, id, *a.Proxy); e != nil {
+			return Account{}, e
+		}
 	}
 	if e = store.Audit(tx, "account.create", id, "ok"); e != nil {
 		return Account{}, e
@@ -296,6 +311,11 @@ func (s *Service) Update(id string, in AccountInput) (Account, error) {
 	defer tx.Rollback()
 	if _, e = tx.Exec("UPDATE accounts SET name=?,provider=?,username=?,host=?,port=?,folders=?,secret=?,secret_file=? WHERE id=?", in.Name, in.Provider, in.Username, in.Host, in.Port, string(folders), cipher, secretFile, id); e != nil {
 		return Account{}, e
+	}
+	if in.Proxy != nil {
+		if e = network.SetAccount(tx, id, *in.Proxy); e != nil {
+			return Account{}, e
+		}
 	}
 	identityChanged := old.Provider != in.Provider || old.Username != in.Username || old.Host != in.Host || old.Port != in.Port
 	if identityChanged || len(in.Folders) > 0 {
@@ -370,6 +390,9 @@ func (s *Service) Accounts() ([]Account, error) {
 	}
 	rows.Close()
 	for i := range out {
+		if e = s.accountNetwork(&out[i]); e != nil {
+			return nil, e
+		}
 		boxes, e := s.Mailboxes(out[i].ID)
 		if e != nil {
 			return nil, e
@@ -382,7 +405,11 @@ func (s *Service) Accounts() ([]Account, error) {
 	return out, nil
 }
 func (s *Service) Account(id string) (Account, error) {
-	return scanAccount(s.Store.DB.QueryRow("SELECT * FROM accounts WHERE id=?", id))
+	account, err := scanAccount(s.Store.DB.QueryRow("SELECT * FROM accounts WHERE id=?", id))
+	if err == nil {
+		err = s.accountNetwork(&account)
+	}
+	return account, err
 }
 func (s *Service) password(a Account) (string, error) {
 	if a.SecretFile != "" {

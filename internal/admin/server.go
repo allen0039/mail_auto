@@ -20,13 +20,15 @@ import (
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/network"
 	"mail-auto/internal/telegram"
+	"mail-auto/internal/version"
 )
 
 //go:embed web/*
 var web embed.FS
 
-const Version = "0.5.1"
+const Version = version.Current
 const sessionCookie = "mail_auto_session"
 const csrfCookie = "mail_auto_csrf"
 
@@ -50,6 +52,9 @@ type Server struct {
 }
 
 func New(auth *Auth, m *mail.Service, c config.Config) *Server {
+	if m.Network == nil {
+		m.Network = network.New(auth.Store, auth.Vault)
+	}
 	s := &Server{Auth: auth, Mail: m, Config: c, attempts: map[string]attempts{}, hashing: make(chan struct{}, 2)}
 	s.initMCP()
 	return s
@@ -195,7 +200,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, 405, "method not allowed")
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/agent.js" && r.URL.Path != "/style.css" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/agent.js" && r.URL.Path != "/network.js" && r.URL.Path != "/style.css" {
 			http.NotFound(w, r)
 			return
 		}
@@ -337,6 +342,9 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "请先修改初始用户名和密码")
 		return
 	}
+	if s.networkAPI(w, r) {
+		return
+	}
 	if s.agentAPI(w, r) {
 		return
 	}
@@ -424,7 +432,9 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func operationError(w http.ResponseWriter, e error) {
-	if errors.Is(e, mail.ErrDailyLimit) {
+	if errors.Is(e, network.ErrConfig) || errors.Is(e, network.ErrConflict) || errors.Is(e, network.ErrReferenced) {
+		networkError(w, e)
+	} else if errors.Is(e, mail.ErrDailyLimit) {
 		fail(w, 429, "已达到今天的自动整理上限，请明天继续或由管理员调整额度")
 	} else if errors.Is(e, mail.ErrInput) || errors.Is(e, mail.ErrLabelInput) {
 		fail(w, 400, "参数无效，请检查邮件和原邮箱目的文件夹")

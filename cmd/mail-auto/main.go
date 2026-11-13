@@ -20,6 +20,7 @@ import (
 	"mail-auto/internal/credentials"
 	remote "mail-auto/internal/imap"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 	"mail-auto/internal/telegram"
 )
@@ -40,7 +41,7 @@ func run(args []string) error {
 		return nil
 	}
 	if len(cmd) == 1 && cmd[0] == "healthcheck" {
-		client := http.Client{Timeout: 3 * time.Second}
+		client := network.HTTPClient((network.Route{}).Transport(), 3*time.Second)
 		host, port, _ := net.SplitHostPort(c.Listen)
 		if host == "" || host == "0.0.0.0" || host == "::" {
 			host = "127.0.0.1"
@@ -111,7 +112,11 @@ func run(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	service := &mail.Service{Store: st, Vault: vault, Remote: remote.NewAdapter(), SecretDir: c.SecretDir, Context: ctx, NotificationPublicURL: c.PublicURL}
+	networks := network.New(st, vault)
+	defer networks.CloseIdle()
+	adapter := remote.NewAdapter()
+	adapter.Network = networks
+	service := &mail.Service{Store: st, Vault: vault, Network: networks, Remote: adapter, SecretDir: c.SecretDir, Context: ctx, NotificationPublicURL: c.PublicURL}
 	if e = service.RecoverSync(ctx); e != nil {
 		return e
 	}

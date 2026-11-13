@@ -186,6 +186,10 @@ func (c *ChatCompletions) once(ctx context.Context, r Request) (Response, error)
 		if ctx.Err() != nil {
 			return Response{}, &Error{Code: CodeTimeout}
 		}
+		var classified *Error
+		if errors.As(err, &classified) {
+			return Response{}, classified
+		}
 		if strings.Contains(err.Error(), errBlockedDestination.Error()) {
 			return Response{}, &Error{Code: CodeDestination}
 		}

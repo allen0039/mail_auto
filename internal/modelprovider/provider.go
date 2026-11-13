@@ -85,7 +85,8 @@ type Error struct {
 	RetryAfter time.Duration
 }
 
-func (e *Error) Error() string { return e.Code }
+func (e *Error) Error() string              { return e.Code }
+func (e *Error) OperationErrorCode() string { return e.Code }
 
 // Retryable reports whether a bounded retry may help.
 func (e *Error) Retryable() bool {

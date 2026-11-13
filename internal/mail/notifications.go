@@ -186,7 +186,10 @@ func (s *Service) telegram(ctx context.Context, c NotificationChannel, secret []
 	req.Header.Set("Content-Type", "application/json")
 	client := s.NotificationHTTP
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client, e = s.TelegramHTTP(10 * time.Second)
+		if e != nil {
+			return "", "network_config_invalid", 0
+		}
 	}
 	resp, e := client.Do(req)
 	if e != nil {

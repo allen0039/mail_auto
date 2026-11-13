@@ -15,6 +15,7 @@
     <script src="/rules.js" defer></script>
     <script src="/tasks.js" defer></script>
     <script src="/agent.js" defer></script>
+    <script src="/network.js" defer></script>
   </head>
   <body>
     <!-- SVG Icons Sprite (F02: hidden without inline styles) -->
@@ -107,7 +108,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.5.1</span>
+          <span class="badge badge-subtle app-version-label">v0.6.0</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -119,7 +120,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.5.1</span>
+            <span class="app-version-label">v0.6.0</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -202,7 +203,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.5.1</span>
+            个人邮件工作台 <span class="app-version-label">v0.6.0</span>
           </div>
         </div>
 
@@ -268,6 +269,10 @@
               <button data-view="audit" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-audit"></use></svg>
                 <span>操作记录</span>
+              </button>
+              <button data-view="network" class="nav-button">
+                <svg class="icon" aria-hidden="true"><use href="#icon-sync"></use></svg>
+                <span>网络与代理</span>
               </button>
               <button data-view="system" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-system"></use></svg>
@@ -804,6 +809,13 @@
             <article class="panel organizer-card">
               <h2>Telegram 自动化通知</h2>
               <p class="muted small">通知只包含任务名称、处理数量和错误摘要，默认不包含邮件正文、发件人隐私信息。</p>
+              <div class="network-inline margin-t-16">
+                <label>TG 连接方式<select id="telegram-network-policy" data-network-scope="telegram"></select></label>
+                <button type="button" class="secondary" data-network-save="telegram">保存 TG 连接方式</button>
+                <button type="button" class="secondary" data-network-check="telegram">诊断 TG 连接</button>
+              </div>
+              <p class="muted small">通知、机器人收取命令、回复与按钮回调共用此设置；代理失败不自动直连。</p>
+              <div id="telegram-network-result" role="status" aria-live="polite"></div>
 
               <form id="telegram-form" class="rules-form margin-t-16">
                 <label class="checkbox-label"><input id="telegram-enabled" type="checkbox" />启用 Telegram 通知</label>
@@ -865,7 +877,13 @@
 
             <article class="panel organizer-card">
               <h2>模型（OpenAI 兼容 Chat Completions）</h2>
-              <p class="muted small">仅允许 HTTPS 公网地址；不跟随重定向、不使用系统代理。API Key 加密保存且不回显。修改地址、模型或密钥后需重新检测，工具闭环检测通过后才能启用。</p>
+              <p class="muted small">仅允许 HTTPS 公网地址；不跟随重定向。连接方式由下方设置控制，不读取系统代理。API Key 加密保存且不回显。修改模型或有效网络出口后需重新检测，工具闭环检测通过后才能启用。</p>
+              <div class="network-inline margin-t-16">
+                <label>Agent 连接方式<select id="agent-network-policy" data-network-scope="agent"></select></label>
+                <button type="button" class="secondary" data-network-save="agent">保存 Agent 连接方式</button>
+                <button type="button" class="secondary" data-network-check="agent">诊断 Agent 连接</button>
+              </div>
+              <div id="agent-network-result" role="status" aria-live="polite"></div>
               <form id="agent-provider-form" class="rules-form margin-t-16">
                 <div class="rules-grid">
                   <label>Base URL（API 根地址）
@@ -990,6 +1008,78 @@
         <!-- ================================================================= -->
         <!-- VIEW 9: System Settings Pane                                     -->
         <!-- ================================================================= -->
+        <section id="network-pane" hidden>
+          <div class="organizer-stack">
+            <article class="panel organizer-card">
+              <div class="panel-heading-clean">
+                <div><span class="eyebrow">OUTBOUND CONNECTIONS</span><h2>连接策略</h2></div>
+                <button id="network-refresh" type="button" class="secondary">重新读取</button>
+              </div>
+              <p class="muted small">局部设置优先；“跟随全局”使用全局默认。代理失败只报错和重试，不自动直连。不读取 HTTP_PROXY、HTTPS_PROXY 或 ALL_PROXY。</p>
+              <form id="network-policy-form" class="rules-form margin-t-16">
+                <div class="rules-grid">
+                  <label>全局默认<select id="network-global" data-network-scope="global"></select></label>
+                  <label>Telegram（通知与交互）<select id="network-telegram" data-network-scope="telegram"></select></label>
+                  <label>内置 Agent<select id="network-agent" data-network-scope="agent"></select></label>
+                </div>
+                <p class="info-strip">更改 Agent 的有效出口会暂停 Agent 并使旧检测失效，请重新检测后启用。只修改代理不会清空邮件索引，也不会解除 TG 绑定。</p>
+                <div class="organizer-inline">
+                  <button type="submit" class="primary">保存代理与连接策略</button>
+                  <button type="button" class="secondary" data-network-check="global">诊断全局出口</button>
+                </div>
+                <p id="network-save-status" class="muted" role="status"></p>
+              </form>
+              <div id="global-network-result" role="status" aria-live="polite"></div>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>代理配置</h2>
+              <p class="muted small">邮箱和 TG 的目标域名交给代理解析。HTTP / HTTPS 代理须允许 CONNECT 到邮箱 TLS 端口。代理账号密码用于连接代理，邮箱授权码保持原设置。</p>
+              <div id="network-profiles" class="margin-t-16"></div>
+              <form id="network-profile-form" class="rules-form margin-t-16">
+                <input id="proxy-id" type="hidden" />
+                <div class="rules-grid">
+                  <label>名称<input id="proxy-name" type="text" maxlength="80" required placeholder="例如：NAS 代理" /></label>
+                  <label>协议<select id="proxy-protocol"><option value="socks5">SOCKS5（代理解析域名）</option><option value="http">HTTP CONNECT</option><option value="https">HTTPS CONNECT</option></select></label>
+                  <label>主机或 IP<input id="proxy-host" type="text" maxlength="253" required placeholder="例如：192.168.1.20 或 proxy" /></label>
+                  <label>端口<input id="proxy-port" type="number" min="1" max="65535" required placeholder="例如：7890" /></label>
+                  <label>用户名（可选）<input id="proxy-username" type="text" maxlength="255" autocomplete="off" /></label>
+                  <label>密码（可选）<input id="proxy-password" type="password" maxlength="4096" autocomplete="new-password" placeholder="已保存时留空保留，不回显" /></label>
+                </div>
+                <label class="checkbox-label"><input id="proxy-clear-password" type="checkbox" />删除已保存的代理密码（同时清空用户名）</label>
+                <label class="checkbox-label"><input id="proxy-trusted-dns" type="checkbox" />信任此代理在 Agent 连接时解析模型域名并限制为公网目标</label>
+                <p class="muted small">Agent 默认在本地验证模型域名的公网 IP，再经代理连接该 IP。勾选后可绕过本地 DNS 故障，但最终 IP 由代理控制，代理必须可信并限制私网和元数据地址。目标 HTTPS 证书始终验证。</p>
+                <div class="organizer-inline">
+                  <button class="secondary" type="submit">加入待保存配置</button>
+                  <button id="proxy-reset" class="secondary" type="button">清空表单</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>连接对比诊断</h2>
+              <p class="muted small">从服务器容器发起诊断；仅测试当前保存的配置。邮箱测试登录及文件夹列表；TG 验证机器人；Agent 发送不含邮件内容的简短聊天测试。Agent 测试可能产生少量模型费用。全局测试仅验证到 Telegram 的 TCP 与 TLS。</p>
+              <form id="network-diagnose-form" class="rules-form margin-t-16">
+                <div class="rules-grid">
+                  <label>目标<select id="network-check-target"></select></label>
+                  <label>测试出口<select id="network-check-route"></select></label>
+                </div>
+                <div class="organizer-inline">
+                  <button class="primary" type="submit">开始诊断</button>
+                  <button id="network-compare" class="secondary" type="button">对比直连与所选代理</button>
+                </div>
+              </form>
+              <div id="network-diagnose-results" class="margin-t-16" role="status" aria-live="polite"></div>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>NAS 连接提示</h2>
+              <p class="muted small">优先使用现有代理：同一 Docker 网络中的代理用服务名，路由器或其他设备用局域网 IP。普通 bridge 容器中的 127.0.0.1 指向容器自身。宿主机代理需监听容器可达地址，并只允许可信网段访问。</p>
+              <p class="muted small">推荐：全局直连，TG 指定代理；连接不佳的邮箱单独指定代理。管理页面、入站 MCP 与本地健康检查不受上述业务代理策略影响。</p>
+            </article>
+          </div>
+        </section>
+
         <section id="system-pane" hidden>
           <div class="system-grid">
             <article class="panel system-card credentials-card">
@@ -1031,7 +1121,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.5.1</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.6.0</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1110,6 +1200,12 @@
             <input name="port" type="number" min="1" max="65535" step="1" value="993" required />
           </label>
         </div>
+
+        <label class="margin-t-12">
+          邮箱连接方式
+          <select id="account-network-policy"></select>
+          <small>跟随全局、强制直连或指定代理；代理失败不自动直连。代理配置在“网络与代理”管理。</small>
+        </label>
 
         <label class="margin-t-12">
           同步文件夹（可选）
