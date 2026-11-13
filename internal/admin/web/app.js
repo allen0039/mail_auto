@@ -459,6 +459,7 @@ const views = {
   rules: ["MAIL RULES", "整理规则", "配置原邮箱的分类规则与任务授权范围。"],
   tasks: ["MAIL TASKS", "定时与任务", "选择内置定时或外部 MCP 触发，统一查看原邮箱整理结果。"],
   organizer: ["MAIL ORGANIZER", "整理与 MCP", "配置原邮箱文件夹分类、整理任务和 MCP 连接。"],
+  agent: ["AGENT & TELEGRAM", "Agent 与 Telegram", "配置内置管理 Agent 的模型、授权与 Telegram 私聊交互；默认关闭。"],
   notifications: ["TASK NOTIFICATIONS", "TG 通知", "按需接收任务结果，成功时可以保持安静。"],
   audit: ["ACTIVITY LOG", "操作记录", "查看登录、同步和配置变更的足迹。"],
   system: [
@@ -494,6 +495,7 @@ async function showView(view) {
   if (view === "rules" && window.loadRules) await window.loadRules();
   if (view === "tasks" && window.loadTasks) await window.loadTasks();
   if (view === "notifications" && window.loadNotifications) await window.loadNotifications();
+  if (view === "agent" && window.loadAgent) await window.loadAgent();
 }
 
 function empty(title, description, action) {

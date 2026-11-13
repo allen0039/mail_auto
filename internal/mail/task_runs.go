@@ -168,7 +168,8 @@ func (s *Service) RunTask(a Access, in TaskRunInput, source string) (TaskRun, er
 	if source == "external" && (t.Trigger != "external" || !t.Enabled) {
 		return TaskRun{}, ErrDenied
 	}
-	if t.Engine == "ai" && a.Owner == "admin" {
+	if t.Engine == "ai" && (a.Owner == "admin" || strings.HasPrefix(a.Owner, AgentOwnerPrefix)) {
+		// The built-in agent never starts a run that waits for external AI.
 		return TaskRun{}, ErrCapability
 	}
 	if _, _, e = s.authorizedAutomation(a, t.AccountID); e != nil {
@@ -338,6 +339,12 @@ func (s *Service) PreviewTask(a Access, id, cursor string, onlyMatched bool) (Ru
 	if e != nil {
 		return RulePreview{}, e
 	}
+	return s.previewTaskRules(a, t, rules, p, cursor, onlyMatched)
+}
+
+// previewTaskRules evaluates a task against a rule snapshot. It reads only the
+// local index and never writes; PreviewTask and draft workflow previews share it.
+func (s *Service) previewTaskRules(a Access, t Task, rules []Rule, p AutomationPolicy, cursor string, onlyMatched bool) (RulePreview, error) {
 	for _, r := range rules {
 		if r.Enabled && !ruleVisible(a, r) {
 			return RulePreview{}, ErrDenied

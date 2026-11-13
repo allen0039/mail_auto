@@ -15,11 +15,13 @@ import (
 	_ "time/tzdata"
 
 	"mail-auto/internal/admin"
+	"mail-auto/internal/agent"
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	remote "mail-auto/internal/imap"
 	"mail-auto/internal/mail"
 	"mail-auto/internal/store"
+	"mail-auto/internal/telegram"
 )
 
 func main() {
@@ -94,7 +96,10 @@ func run(args []string) error {
 		if e = auth.Recover(); e != nil {
 			return e
 		}
-		fmt.Println("All sessions revoked. New temporary credentials are available via bootstrap show.")
+		if e = telegram.RecoverOffline(st); e != nil {
+			return e
+		}
+		fmt.Println("All sessions revoked. Telegram bindings, pending agent proposals and queued agent work were revoked; re-bind after recovery. New temporary credentials are available via bootstrap show.")
 		return nil
 	}
 	if isBackup {
@@ -122,7 +127,20 @@ func run(args []string) error {
 			return e
 		}
 	}
-	handler := admin.New(auth, service, c).Handler()
+	// The agent and Telegram workers start idle: nothing polls, calls a model
+	// or writes until an administrator enables and binds them.
+	runtime := agent.New(st, vault, service)
+	interactive := telegram.New(st, vault, service, runtime)
+	runtime.Start(ctx)
+	interactive.Start(ctx)
+	defer func() {
+		runtime.Wait()
+		interactive.Wait()
+		interactive.ReleaseLease()
+	}()
+	adminServer := admin.New(auth, service, c)
+	adminServer.Agent, adminServer.Telegram = runtime, interactive
+	handler := adminServer.Handler()
 	server := &http.Server{Addr: c.Listen, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 130 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	cleanupDone := make(chan struct{})
 	go func() {

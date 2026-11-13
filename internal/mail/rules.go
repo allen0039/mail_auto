@@ -210,8 +210,25 @@ func (s *Service) knownFolder(account Account, name string) bool {
 	return s.Store.DB.QueryRow("SELECT count(*) FROM mailboxes WHERE account_id=? AND name=?", account.ID, name).Scan(&n) == nil && n == 1
 }
 func (s *Service) SaveRule(a Access, r Rule) (Rule, error) {
+	return s.saveRule(a, r, nil)
+}
+
+// SaveRuleWithMutation is SaveRule with a server-assigned mutation ID. The
+// business write, its audit record and the mutation result commit in one
+// transaction; a retry with the same ID returns the recorded result instead of
+// creating or updating the rule again.
+func (s *Service) SaveRuleWithMutation(a Access, r Rule, m Mutation) (Rule, error) {
+	return s.saveRule(a, r, &m)
+}
+func (s *Service) saveRule(a Access, r Rule, m *Mutation) (Rule, error) {
 	s.automationMu.Lock()
 	defer s.automationMu.Unlock()
+	if m != nil {
+		var saved Rule
+		if done, err := s.mutationResult(m, r, &saved); err != nil || done {
+			return saved, err
+		}
+	}
 	a, e := s.CheckAccess(a)
 	if e != nil {
 		return Rule{}, e
@@ -326,8 +343,13 @@ func (s *Service) SaveRule(a Access, r Rule) (Rule, error) {
 	if _, e = tx.Exec("INSERT INTO mail_rule_versions VALUES(?,?,?,?)", r.ID, r.Version, string(raw), r.UpdatedAt); e != nil {
 		return Rule{}, e
 	}
-	if e = store.Audit(tx, "mail.rule.save", r.ID, "ok"); e != nil {
+	if e = store.Audit(tx, "mail.rule.save", r.ID, auditActor(a)); e != nil {
 		return Rule{}, e
+	}
+	if m != nil {
+		if e = recordMutation(tx, *m, a, r.ID, r.Version, r); e != nil {
+			return Rule{}, e
+		}
 	}
 	return r, tx.Commit()
 }

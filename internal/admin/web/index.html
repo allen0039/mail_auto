@@ -14,6 +14,7 @@
     <script src="/organizer.js" defer></script>
     <script src="/rules.js" defer></script>
     <script src="/tasks.js" defer></script>
+    <script src="/agent.js" defer></script>
   </head>
   <body>
     <!-- SVG Icons Sprite (F02: hidden without inline styles) -->
@@ -106,7 +107,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.4.20</span>
+          <span class="badge badge-subtle app-version-label">v0.5.0</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -118,7 +119,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.4.20</span>
+            <span class="app-version-label">v0.5.0</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -201,7 +202,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.4.20</span>
+            个人邮件工作台 <span class="app-version-label">v0.5.0</span>
           </div>
         </div>
 
@@ -256,6 +257,10 @@
           <div class="nav-group">
             <div class="nav-group-title">系统与安全</div>
             <div class="nav-group-items">
+              <button data-view="agent" class="nav-button">
+                <svg class="icon" aria-hidden="true"><use href="#icon-mcp"></use></svg>
+                <span>Agent 与 TG</span>
+              </button>
               <button data-view="notifications" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-bell"></use></svg>
                 <span>TG 通知</span>
@@ -850,6 +855,110 @@
           </div>
         </section>
 
+        <section id="agent-pane" hidden>
+          <div class="organizer-stack">
+            <article class="panel organizer-card">
+              <h2>能力状态</h2>
+              <p class="muted small">内置管理 Agent 通过 Telegram 私聊管理固定规则与任务。持续 AI 语义分类、按正文判断尚未支持。模型或 Telegram 故障不影响邮件同步、Web、MCP 和既有任务。</p>
+              <ul id="agent-capabilities" class="agent-status-list margin-t-12"></ul>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>模型（OpenAI 兼容 Chat Completions）</h2>
+              <p class="muted small">仅允许 HTTPS 公网地址；不跟随重定向、不使用系统代理。API Key 加密保存且不回显。修改地址、模型或密钥后需重新检测，工具闭环检测通过后才能启用。</p>
+              <form id="agent-provider-form" class="rules-form margin-t-16">
+                <div class="rules-grid">
+                  <label>Base URL（API 根地址）
+                    <input id="agent-base-url" type="url" maxlength="512" placeholder="https://api.example.com/v1" />
+                    <small id="agent-endpoint">请求地址：—</small>
+                  </label>
+                  <label>模型
+                    <input id="agent-model" type="text" maxlength="200" placeholder="手工填写模型名称" />
+                  </label>
+                </div>
+                <div class="rules-grid">
+                  <label>API Key
+                    <input id="agent-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="留空表示保留原密钥" />
+                    <small id="agent-key-note">未保存密钥。</small>
+                  </label>
+                  <label>单次请求超时（秒）
+                    <input id="agent-timeout" type="number" min="10" max="120" value="60" />
+                  </label>
+                </div>
+                <div class="rules-grid">
+                  <label>输出长度参数
+                    <select id="agent-max-param">
+                      <option value="">不发送（默认）</option>
+                      <option value="max_tokens">max_tokens</option>
+                      <option value="max_completion_tokens">max_completion_tokens</option>
+                    </select>
+                  </label>
+                  <div class="form-checkbox-stack">
+                    <label class="checkbox-label"><input id="agent-enabled" type="checkbox" />启用 Agent（需工具闭环检测通过）</label>
+                    <label class="checkbox-label"><input id="agent-clear-key" type="checkbox" />删除已保存的 API Key 并停用</label>
+                  </div>
+                </div>
+                <div class="organizer-inline">
+                  <button type="submit" class="primary">保存模型设置</button>
+                  <button id="agent-check-chat" type="button" class="secondary">聊天测试</button>
+                  <button id="agent-check-tool" type="button" class="secondary">工具闭环测试</button>
+                </div>
+                <p id="agent-provider-status" class="muted margin-t-10" role="status"></p>
+              </form>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>Agent 授权</h2>
+              <p class="muted small">Agent 使用独立、可撤销的身份，与管理员自动化策略取交集，不能扩大策略。默认只勾选“查询”。执行任务需要授权覆盖策略中的全部来源文件夹及目的文件夹（建议“全部文件夹”）。</p>
+              <form id="agent-grant-form" class="rules-form margin-t-16">
+                <div id="agent-grant-accounts" class="agent-grant-accounts"></div>
+                <fieldset class="agent-actions">
+                  <legend>允许的动作</legend>
+                  <label class="checkbox-label"><input type="checkbox" value="read" checked disabled />查询账号、目录、策略、规则、任务与运行</label>
+                  <label class="checkbox-label"><input type="checkbox" value="rule_manage" />规则管理（草稿；启用需按钮确认）</label>
+                  <label class="checkbox-label"><input type="checkbox" value="task_manage" />任务管理（草稿；启用/执行模式需按钮确认）</label>
+                  <label class="checkbox-label"><input type="checkbox" value="automation" />手动运行固定规则任务</label>
+                  <label class="checkbox-label"><input type="checkbox" value="task_run_manage" />查看/停止内置日程产生的运行</label>
+                </fieldset>
+                <div class="rules-grid">
+                  <label>有效期（天，1–90）
+                    <input id="agent-grant-days" type="number" min="1" max="90" value="30" />
+                  </label>
+                  <div class="form-checkbox-stack">
+                    <label class="checkbox-label"><input id="agent-grant-enabled" type="checkbox" checked />授权生效</label>
+                  </div>
+                </div>
+                <div class="organizer-inline">
+                  <button type="submit" class="primary">保存授权</button>
+                  <button id="agent-grant-revoke" type="button" class="secondary danger-btn">撤销授权并解除绑定</button>
+                </div>
+                <p id="agent-grant-status" class="muted margin-t-10" role="status"></p>
+              </form>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>Telegram 私聊交互</h2>
+              <p class="muted small">复用「TG 通知」中保存的 Bot Token；交互开关与通知开关相互独立，通知仍发往原通知 Chat。仅支持长轮询；若 Bot 已设置 webhook 会报告冲突且不会删除。Telegram 服务端最多保留 24 小时更新，离线超过该时间的消息无法补齐。</p>
+              <div id="agent-telegram-state" class="margin-t-12"></div>
+              <div class="organizer-inline margin-t-12">
+                <button id="agent-telegram-toggle" type="button" class="primary">开启交互</button>
+                <button id="agent-bind-code" type="button" class="secondary">生成绑定码</button>
+                <button id="agent-unbind" type="button" class="secondary danger-btn">解除绑定</button>
+              </div>
+              <p id="agent-bind-output" class="margin-t-10" role="status"></p>
+            </article>
+
+            <article class="panel organizer-card">
+              <div class="panel-heading-clean">
+                <h2>近期 Agent 记录</h2>
+                <button id="agent-refresh" type="button" class="secondary">刷新</button>
+              </div>
+              <p class="muted small">只显示状态、工具名称、结果代码和业务对象 ID，不展示对话原文。规则与任务的实际状态以「整理规则」「定时与任务」为准。</p>
+              <div id="agent-records" class="margin-t-12"></div>
+            </article>
+          </div>
+        </section>
+
         <!-- ================================================================= -->
         <!-- VIEW 8: Audit Log Pane                                           -->
         <!-- ================================================================= -->
@@ -922,7 +1031,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.4.20</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.5.0</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>

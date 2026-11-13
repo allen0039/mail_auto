@@ -79,6 +79,9 @@ func (s *Service) CheckAccess(a Access) (Access, error) {
 	if strings.HasPrefix(a.Owner, "svc:") {
 		return s.taskServiceAccess(a)
 	}
+	if strings.HasPrefix(a.Owner, AgentOwnerPrefix) {
+		return s.agentAccess(a)
+	}
 	var rawAccounts, rawFolders, rawActions string
 	var expires int64
 	var version, revoked int

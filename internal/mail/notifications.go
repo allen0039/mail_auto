@@ -17,15 +17,19 @@ import (
 
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/store"
+	"mail-auto/internal/tglimit"
 )
 
 type NotificationChannel struct {
-	Version    int    `json:"version"`
-	Enabled    bool   `json:"enabled"`
-	ChatID     string `json:"chat_id"`
-	Policy     string `json:"policy"`
-	Configured bool   `json:"configured"`
-	Recovery   bool   `json:"recovery"`
+	// TokenGeneration changes only when the bot token is replaced or cleared;
+	// Telegram interaction uses it to fence old consumers.
+	TokenGeneration int    `json:"token_generation"`
+	Version         int    `json:"version"`
+	Enabled         bool   `json:"enabled"`
+	ChatID          string `json:"chat_id"`
+	Policy          string `json:"policy"`
+	Configured      bool   `json:"configured"`
+	Recovery        bool   `json:"recovery"`
 }
 type NotificationInput struct {
 	Version    int    `json:"version"`
@@ -110,7 +114,10 @@ func (s *Service) SaveNotifications(a Access, in NotificationInput) (Notificatio
 	if in.Enabled && (len(secret) == 0 || in.ChatID == "") {
 		return old, ErrInput
 	}
-	c := NotificationChannel{Version: old.Version + 1, Enabled: in.Enabled, ChatID: in.ChatID, Policy: in.Policy, Configured: len(secret) > 0, Recovery: in.Recovery}
+	c := NotificationChannel{Version: old.Version + 1, Enabled: in.Enabled, ChatID: in.ChatID, Policy: in.Policy, Configured: len(secret) > 0, Recovery: in.Recovery, TokenGeneration: old.TokenGeneration}
+	if in.ClearToken || in.BotToken != "" {
+		c.TokenGeneration++
+	}
 	raw, _ := json.Marshal(c)
 	tx, e := s.Store.DB.Begin()
 	if e != nil {
@@ -165,6 +172,11 @@ func (s *Service) telegram(ctx context.Context, c NotificationChannel, secret []
 		data = map[string]any{"chat_id": c.ChatID, "text": text, "disable_web_page_preview": true}
 	}
 	body, _ := json.Marshal(data)
+	if method == "sendMessage" {
+		if tglimit.Pace(ctx, c.ChatID) != nil {
+			return "", "telegram_network_error", 0
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, e := http.NewRequestWithContext(ctx, "POST", "https://api.telegram.org/bot"+token+"/"+method, bytes.NewReader(body))
@@ -192,6 +204,7 @@ func (s *Service) telegram(ctx context.Context, c NotificationChannel, secret []
 		if wait == 0 {
 			wait, _ = strconv.Atoi(resp.Header.Get("Retry-After"))
 		}
+		tglimit.Block(time.Duration(max(1, wait)) * time.Second)
 		return "", "telegram_rate_limited", max(1, min(wait, 86400))
 	}
 	if code == 401 {
@@ -399,4 +412,28 @@ func (s *Service) NotificationDeliveries(a Access) ([]NotificationDelivery, erro
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// TelegramCredential returns the decrypted bot token and its generation for
+// the interaction transport. It is not exposed through any API.
+func (s *Service) TelegramCredential() (string, int, error) {
+	c, secret, e := s.notificationChannel()
+	if e != nil {
+		return "", 0, e
+	}
+	if len(secret) == 0 {
+		return "", c.TokenGeneration, ErrInput
+	}
+	token, e := s.Vault.Decrypt(secret, "notification:telegram:1")
+	if e != nil || !botTokenPattern.MatchString(token) {
+		return "", c.TokenGeneration, ErrConflict
+	}
+	return token, c.TokenGeneration, nil
+}
+
+// NotificationChatID is the configured notification chat, for avoiding a
+// duplicate result message in the same chat.
+func (s *Service) NotificationChatID() string {
+	c, _, _ := s.notificationChannel()
+	return c.ChatID
 }

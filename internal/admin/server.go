@@ -16,15 +16,17 @@ import (
 	"sync"
 	"time"
 
+	"mail-auto/internal/agent"
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/telegram"
 )
 
 //go:embed web/*
 var web embed.FS
 
-const Version = "0.4.20"
+const Version = "0.5.0"
 const sessionCookie = "mail_auto_session"
 const csrfCookie = "mail_auto_csrf"
 
@@ -42,6 +44,9 @@ type Server struct {
 	hashing  chan struct{}
 	mcpMu    sync.RWMutex
 	mcpState *mcpRuntime
+	// Agent and Telegram are optional: both stay disabled until configured.
+	Agent    *agent.Runtime
+	Telegram *telegram.Service
 }
 
 func New(auth *Auth, m *mail.Service, c config.Config) *Server {
@@ -190,7 +195,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, 405, "method not allowed")
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/style.css" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/agent.js" && r.URL.Path != "/style.css" {
 			http.NotFound(w, r)
 			return
 		}
@@ -330,6 +335,9 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 	// This gate applies to every business API, including unknown and future routes.
 	if session.Restricted {
 		fail(w, 403, "请先修改初始用户名和密码")
+		return
+	}
+	if s.agentAPI(w, r) {
 		return
 	}
 	if s.organizerAPI(w, r, session) {
@@ -568,7 +576,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "自动化状态读取失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"sync_jobs": jobs, "version": Version, "accounts": accounts, "messages": messages, "unread": unread, "last_sync": last.Int64, "retention_days": 0, "all_history": true, "read_only": false, "remote_writes_default": false, "mcp_enabled": s.currentMCP().Enabled, "ai_enabled": false, "automatic_sync": automatic.Enabled, "automatic": automatic, "automation": metrics, "index_revision": s.Mail.IndexRevision()})
+	writeJSON(w, 200, map[string]any{"sync_jobs": jobs, "version": Version, "accounts": accounts, "messages": messages, "unread": unread, "last_sync": last.Int64, "retention_days": 0, "all_history": true, "read_only": false, "remote_writes_default": false, "mcp_enabled": s.currentMCP().Enabled, "ai_enabled": false, "agent": s.agentStatus(r), "automatic_sync": automatic.Enabled, "automatic": automatic, "automation": metrics, "index_revision": s.Mail.IndexRevision()})
 }
 func (s *Server) audits(w http.ResponseWriter, r *http.Request) {
 	rows, e := s.Auth.Store.DB.QueryContext(r.Context(), "SELECT at,action,target,outcome FROM audits ORDER BY id DESC LIMIT 100")
@@ -597,4 +605,27 @@ func (s *Server) audits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// agentStatus reports agent and interaction state separately from the
+// application's own health: a model or Telegram outage never fails readyz.
+func (s *Server) agentStatus(r *http.Request) map[string]any {
+	out := map[string]any{"configured": false, "enabled": false, "ready": false, "interaction": "off", "bound": false, "continuous_ai_classification": false}
+	if s.Agent == nil || s.Telegram == nil {
+		return out
+	}
+	a, e := s.Mail.AdminAccess()
+	if e != nil {
+		return out
+	}
+	if p, e := s.Agent.Provider(a); e == nil {
+		out["configured"] = p.KeyConfigured && p.Model != "" && p.BaseURL != ""
+		out["enabled"] = p.Enabled
+		out["ready"] = p.Enabled && p.Capabilities.Current && p.Capabilities.ToolLoop == "ok"
+	}
+	if t, e := s.Telegram.Get(a); e == nil {
+		out["interaction"] = t.State
+		out["bound"] = t.Binding != nil
+	}
+	return out
 }

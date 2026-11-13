@@ -2193,3 +2193,36 @@ dialog::backdrop {
     font-size: 12px;
   }
 }
+
+/* Agent & Telegram page */
+.agent-status-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.agent-status-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.agent-status-list .ok { color: var(--success, #15803d); }
+.agent-status-list .no { color: var(--muted, #6b7280); }
+.agent-grant-accounts { display: grid; gap: 10px; }
+.agent-grant-accounts fieldset, .agent-actions {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.agent-folders { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.agent-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  user-select: all;
+}
+.agent-record { border-top: 1px solid var(--border, #e5e7eb); padding: 8px 0; overflow-wrap: anywhere; }

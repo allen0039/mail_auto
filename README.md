@@ -1,18 +1,18 @@
 # Mail Auto
 
-Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用，不接入 AI API。
+Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用；0.5.0 起另有可选的内置管理 Agent（OpenAI 兼容 Chat Completions + Telegram 私聊），用自然语言管理固定规则与任务，默认关闭。持续 AI 语义分类仍未支持。
 
 MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存公开 HTTPS 地址和开关、检测连接并复制 Codex / ChatGPT 配置，无需修改启动参数。分类会把邮件移动到**原邮箱中的真实文件夹**，邮箱网页和手机端同步后可见。支持在原邮箱创建文件夹；归档与回收站独立可选。
 
-新增「整理规则」「定时与任务」「TG 通知」：可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。AI 由外部 MCP 客户端触发，服务端不接入模型 API。[使用说明](docs/automation-guide.md)。
+新增「整理规则」「定时与任务」「TG 通知」：可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。持续 AI 分类仍由外部 MCP 客户端触发，服务端不做 AI 分类；内置管理 Agent 只通过确认卡片管理固定条件规则与任务，见 [Agent 与 Telegram 指南](docs/agent-telegram.md)。[使用说明](docs/automation-guide.md)。
 
-远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.4.20 验证范围](docs/acceptance-0.4.20.md)。
+远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。配置与使用见 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.5.0 验证范围](docs/acceptance-0.5.0.md)。
 
 支持 QQ、网易（163 / 126 / yeah.net）、iCloud 的 IMAPS 接入；此前已验证单个网易账号 13 个文件夹、1,730 条元数据只读同步。网易 163 已完成真实分类移动验证；QQ 和 iCloud 仍待专用测试邮件验证。本轮 TestFlight 清理任务没有符合条件的候选，不作为真实删除（移入已删除）写入的验证。
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.4.20`，可使用固定镜像标签 `allen0039/mail-auto:0.4.20`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级至本版前请备份数据库和主密钥，schema 9 的回退说明见[运维文档](docs/operations.md)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.5.0`，可使用固定镜像标签 `allen0039/mail-auto:0.5.0`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。发布时版本号从上一个已发布标签逐次递增，镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级至本版前请备份数据库和主密钥；0.5.0 迁移到 schema 10，旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
 
 在运行 Docker 的主机执行：
 
@@ -125,6 +125,8 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 - [配置与邮箱接入](docs/configuration.md)
 - [备份、恢复、远程访问与升级](docs/operations.md)
+- [0.5.0 版本范围、验证结果与已知限制](docs/acceptance-0.5.0.md)
+- [内置 Agent 与 Telegram 交互管理](docs/agent-telegram.md)
 - [0.4.20 版本范围、验证结果与已知限制](docs/acceptance-0.4.20.md)
 - [0.4.19 版本范围、验证结果与已知限制](docs/acceptance-0.4.19.md)
 - [0.4.18 版本范围、验证结果与已知限制](docs/acceptance-0.4.18.md)

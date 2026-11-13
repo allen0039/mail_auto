@@ -119,6 +119,12 @@ func (s *Service) resolveTaskRules(a Access, t Task, saving bool) ([]Rule, []str
 	if e != nil {
 		return nil, nil, nil, e
 	}
+	return resolveTaskRulesFrom(a, t, saving, all)
+}
+
+// resolveTaskRulesFrom applies the binding rules to a given account rule
+// snapshot. Draft previews pass an in-memory snapshot; nothing is written.
+func resolveTaskRulesFrom(a Access, t Task, saving bool, all []Rule) ([]Rule, []string, map[string]int, error) {
 	if len(t.RuleIDs) == 0 {
 		if len(t.RuleVersions) > 0 {
 			if saving {
@@ -266,8 +272,23 @@ func (s *Service) Tasks(a Access, account string) ([]Task, error) {
 	return out, nil
 }
 func (s *Service) SaveTask(a Access, t Task) (Task, error) {
+	return s.saveTask(a, t, nil)
+}
+
+// SaveTaskWithMutation is SaveTask with a server-assigned idempotency record
+// committed in the same transaction as the task write.
+func (s *Service) SaveTaskWithMutation(a Access, t Task, m Mutation) (Task, error) {
+	return s.saveTask(a, t, &m)
+}
+func (s *Service) saveTask(a Access, t Task, m *Mutation) (Task, error) {
 	s.taskMu.Lock()
 	defer s.taskMu.Unlock()
+	if m != nil {
+		var saved Task
+		if done, err := s.mutationResult(m, t, &saved); err != nil || done {
+			return saved, err
+		}
+	}
 	a, e := s.CheckAccess(a)
 	if e != nil {
 		return t, e
@@ -312,6 +333,9 @@ func (s *Service) SaveTask(a Access, t Task) (Task, error) {
 	}
 	if t.Engine == "ai" && t.Trigger == "internal" {
 		return t, ErrInput
+	}
+	if t.Engine == "ai" && strings.HasPrefix(a.Owner, AgentOwnerPrefix) {
+		return t, ErrCapability
 	}
 	if t.Trigger == "internal" && !p.AllowInternal {
 		return t, ErrDenied
@@ -390,8 +414,13 @@ func (s *Service) SaveTask(a Access, t Task) (Task, error) {
 	if e != nil {
 		return t, e
 	}
-	if e = store.Audit(tx, "mail.task.save", t.ID, "ok"); e != nil {
+	if e = store.Audit(tx, "mail.task.save", t.ID, auditActor(a)); e != nil {
 		return t, e
+	}
+	if m != nil {
+		if e = recordMutation(tx, *m, a, t.ID, t.Version, t); e != nil {
+			return t, e
+		}
 	}
 	if e = tx.Commit(); e != nil {
 		return t, e
@@ -429,6 +458,23 @@ func (s *Service) taskServiceAccess(a Access) (Access, error) {
 
 // Pausing is always possible after grant revocation; enabling revalidates all settings.
 func (s *Service) SetTaskEnabled(a Access, id string, version int, enabled bool) (Task, error) {
+	return s.setTaskEnabled(a, id, version, enabled, nil)
+}
+
+// SetTaskEnabledWithMutation pauses or enables a task once per mutation ID.
+func (s *Service) SetTaskEnabledWithMutation(a Access, id string, version int, enabled bool, m Mutation) (Task, error) {
+	return s.setTaskEnabled(a, id, version, enabled, &m)
+}
+func (s *Service) setTaskEnabled(a Access, id string, version int, enabled bool, m *Mutation) (Task, error) {
+	if m != nil {
+		var saved Task
+		s.taskMu.Lock()
+		done, err := s.mutationResult(m, map[string]any{"id": id, "version": version, "enabled": enabled}, &saved)
+		s.taskMu.Unlock()
+		if err != nil || done {
+			return saved, err
+		}
+	}
 	a, e := s.CheckAccess(a)
 	if e != nil {
 		return Task{}, e
@@ -445,6 +491,11 @@ func (s *Service) SetTaskEnabled(a Access, id string, version int, enabled bool)
 	}
 	if enabled {
 		t.Enabled = true
+		if m != nil {
+			// The enable mutation is recorded by the task save transaction.
+			// m.digest was computed from the enable request above.
+			return s.saveTask(a, t, m)
+		}
 		return s.SaveTask(a, t)
 	}
 	s.taskMu.Lock()
@@ -477,8 +528,13 @@ func (s *Service) SetTaskEnabled(a Access, id string, version int, enabled bool)
 	if n != 1 {
 		return t, ErrConflict
 	}
-	if e = store.Audit(tx, "mail.task.pause", t.ID, "ok"); e != nil {
+	if e = store.Audit(tx, "mail.task.pause", t.ID, auditActor(a)); e != nil {
 		return t, e
+	}
+	if m != nil {
+		if e = recordMutation(tx, *m, a, t.ID, t.Version, t); e != nil {
+			return t, e
+		}
 	}
 	return t, tx.Commit()
 }
