@@ -111,13 +111,38 @@ func loadConnection(q queryer, id string) (storedConnection, error) {
 	return c, nil
 }
 
-func (c storedConnection) view(p storedProvider) Connection {
+// view redacts c. Pending covers the key too: the saved connection and the
+// current provider each hold their own ciphertext (different AAD), so the
+// keys are compared after decryption, never as ciphertext, and nothing about
+// the key is returned.
+func (r *Runtime) view(c storedConnection, p storedProvider) Connection {
 	endpoint := ""
 	if _, e, err := modelprovider.NormalizeBaseURL(c.cfg.BaseURL); err == nil {
 		endpoint = e
 	}
 	active := p.connectionID == c.id
-	return Connection{ID: c.id, Version: c.version, Name: c.name, BaseURL: c.cfg.BaseURL, Endpoint: endpoint, Model: c.cfg.Model, TimeoutSeconds: c.cfg.TimeoutSeconds, MaxTokensParam: c.cfg.MaxTokensParam, KeyConfigured: len(c.secret) > 0, Active: active, Pending: active && c.cfg != p.cfg, UpdatedAt: c.updated}
+	pending := active && (c.cfg != p.cfg || !r.sameKey(c, p))
+	return Connection{ID: c.id, Version: c.version, Name: c.name, BaseURL: c.cfg.BaseURL, Endpoint: endpoint, Model: c.cfg.Model, TimeoutSeconds: c.cfg.TimeoutSeconds, MaxTokensParam: c.cfg.MaxTokensParam, KeyConfigured: len(c.secret) > 0, Active: active, Pending: pending, UpdatedAt: c.updated}
+}
+
+func (r *Runtime) sameKey(c storedConnection, p storedProvider) bool {
+	if len(c.secret) == 0 || len(p.secret) == 0 {
+		return len(c.secret) == len(p.secret)
+	}
+	key, err := r.Vault.Decrypt(c.secret, connectionAAD(c.id))
+	return err == nil && r.providerKeyIs(p, key)
+}
+
+// adminStillValid repeats the administrator check inside the caller's
+// transaction (the store has a single connection, so a separate query would
+// block). A credential change or restriction since the request began
+// rejects the write.
+func adminStillValid(tx *sql.Tx, a mail.Access) error {
+	var version, restricted int
+	if err := tx.QueryRow("SELECT version,must_change FROM admin WHERE id=1").Scan(&version, &restricted); err != nil || restricted != 0 || a.Owner != "admin" || version != a.Version {
+		return mail.ErrDenied
+	}
+	return nil
 }
 
 // origin is scheme://host[:port]; a stored key is reused only for the origin
@@ -174,7 +199,7 @@ func (r *Runtime) Connections(a mail.Access) (ConnectionList, error) {
 		if err != nil {
 			return ConnectionList{}, err
 		}
-		out.Connections = append(out.Connections, c.view(p))
+		out.Connections = append(out.Connections, r.view(c, p))
 	}
 	return out, nil
 }
@@ -294,10 +319,13 @@ func (r *Runtime) SaveConnection(a mail.Access, in ConnectionInput) (Connection,
 	if err != nil {
 		return Connection{}, err
 	}
+	if err = adminStillValid(tx, a); err != nil {
+		return Connection{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return Connection{}, err
 	}
-	return saved.view(p), nil
+	return r.view(saved, p), nil
 }
 
 // DeleteConnection refuses the connection serving the enabled Agent: switch
@@ -316,6 +344,9 @@ func (r *Runtime) DeleteConnection(a mail.Access, id string, version int) error 
 	defer tx.Rollback()
 	p, err := loadProviderQ(tx)
 	if err != nil {
+		return err
+	}
+	if err = adminStillValid(tx, a); err != nil {
 		return err
 	}
 	if p.connectionID == id && p.enabled {
@@ -453,7 +484,7 @@ func (r *Runtime) Activate(ctx context.Context, a mail.Access, in ActivateInput)
 		return ActivateResult{Provider: p.view()}, err
 	}
 	if unchanged {
-		v := old.view(p)
+		v := r.view(*old, p)
 		return ActivateResult{OK: true, Result: "ok", Unchanged: true, Provider: p.view(), Connection: &v}, nil
 	}
 
@@ -473,6 +504,9 @@ func (r *Runtime) Activate(ctx context.Context, a mail.Access, in ActivateInput)
 	current, err := loadProviderQ(tx)
 	if err != nil {
 		return ActivateResult{}, err
+	}
+	if err = adminStillValid(tx, a); err != nil {
+		return ActivateResult{Provider: current.view()}, err
 	}
 	nowRoute, err := r.route(tx)
 	if err != nil || current.version != p.version || nowRoute.Key != route.Key {
@@ -509,7 +543,7 @@ func (r *Runtime) Activate(ctx context.Context, a mail.Access, in ActivateInput)
 	if err = tx.Commit(); err != nil {
 		return ActivateResult{}, err
 	}
-	v := saved.view(np)
+	v := r.view(saved, np)
 	return ActivateResult{OK: true, Result: "ok", Provider: np.view(), Connection: &v}, nil
 }
 

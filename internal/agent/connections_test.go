@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -372,5 +373,83 @@ func TestEmptyLegacyProviderMigratesWithoutConnection(t *testing.T) {
 	list, _ := e.rt.Connections(e.f.Admin)
 	if len(list.Connections) != 0 || list.Provider.ConnectionID != "" {
 		t.Fatal(list)
+	}
+}
+
+// MC-01: the administrator is re-checked in the commit transaction. A
+// credential change (version bump) or a forced change (restricted) while the
+// probe runs rejects the result; nothing is saved or applied.
+func TestAdminChangeDuringCheckRejectsActivation(t *testing.T) {
+	for _, change := range []string{"UPDATE admin SET version=version+1 WHERE id=1", "UPDATE admin SET must_change=1 WHERE id=1"} {
+		e, k := connEnv(t)
+		before, _ := e.rt.Provider(e.f.Admin)
+		var conns int
+		e.f.Store.DB.QueryRow("SELECT count(*) FROM agent_provider_connections").Scan(&conns)
+		k.block = make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			out, err := e.rt.Activate(context.Background(), e.f.Admin, ActivateInput{ConnectionInput: ConnectionInput{BaseURL: "https://n.example/v1", Model: "m-n", APIKey: "key-n"}, ProviderVersion: before.Version})
+			if err == nil && out.OK {
+				err = errors.New("accepted")
+			}
+			done <- err
+		}()
+		time.Sleep(50 * time.Millisecond)
+		if _, err := e.f.Store.DB.Exec(change); err != nil {
+			t.Fatal(err)
+		}
+		releaseAll(k)
+		if err := <-done; !errors.Is(err, mail.ErrDenied) {
+			t.Fatal(change, "stale administrator activation", err)
+		}
+		var after, afterConns int
+		var model string
+		e.f.Store.DB.QueryRow("SELECT version,json_extract(config,'$.model') FROM agent_provider_settings").Scan(&after, &model)
+		e.f.Store.DB.QueryRow("SELECT count(*) FROM agent_provider_connections").Scan(&afterConns)
+		if after != before.Version || model != "fake" || afterConns != conns {
+			t.Fatal(change, "state changed", after, model, afterConns)
+		}
+		// Saving and deleting with the old access are refused as well.
+		if _, err := e.rt.SaveConnection(e.f.Admin, ConnectionInput{BaseURL: "https://n.example/v1", Model: "m", APIKey: "k"}); !errors.Is(err, mail.ErrDenied) {
+			t.Fatal(change, "stale save", err)
+		}
+	}
+}
+
+// MC-04: a saved key change on the connection in use is pending until it
+// is checked and applied; the runtime keeps the old key meanwhile.
+func TestKeyOnlyChangeIsPendingUntilApplied(t *testing.T) {
+	e, k := connEnv(t)
+	a, _ := activate(t, e, ConnectionInput{BaseURL: "https://a.example/v1", Model: "m-a", APIKey: "key-old"})
+	if a.Connection.Pending {
+		t.Fatal("pending right after activation")
+	}
+	saved, err := e.rt.SaveConnection(e.f.Admin, ConnectionInput{ID: a.Connection.ID, Version: a.Connection.Version, BaseURL: "https://a.example/v1", Model: "m-a", APIKey: "key-new"})
+	if err != nil || !saved.Pending || !saved.Active {
+		t.Fatal("key-only change not pending", saved, err)
+	}
+	list, _ := e.rt.Connections(e.f.Admin)
+	if !list.Connections[0].Pending {
+		t.Fatal("list does not show pending key change")
+	}
+	p, _ := e.rt.loadProvider()
+	client, _ := e.rt.providerClient(p)
+	client.Complete(context.Background(), modelprovider.Request{Messages: []modelprovider.Message{{Role: "user", Content: "x"}}})
+	if k.last() != "key-old|m-a" {
+		t.Fatal("runtime switched key before apply", k.last())
+	}
+	// Saving the same key again is not a change.
+	same, _ := e.rt.SaveConnection(e.f.Admin, ConnectionInput{ID: saved.ID, Version: saved.Version, BaseURL: "https://a.example/v1", Model: "m-a", APIKey: "key-new"})
+	if same.Version != saved.Version || !same.Pending {
+		t.Fatal(same)
+	}
+	// The resubmit is not "unchanged": it is checked with the new key.
+	out, err := activate(t, e, ConnectionInput{ID: saved.ID, Version: saved.Version, BaseURL: "https://a.example/v1", Model: "m-a"})
+	if err != nil || !out.OK || out.Unchanged || out.Connection.Pending || k.last() != "key-new|m-a" {
+		t.Fatal(out, err, k.last())
+	}
+	raw, _ := json.Marshal(list)
+	if strings.Contains(string(raw), "key-new") || strings.Contains(string(raw), "key-old") {
+		t.Fatal("key leaked")
 	}
 }

@@ -12,7 +12,7 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.7.0`，可使用固定镜像标签 `allen0039/mail-auto:0.7.0`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥；0.7.0 迁移到 schema 13（0.6.x 为 schema 12），旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.7.1`，可使用固定镜像标签 `allen0039/mail-auto:0.7.1`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥；0.7.x 使用 schema 13（0.7.0 起迁移）（0.6.x 为 schema 12），旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
 
 在运行 Docker 的主机执行：
 

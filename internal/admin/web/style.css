@@ -2276,3 +2276,4 @@ dialog::backdrop {
 .model-picker input { flex: 1 1 auto; min-width: 0; }
 .model-picker button { flex: 0 0 auto; }
 #model-advanced summary { cursor: pointer; }
+.plain-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }

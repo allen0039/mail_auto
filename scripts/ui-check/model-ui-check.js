@@ -1,4 +1,4 @@
-// Mail Auto 0.7.0 model-connection UI check. It replaces the page's API with
+// Mail Auto 0.7.x model-connection UI check (0.7.1 adds MC-02/03/05 regressions). It replaces the page's API with
 // an in-memory fake, so it needs no model key and sends nothing anywhere.
 // Usage: open a throwaway instance (e.g. 127.0.0.1:18081), log in, paste this
 // file into the console or evaluate it through automation. Resolves to
@@ -22,6 +22,10 @@
   let conns = [{id: "c1", version: 1, name: "旧配置", base_url: "https://a.example/v1", endpoint: "https://a.example/v1/chat/completions", model: "m-a", timeout_seconds: 60, max_tokens_param: "", key_configured: true}];
   let nextActivate = null;
   let modelsGate = null;
+  let activateGate = null;
+  let saveGate = null;
+  let netAgent = "inherit";
+  const sent = [];
   const view = () => ({connections: conns.map((c) => ({...c, active: c.id === provider.connection_id, pending: false})), provider});
   window.api = async (url, opts = {}) => {
     const body = opts.body ? JSON.parse(opts.body) : {};
@@ -33,7 +37,10 @@
       return {models: body.base_url.includes("b.example") ? ["b-1", "b-2"] : ["a-late"]};
     }
     if (url === "/api/agent/connections/activate") {
-      if (body.provider_version !== provider.version) throw new Error("配置已被修改，请刷新后重试");
+      sent.push(body);
+      if (activateGate) await activateGate;
+      const known = conns.find((x) => x.id === body.id);
+      if (body.provider_version !== provider.version || (known && known.version !== body.version)) throw new Error("配置已被修改，请刷新后重试");
       if (nextActivate === "fail") {
         nextActivate = null;
         return {ok: false, result: "provider_auth_failed", message: "API Key 无效或无权访问（provider_auth_failed）", provider};
@@ -48,6 +55,14 @@
       return {ok: true, result: "ok", provider, connection: {...c, active: true}};
     }
     if (url === "/api/agent/connections" && opts.method === "POST") {
+      sent.push(body);
+      if (saveGate) await saveGate;
+      const known = conns.find((x) => x.id === body.id);
+      if (known) {
+        if (known.version !== body.version) throw new Error("配置已被修改，请刷新后重试");
+        Object.assign(known, {version: known.version + 1, name: body.name, base_url: body.base_url, model: body.model});
+        return {...known, active: known.id === provider.connection_id};
+      }
       const c = {id: "c" + (conns.length + 1), version: 1, key_configured: !!body.api_key, name: body.name || "backup", base_url: body.base_url, model: body.model, timeout_seconds: 60, max_tokens_param: ""};
       conns.push(c);
       return {...c, active: false};
@@ -60,7 +75,7 @@
     if (url === "/api/telegram/interaction") return {version: 1, enabled: false, state: "off"};
     if (url === "/api/accounts") return [];
     if (url.startsWith("/api/agent/conversations")) return {turns: [], proposals: [], run_links: [], queued: 0};
-    if (url === "/api/network") return realApi(url, opts);
+    if (url === "/api/network") return {version: 1, global: {mode: "direct", proxy_id: ""}, telegram: {mode: "inherit", proxy_id: ""}, agent: {mode: netAgent, proxy_id: ""}, profiles: []};
     throw new Error("unexpected " + url);
   };
   try {
@@ -117,6 +132,7 @@
     check("draft kept after failure", $("#model-model").value === "b-1" && $("#model-base-url").value === "https://b.example/v1");
 
     // Success switches and marks the new one in use.
+    await until(() => !$("#model-fields").disabled);
     $("#model-form").requestSubmit();
     await until(() => $("#model-status").textContent.includes("已切换"));
     check("switch applied", provider.connection_id === "c2" && $("#model-connection").value === "c2" && $("#model-current").textContent.includes("DeepSeek"));
@@ -143,11 +159,89 @@
     $("#model-cancel").click();
     $("#model-form").requestSubmit();
     await until(() => provider.connection_id === "c1");
+    await until(() => !$("#model-fields").disabled);
     check("switch back applied", provider.connection_id === "c1" && provider.version === 5);
+
+    // MC-02: a draft kept across a refresh keeps its base version; a change
+    // made elsewhere meanwhile makes the submit conflict instead of
+    // overwriting it.
+    const edit = (sel, v) => {
+      $(sel).value = v;
+      $(sel).dispatchEvent(new Event("input", {bubbles: true}));
+    };
+    edit("#model-model", "my-local-draft");
+    const c1 = conns.find((x) => x.id === "c1");
+    const baseVersion = c1.version;
+    Object.assign(c1, {version: c1.version + 1, name: "Changed-in-another-tab", model: "external-model"});
+    await window.loadAgent();
+    check("refresh keeps dirty draft", $("#model-model").value === "my-local-draft");
+    check("stale draft is announced", $("#model-status").textContent.includes("其他页面"));
+    const before = sent.length;
+    $("#model-form").requestSubmit();
+    await until(() => $("#model-status").textContent.includes("未提交"));
+    check("stale draft submits its original base version", sent[before]?.version === baseVersion && sent[before]?.provider_version === 5, JSON.stringify(sent[before]));
+    check("external change not overwritten", c1.name === "Changed-in-another-tab" && c1.model === "external-model");
+    check("draft kept after conflict", $("#model-model").value === "my-local-draft");
+    await until(() => !$("#model-fields").disabled);
+    $("#model-cancel").click();
+    check("cancel loads the newer saved state", $("#model-model").value === "external-model" && $("#model-name").value === "Changed-in-another-tab");
+
+    // MC-03: the form is locked while a check runs; a refresh meanwhile
+    // keeps it locked; the success response shows what was applied.
+    edit("#model-model", "submitted-model");
+    let releaseActivate;
+    activateGate = new Promise((r) => (releaseActivate = r));
+    $("#model-form").requestSubmit();
+    await until(() => $("#model-fields").disabled);
+    check("fields locked during check", $("#model-model").matches(":disabled") && $("#model-connection").matches(":disabled") && $("#model-cancel").matches(":disabled") && $("#model-save").matches(":disabled"));
+    await window.loadAgent();
+    check("refresh during check keeps lock and draft", $("#model-fields").disabled && $("#model-model").value === "submitted-model");
+    releaseActivate();
+    activateGate = null;
+    await until(() => !$("#model-fields").disabled);
+    check("applied value shown after check", $("#model-model").value === "submitted-model" && provider.model === "submitted-model" && $("#model-current").textContent.includes("submitted-model") && $("#model-cancel").hidden);
+
+    // An edit that still lands while locked (scripted input) survives the
+    // late success and is rebased on the versions that success produced.
+    edit("#model-model", "submitted-2");
+    activateGate = new Promise((r) => (releaseActivate = r));
+    $("#model-form").requestSubmit();
+    await until(() => $("#model-fields").disabled);
+    edit("#model-model", "edited-while-checking");
+    releaseActivate();
+    activateGate = null;
+    await until(() => !$("#model-fields").disabled);
+    check("late success keeps newer edit", $("#model-model").value === "edited-while-checking" && provider.model === "submitted-2" && $("#model-status").textContent.includes("之后的修改尚未应用") && $("#model-current").textContent.includes("submitted-2"));
+    $("#model-form").requestSubmit();
+    await until(() => provider.model === "edited-while-checking");
+    await until(() => !$("#model-fields").disabled);
+    check("rebased draft applies without false conflict", provider.model === "edited-while-checking" && !$("#model-status").textContent.includes("未提交"));
+
+    // Same for 仅保存为备用 on a backup connection.
+    $("#model-connection").value = "c2";
+    $("#model-connection").dispatchEvent(new Event("change", {bubbles: true}));
+    edit("#model-model", "backup-model");
+    let releaseSave;
+    saveGate = new Promise((r) => (releaseSave = r));
+    $("#model-save").click();
+    await until(() => $("#model-fields").disabled);
+    check("fields locked during backup save", $("#model-model").matches(":disabled") && $("#model-connection").matches(":disabled"));
+    releaseSave();
+    saveGate = null;
+    await until(() => !$("#model-fields").disabled);
+    check("backup save shows saved value, current unchanged", $("#model-model").value === "backup-model" && provider.model === "edited-while-checking" && $("#model-connection").value === "c2");
+
+    // MC-05: the summary follows the network policy once it loads.
+    netAgent = "direct";
+    await window.loadNetworkPolicies();
+    check("network policy summary after load", $("#model-advanced-summary").textContent.includes("连接方式"), $("#model-advanced-summary").textContent);
+    netAgent = "inherit";
+    await window.loadNetworkPolicies();
+    check("summary cleared for inherit", !$("#model-advanced-summary").textContent.includes("连接方式"));
 
     // Narrow screen: no horizontal overflow in the card.
     const card = $("#model-form").closest("article");
-    check("card fits its width", card.scrollWidth <= card.clientWidth + 1, `${card.scrollWidth}/${card.clientWidth}`);
+    check("card and page fit the width", card.scrollWidth <= card.clientWidth + 1 && document.documentElement.scrollWidth <= innerWidth, `${card.scrollWidth}/${card.clientWidth} doc ${document.documentElement.scrollWidth}/${innerWidth}`);
   } catch (e) {
     check("exception", false, String(e && e.stack || e));
   } finally {

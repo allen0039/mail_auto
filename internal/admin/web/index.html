@@ -108,7 +108,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.7.0</span>
+          <span class="badge badge-subtle app-version-label">v0.7.1</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -120,7 +120,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.7.0</span>
+            <span class="app-version-label">v0.7.1</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -203,7 +203,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.7.0</span>
+            个人邮件工作台 <span class="app-version-label">v0.7.1</span>
           </div>
         </div>
 
@@ -880,6 +880,7 @@
               <p class="muted small">支持 OpenAI 兼容 Chat Completions 接口，可保存多个连接。选好连接和模型后点击“检测并使用”：检测通过才会生效，失败时当前配置保持不变。密钥加密保存且不回显。</p>
               <p id="model-current" class="model-current margin-t-10" role="status"></p>
               <form id="model-form" class="rules-form margin-t-16" autocomplete="off">
+                <fieldset id="model-fields" class="plain-fieldset">
                 <div class="rules-grid">
                   <label>已保存连接
                     <select id="model-connection"></select>
@@ -945,6 +946,7 @@
                   <button id="model-disable" type="button" class="secondary">停用 Agent</button>
                 </div>
                 <p class="muted small margin-t-10">“检测并使用”会向模型发送 2 次简短请求（只用本地回显工具，不处理邮件），确认支持工具调用后才切换。</p>
+                </fieldset>
                 <p id="model-status" class="margin-t-10" role="status" aria-live="polite"></p>
               </form>
             </article>
@@ -1145,7 +1147,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.7.0</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.7.1</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>

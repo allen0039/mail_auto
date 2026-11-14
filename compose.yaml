@@ -1,7 +1,7 @@
 name: mail-auto
 services:
   app:
-    image: allen0039/mail-auto:0.7.0
+    image: allen0039/mail-auto:0.7.1
     container_name: mail-auto
     build:
       context: .

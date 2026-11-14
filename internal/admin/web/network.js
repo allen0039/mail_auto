@@ -91,6 +91,7 @@
   window.loadNetworkPolicies = async () => {
     state.network = await api("/api/network");
     for (const pane of ["agent", "notifications"]) renderPolicies(state.network, $(`#${pane}-pane`));
+    document.dispatchEvent(new CustomEvent("network-policies-rendered"));
   };
   window.loadNetwork = async () => {
     state.network = await api("/api/network");

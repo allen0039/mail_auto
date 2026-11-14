@@ -43,6 +43,10 @@
   // passes, and a refresh never overwrites unsaved edits. Model lists live
   // only on this page and belong to one connection + address + key; any
   // switch or edit bumps listToken so a late response is discarded.
+  // `base` is what the draft was loaded from (connection and provider
+  // versions). A refresh that keeps a draft never moves it, so a draft made
+  // before a change elsewhere still conflicts. While a check or save is in
+  // flight the form is locked, so the response cannot overwrite newer edits.
   const presets = [
     ["", "自定义兼容接口", ""],
     ["openai", "OpenAI", "https://api.openai.com/v1"],
@@ -51,7 +55,8 @@
     ["dashscope", "阿里云百炼", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
     ["siliconflow", "硅基流动", "https://api.siliconflow.cn/v1"],
   ];
-  let selected = "", dirty = false, listToken = 0;
+  let selected = "", dirty = false, listToken = 0, locked = false, draftGen = 0;
+  let base = { id: "", version: 0, providerVersion: 0 };
   const current = () => connections.find((c) => c.id === selected) || null;
   const endpointOf = (base) => {
     try {
@@ -126,6 +131,7 @@
     $("#model-save").hidden = !!(c && c.active && provider.enabled);
     $("#model-cancel").hidden = true;
     $("#model-status").textContent = c?.pending ? "该连接有已保存但尚未生效的修改：点击“检测并使用”后生效。" : "";
+    base = { id: c?.id || "", version: c?.version || 0, providerVersion: provider.version };
     dirty = false;
     resetModelList();
     advancedSummary();
@@ -150,15 +156,15 @@
 
   function markDirty() {
     dirty = true;
+    draftGen++;
     $("#model-cancel").hidden = false;
     $("#model-status").textContent = "有未应用的修改。";
   }
 
   function draftBody() {
-    const c = current();
     return {
-      id: c?.id || "",
-      version: c?.version || 0,
+      id: base.id,
+      version: base.version,
       name: $("#model-name").value.trim(),
       base_url: $("#model-base-url").value.trim(),
       model: $("#model-model").value.trim(),
@@ -172,9 +178,13 @@
     const out = await api("/api/agent/connections");
     connections = out.connections;
     provider = out.provider;
-    if (keepDraft && dirty && (selected === "" || connections.some((c) => c.id === selected))) {
+    if (keepDraft && (dirty || locked) && (selected === "" || connections.some((c) => c.id === selected))) {
       renderConnectionOptions();
       renderCurrent();
+      const c = current();
+      if (dirty && ((c && c.version !== base.version) || provider.version !== base.providerVersion)) {
+        $("#model-status").textContent = "有未应用的修改；此连接或当前配置已在其他页面或操作中更新，提交会提示冲突。可点击“取消修改”载入最新配置。";
+      }
       return;
     }
     if (!connections.some((c) => c.id === selected)) {
@@ -183,6 +193,44 @@
     renderConnectionOptions();
     renderCurrent();
     fillForm();
+  }
+
+  function lock(on) {
+    locked = on;
+    $("#model-fields").disabled = on;
+  }
+
+  // Runs a submit with the form locked. A version conflict keeps the draft
+  // and its base; the list is refreshed so the newer state is visible.
+  // A success only reloads the form when the draft is still the one that
+  // was submitted; otherwise the newer draft stays, rebased on the versions
+  // this submission produced (they came from this draft, not another page).
+  async function settle(gen, conn, providerVersion, applied) {
+    selected = conn?.id || selected;
+    if (draftGen !== gen && dirty) {
+      base = { id: conn?.id || base.id, version: conn?.version || base.version, providerVersion };
+      await loadConnections(true);
+      $("#model-status").textContent = `${applied}；之后的修改尚未应用。`;
+      return;
+    }
+    dirty = false;
+    await loadConnections();
+    $("#model-status").textContent = `${applied}。`;
+  }
+
+  async function submitLocked(button, label, task) {
+    lock(true);
+    try {
+      await busy(button, label, () => task(draftGen));
+    } catch (err) {
+      if (/已被修改/.test(err.message)) {
+        await loadConnections(true).catch(() => {});
+        $("#model-status").textContent = "未提交：此连接或当前配置已在其他页面或操作中被修改。你的草稿已保留；点击“取消修改”载入最新配置后再提交。";
+      }
+      throw err;
+    } finally {
+      lock(false);
+    }
   }
 
   $("#model-preset").innerHTML = presets.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join("");
@@ -245,10 +293,9 @@
   $("#model-form").addEventListener("submit", wrap(async (e) => {
     const body = draftBody();
     if (!body.base_url || !body.model) throw new Error("请填写 API 地址并选择或输入模型");
-    const at = selected;
-    await busy($("#model-activate"), "检测中…", async () => {
-      $("#model-status").textContent = "正在检测（约 5–30 秒）…";
-      const out = await request("/api/agent/connections/activate", "POST", { ...body, provider_version: provider.version });
+    await submitLocked($("#model-activate"), "检测中…", async (gen) => {
+      $("#model-status").textContent = "正在检测（约 5–30 秒），完成前暂不能修改…";
+      const out = await request("/api/agent/connections/activate", "POST", { ...body, provider_version: base.providerVersion });
       if (!out.ok) {
         provider = out.provider || provider;
         $("#model-status").textContent = `检测未通过，当前生效配置未改变：${out.message || out.result}`;
@@ -257,13 +304,8 @@
         renderCapabilities();
         return;
       }
-      if (selected === at) {
-        selected = out.connection?.id || selected;
-        dirty = false;
-      }
-      await loadConnections(true);
+      await settle(gen, out.connection, out.provider.version, out.unchanged ? "该配置已在使用中，无需重新检测" : `检测通过，已切换并启用（模型 ${body.model}）`);
       renderCapabilities();
-      $("#model-status").textContent = out.unchanged ? "该配置已在使用中，无需重新检测。" : "检测通过，已切换并启用。";
       notify(out.unchanged ? "配置未变化" : "已检测并使用新的模型连接");
     });
   }));
@@ -271,17 +313,17 @@
   $("#model-save").addEventListener("click", wrap(async () => {
     const body = draftBody();
     if (!body.base_url) throw new Error("请填写 API 地址");
-    await busy($("#model-save"), "保存中…", async () => {
+    await submitLocked($("#model-save"), "保存中…", async (gen) => {
       const saved = await request("/api/agent/connections", "POST", body);
-      selected = saved.id;
-      dirty = false;
-      await loadConnections();
-      $("#model-status").textContent = "已保存为备用连接，当前生效配置未改变。";
+      await settle(gen, saved, base.providerVersion, "已保存为备用连接，当前生效配置未改变");
       notify("连接已保存");
     });
   }));
 
   $("#model-cancel").addEventListener("click", () => fillForm());
+  // Network policies load after the model card; recompute the summary so a
+  // non-default Agent route is visible while the section is collapsed.
+  document.addEventListener("network-policies-rendered", advancedSummary);
 
   $("#model-delete").addEventListener("click", wrap(async () => {
     const c = current();
