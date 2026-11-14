@@ -241,3 +241,40 @@ func TestDestinationGuard(t *testing.T) {
 		t.Fatal("rate limit should be retryable")
 	}
 }
+
+// The stored output-length parameter name decides the wire field; an empty
+// value sends no limit at all. The admin page hiding the setting must not
+// change this.
+func TestMaxTokensParamWireField(t *testing.T) {
+	for _, param := range []string{"", "max_tokens", "max_completion_tokens"} {
+		f := &fakeModel{handler: func(n int, body map[string]any, w http.ResponseWriter) {
+			reply(w, map[string]any{"role": "assistant", "content": "OK"}, "stop")
+		}}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			f.mu.Lock()
+			f.requests = append(f.requests, body)
+			f.mu.Unlock()
+			f.handler(0, body, w)
+		}))
+		u, _ := url.Parse(srv.URL)
+		c, err := NewChatCompletions(Settings{BaseURL: "https://api.model.example/v1", Model: "m", APIKey: "k", Timeout: 2 * time.Second, MaxTokensParam: param}, rewrite{u})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, max := range []int{64, 2048} {
+			if _, err := c.Complete(context.Background(), Request{Messages: []Message{{Role: "user", Content: "x"}}, MaxOutputTokens: max}); err != nil {
+				t.Fatal(err)
+			}
+			body := f.requests[len(f.requests)-1]
+			for _, name := range []string{"max_tokens", "max_completion_tokens"} {
+				v, ok := body[name]
+				if want := name == param; ok != want || (want && v != float64(max)) {
+					t.Fatalf("param %q: field %s = %v (present %v)", param, name, v, ok)
+				}
+			}
+		}
+		srv.Close()
+	}
+}

@@ -55,7 +55,7 @@
     ["dashscope", "阿里云百炼", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
     ["siliconflow", "硅基流动", "https://api.siliconflow.cn/v1"],
   ];
-  let selected = "", dirty = false, listToken = 0, locked = false, draftGen = 0;
+  let selected = "", dirty = false, listToken = 0, locked = false, draftGen = 0, maxParam = "";
   let base = { id: "", version: 0, providerVersion: 0 };
   const current = () => connections.find((c) => c.id === selected) || null;
   const endpointOf = (base) => {
@@ -103,10 +103,10 @@
   }
 
   function advancedSummary() {
-    const t = Number($("#model-timeout").value) || 60, m = $("#model-max-param").value;
+    const t = Number($("#model-timeout").value) || 60;
     const parts = [];
     if (t !== 60) parts.push(`超时 ${t} 秒`);
-    if (m) parts.push(m);
+    if (maxParam) parts.push("已启用输出长度兼容设置");
     const net = $("#agent-network-policy");
     if (net && net.value && net.selectedIndex > 0) parts.push(`连接方式：${net.options[net.selectedIndex].text}`);
     $("#model-advanced-summary").textContent = parts.length ? `（当前非默认：${parts.join("，")}）` : "";
@@ -122,7 +122,9 @@
     $("#model-model").value = c?.model || "";
     $("#model-key").value = "";
     $("#model-timeout").value = c?.timeout_seconds || 60;
-    $("#model-max-param").value = c?.max_tokens_param || "";
+    // Not shown in the form: kept as page state so a stored value is
+    // submitted unchanged; new connections send none.
+    maxParam = c?.max_tokens_param || "";
     $("#model-endpoint").textContent = `请求地址：${c?.endpoint || endpointOf($("#model-base-url").value)}`;
     keyNote();
     $("#model-delete").hidden = isNew || !!(c.active && provider.enabled);
@@ -170,7 +172,7 @@
       model: $("#model-model").value.trim(),
       api_key: $("#model-key").value.trim(),
       timeout_seconds: Number($("#model-timeout").value) || 60,
-      max_tokens_param: $("#model-max-param").value,
+      max_tokens_param: maxParam,
     };
   }
 
@@ -259,14 +261,10 @@
       $("#model-endpoint").textContent = `请求地址：${endpointOf($("#model-base-url").value)}`;
       keyNote();
     }
-    if (e.target.id === "model-timeout" || e.target.id === "model-max-param") advancedSummary();
+    if (e.target.id === "model-timeout") advancedSummary();
     markDirty();
   });
   $("#model-form").addEventListener("change", (e) => {
-    if (e.target.id === "model-max-param") {
-      advancedSummary();
-      markDirty();
-    }
     if (e.target.id === "agent-network-policy") advancedSummary();
   });
 

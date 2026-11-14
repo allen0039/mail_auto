@@ -1,4 +1,5 @@
-// Mail Auto 0.7.x model-connection UI check (0.7.1 adds MC-02/03/05 regressions). It replaces the page's API with
+// Mail Auto 0.7.x model-connection UI check (0.7.1 adds MC-02/03/05 regressions;
+// 0.7.2 checks the hidden output-length parameter keeps stored values). It replaces the page's API with
 // an in-memory fake, so it needs no model key and sends nothing anywhere.
 // Usage: open a throwaway instance (e.g. 127.0.0.1:18081), log in, paste this
 // file into the console or evaluate it through automation. Resolves to
@@ -51,7 +52,7 @@
         conns.push(c);
       } else c.version++;
       Object.assign(c, {name: body.name || new URL(body.base_url).hostname, base_url: body.base_url, model: body.model, timeout_seconds: body.timeout_seconds, max_tokens_param: body.max_tokens_param});
-      provider = {...provider, version: provider.version + 1, enabled: true, base_url: c.base_url, model: c.model, connection_id: c.id, capabilities: {current: true, tool_loop: "ok", tool_loop_at: 2}};
+      provider = {...provider, version: provider.version + 1, enabled: true, base_url: c.base_url, model: c.model, timeout_seconds: c.timeout_seconds, max_tokens_param: c.max_tokens_param, connection_id: c.id, capabilities: {current: true, tool_loop: "ok", tool_loop_at: 2}};
       return {ok: true, result: "ok", provider, connection: {...c, active: true}};
     }
     if (url === "/api/agent/connections" && opts.method === "POST") {
@@ -60,12 +61,18 @@
       const known = conns.find((x) => x.id === body.id);
       if (known) {
         if (known.version !== body.version) throw new Error("配置已被修改，请刷新后重试");
-        Object.assign(known, {version: known.version + 1, name: body.name, base_url: body.base_url, model: body.model});
+        Object.assign(known, {version: known.version + 1, name: body.name, base_url: body.base_url, model: body.model, timeout_seconds: body.timeout_seconds, max_tokens_param: body.max_tokens_param});
         return {...known, active: known.id === provider.connection_id};
       }
-      const c = {id: "c" + (conns.length + 1), version: 1, key_configured: !!body.api_key, name: body.name || "backup", base_url: body.base_url, model: body.model, timeout_seconds: 60, max_tokens_param: ""};
+      const c = {id: "c" + (conns.length + 1), version: 1, key_configured: !!body.api_key, name: body.name || "backup", base_url: body.base_url, model: body.model, timeout_seconds: body.timeout_seconds, max_tokens_param: body.max_tokens_param};
       conns.push(c);
       return {...c, active: false};
+    }
+    if (url === "/api/agent/provider" && opts.method === "PUT") {
+      sent.push({put: true, ...body});
+      if (body.version !== provider.version) throw new Error("配置已被修改，请刷新后重试");
+      provider = {...provider, version: provider.version + 1, enabled: body.enabled, max_tokens_param: body.max_tokens_param};
+      return provider;
     }
     if (url === "/api/agent/connections/delete") {
       conns = conns.filter((c) => c.id !== body.id);
@@ -135,6 +142,7 @@
     await until(() => !$("#model-fields").disabled);
     $("#model-form").requestSubmit();
     await until(() => $("#model-status").textContent.includes("已切换"));
+    check("new connection sends no output-length parameter", sent[sent.length - 1].max_tokens_param === "" && conns.find((x) => x.id === "c2")?.max_tokens_param === "", JSON.stringify(sent[sent.length - 1]));
     check("switch applied", provider.connection_id === "c2" && $("#model-connection").value === "c2" && $("#model-current").textContent.includes("DeepSeek"));
     check("old connection listed as backup", [...$("#model-connection").options].some((o) => o.value === "c1" && !o.text.includes("使用中")));
 
@@ -238,6 +246,77 @@
     netAgent = "inherit";
     await window.loadNetworkPolicies();
     check("summary cleared for inherit", !$("#model-advanced-summary").textContent.includes("连接方式"));
+
+    // 0.7.2: the output-length parameter is not on the page; each stored
+    // value (empty and both names) is submitted back unchanged.
+    $("#model-advanced").open = true;
+    const focusable = [...document.querySelectorAll("#model-form input, #model-form select, #model-form button, #model-form textarea, #model-form [tabindex]")].filter((el) => !el.hidden && el.type !== "hidden");
+    check("no output-length control or label", !$("#model-max-param") && !$("#model-form").textContent.includes("输出长度参数") && !document.querySelector('option[value="max_tokens"], option[value="max_completion_tokens"]'));
+    check("no focusable element for the parameter", !focusable.some((el) => /max/i.test(el.id + el.name) || [...(el.options || [])].some((o) => /max_/.test(o.value))), focusable.map((el) => el.id).join());
+    const pick = (id) => {
+      $("#model-connection").value = id;
+      $("#model-connection").dispatchEvent(new Event("change", {bubbles: true}));
+    };
+    const last = () => sent[sent.length - 1];
+    const params = ["", "max_tokens", "max_completion_tokens"];
+    for (const [i, p] of params.entries()) {
+      const q = params[(i + 1) % 3];
+      const a = conns.find((x) => x.id === "c1"), b = conns.find((x) => x.id === "c2");
+      a.max_tokens_param = p;
+      provider.max_tokens_param = p;
+      provider.connection_id = "c1";
+      b.max_tokens_param = q;
+      await window.loadAgent();
+      pick("c1");
+      const tag = `[${p || "empty"}]`;
+      check(`${tag} summary`, p ? $("#model-advanced-summary").textContent.includes("已启用输出长度兼容设置") : !$("#model-advanced-summary").textContent.includes("输出长度"), $("#model-advanced-summary").textContent);
+      // Resubmitting the applied config sends exactly the stored values.
+      const n = sent.length;
+      $("#model-form").requestSubmit();
+      await until(() => sent.length > n);
+      await until(() => !$("#model-fields").disabled);
+      const r = last();
+      check(`${tag} unchanged resubmit sends stored values`, r.id === "c1" && r.max_tokens_param === p && r.model === a.model && r.base_url === a.base_url && r.timeout_seconds === a.timeout_seconds && r.api_key === "", JSON.stringify(r));
+      // Editing and applying keeps the value.
+      edit("#model-model", `m-${i}`);
+      $("#model-form").requestSubmit();
+      await until(() => provider.model === `m-${i}`);
+      await until(() => !$("#model-fields").disabled);
+      check(`${tag} edit + check-and-use keeps value`, last().max_tokens_param === p && a.max_tokens_param === p && provider.max_tokens_param === p);
+      // Backup save of the other connection keeps its own value.
+      pick("c2");
+      edit("#model-model", `backup-${i}`);
+      $("#model-save").click();
+      await until(() => b.model === `backup-${i}`);
+      await until(() => !$("#model-fields").disabled);
+      check(`${tag} backup save keeps the other connection's value`, last().max_tokens_param === q && b.max_tokens_param === q && a.max_tokens_param === p);
+      // Switch to the backup and back.
+      $("#model-form").requestSubmit();
+      await until(() => provider.connection_id === "c2");
+      await until(() => !$("#model-fields").disabled);
+      check(`${tag} switch sends the target's value`, last().max_tokens_param === q && provider.max_tokens_param === q);
+      pick("c1");
+      $("#model-form").requestSubmit();
+      await until(() => provider.connection_id === "c1");
+      await until(() => !$("#model-fields").disabled);
+      check(`${tag} switch back restores value`, last().max_tokens_param === p && provider.max_tokens_param === p && a.max_tokens_param === p);
+      // Disabling resubmits the provider's value.
+      $("#model-disable").click();
+      await until(() => last().put);
+      await until(() => !provider.enabled);
+      check(`${tag} disable keeps value`, last().max_tokens_param === p && provider.max_tokens_param === p && a.max_tokens_param === p);
+      // A new connection started from here sends none.
+      if (p) {
+        pick("");
+        edit("#model-base-url", `https://n${i}.example/v1`);
+        edit("#model-model", "n-model");
+        $("#model-key").value = "k";
+        $("#model-save").click();
+        await until(() => conns.some((x) => x.base_url === `https://n${i}.example/v1`));
+        await until(() => !$("#model-fields").disabled);
+        check(`${tag} new connection defaults to none`, last().max_tokens_param === "" && conns.find((x) => x.base_url === `https://n${i}.example/v1`).max_tokens_param === "");
+      }
+    }
 
     // Narrow screen: no horizontal overflow in the card.
     const card = $("#model-form").closest("article");
