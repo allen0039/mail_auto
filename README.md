@@ -2,9 +2,9 @@
 
 Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹分类、归档、移入回收站、恢复和受控任务。通过 MCP 挂载给 Codex / ChatGPT 使用；0.5.0 起另有可选的内置管理 Agent（OpenAI 兼容 Chat Completions + Telegram 私聊），用自然语言管理固定规则与任务，默认关闭。持续 AI 语义分类仍未支持。
 
-MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存公开 HTTPS 地址和开关、检测连接并复制 Codex / ChatGPT 配置，无需修改启动参数。分类会把邮件移动到**原邮箱中的真实文件夹**，邮箱网页和手机端同步后可见。支持在原邮箱创建文件夹；归档与回收站独立可选。
+MCP 默认关闭，域名可暂留空。「核验记录与 MCP」页面可直接保存公开 HTTPS 地址和开关、检测连接并复制 Codex / ChatGPT 配置，无需修改启动参数。分类会把邮件移动到**原邮箱中的真实文件夹**，邮箱网页和手机端同步后可见。支持在原邮箱创建文件夹；归档与回收站独立可选。
 
-新增「整理规则」「定时与任务」「TG 通知」：可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。持续 AI 分类仍由外部 MCP 客户端触发，服务端不做 AI 分类；内置管理 Agent 只通过确认卡片管理固定条件规则与任务，见 [Agent 与 Telegram 指南](docs/agent-telegram.md)。[使用说明](docs/automation-guide.md)。
+「自动整理」页面集中规则、任务和它们需要的整理设置（写入开关、归档/回收站映射、整理授权），任务卡直接显示最近结果与不能运行的原因；「Telegram」页面集中 Bot、任务通知与私聊交互（两者分别开关）。可视化规则、试运行、观察/执行授权；每项任务可选仅手动、内置定时或外部 MCP，也可跟随全部启用规则或绑定指定规则版本。Telegram 可选仅失败、有变更或每次结束通知。持续 AI 分类仍由外部 MCP 客户端触发，服务端不做 AI 分类；内置管理 Agent 只通过确认卡片管理固定条件规则与任务，见 [Agent 与 Telegram 指南](docs/agent-telegram.md)。[使用说明](docs/automation-guide.md)。
 
 远端整理逐账号默认关闭。支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径。不会发送全局 EXPUNGE，不提供永久删除。新增「网络与代理」：HTTP、HTTPS、SOCKS5，全局默认直连，邮箱、TG 与 Agent 可独立覆盖，代理失败不自动直连；支持连接阶段诊断与直连/代理对比。配置与使用见 [代理配置](docs/network-proxy.md) 和 [MCP 接入指南](docs/mcp-setup.md)，测试边界见 [0.6.0 验证范围](docs/acceptance-0.6.0.md)。
 
@@ -12,7 +12,7 @@ MCP 默认关闭，域名可暂留空。「整理与 MCP」页面可直接保存
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.7.2`，可使用固定镜像标签 `allen0039/mail-auto:0.7.2`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥；0.7.x 使用 schema 13（0.7.0 起迁移）（0.6.x 为 schema 12），旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.8.0`，可使用固定镜像标签 `allen0039/mail-auto:0.8.0`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥；0.7.x 与 0.8.x 使用 schema 13（0.7.0 起迁移；0.8.0 无迁移）（0.6.x 为 schema 12），旧二进制不能直接打开升级后的数据库，回退须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md)。
 
 在运行 Docker 的主机执行：
 

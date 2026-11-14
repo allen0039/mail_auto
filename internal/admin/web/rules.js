@@ -22,6 +22,7 @@
   }
   function renderPolicy() {
     if(!policy) return;
+    if(isDirty($("#automation-policy-form"))){$("#policy-status").textContent="有未保存的修改；刷新没有覆盖你的编辑。";return;}
     $("#policy-internal").checked=!!policy.allow_internal; $("#policy-enabled").checked=policy.enabled; $("#policy-mode").value=policy.mode;
     folderChecks("#policy-sources",policy.source_folders||[]); folderChecks("#policy-destinations",policy.destinations||[]);
     $$('[name="policy-action"]').forEach(x=>x.checked=(policy.actions||[]).includes(x.value));
@@ -39,12 +40,12 @@
     return g.mode==="not"?`排除（${parts.join("；")}）`:`${g.mode==="any"?"任一满足":"全部满足"}：${parts.join("；")||"限定目录内全部邮件"}`;
   }
   function renderRules() {
-    $("#rules-list").innerHTML=rules.length?rules.map(r=>`<div class="rule-record"><div><div class="rule-record-title"><strong>${esc(r.name)}</strong><span class="badge">${r.enabled?"已启用":"草稿 / 暂停"}</span><span class="muted small">优先级 ${r.priority} · v${r.version}</span></div><p class="muted">${esc(r.source_folders.map(folderLabel).join("、"))} → ${esc(describeAction(r))}</p><p>${esc(describeGroup(r.match))}</p></div><div class="rule-record-actions">${[["edit","编辑"],["preview","试运行"],["toggle",r.enabled?"暂停":"启用"],["clone","复制"],["history","版本"]].map(([cmd,label])=>`<button type="button" class="secondary" data-rule-command="${cmd}" data-rule-id="${esc(r.id)}">${label}</button>`).join("")}</div></div>`).join(""):'<div class="rules-empty"><strong>先建立一条整理规则</strong><p>选择原邮箱已有目录，设置条件和去向。可从订阅归档或 AI 判断模板开始。</p></div>';
+    $("#rules-list").innerHTML=rules.length?rules.map(r=>`<div class="rule-record"><div><div class="rule-record-title"><strong>${esc(r.name)}</strong><span class="badge">${r.enabled?"已启用":"草稿 / 暂停"}</span><span class="muted small">优先级 ${r.priority} · v${r.version}</span></div><p class="muted">${esc(r.source_folders.map(folderLabel).join("、"))} → ${esc(describeAction(r))}</p><p>${esc(describeGroup(r.match))}</p></div><div class="rule-record-actions">${[["edit","编辑"],["preview","试运行"],["toggle",r.enabled?"暂停":"启用"],["task","创建任务"],["clone","复制"],["history","版本"]].map(([cmd,label])=>`<button type="button" class="secondary" data-rule-command="${cmd}" data-rule-id="${esc(r.id)}">${label}</button>`).join("")}</div></div>`).join(""):'<div class="rules-empty"><strong>先建立一条整理规则</strong><p>选择原邮箱已有目录，设置条件和去向。可从订阅归档或 AI 判断模板开始。</p></div>';
   }
   async function loadRuns() {
     if(!accountID()) { $("#ai-runs").textContent="添加邮箱后可查看记录。"; return; }
     const batches=await api(`/api/automation/batches?account_id=${encodeURIComponent(accountID())}`);
-    $("#ai-runs").innerHTML=batches.length?batches.map(b=>`<details class="organizer-item"><summary>${esc(date(b.created_at))} · ${esc(statuses[b.state]||b.state)} · ${b.items.length} 封 · ${b.mode==="observe"?"观察":"执行"}</summary><p class="muted small">任务标识：${esc(b.run_key)} · 扫描 ${b.scanned} 封 · 规则范围版本 ${b.policy_version}</p>${b.items.map(item=>`<p><strong>${esc(item.message.subject||"（无主题）")}</strong> · ${esc(actions[item.action]||item.action)}<br /><span class="muted">${esc(item.reasons.join("；"))}</span></p>`).join("")}${b.decisions.map(d=>`<p>${esc(d.ref.slice(0,10))}… · ${esc(actions[d.action]||d.action)}${d.destination?` → ${esc(folderLabel(d.destination))}`:""} · ${esc(d.reason)}</p>`).join("")}${(b.operations||[]).map(o=>`<p>原邮箱任务：${esc(o.id)} · ${esc(o.state)}</p>`).join("")}${b.plan_ids.length?'<p class="muted small">实际写入、失败与核验结果可在「整理与 MCP」的整理任务中查看。</p>':""}${b.state!=="cancelled"?`<button class="secondary" type="button" data-cancel-batch="${esc(b.id)}">停止本批剩余操作</button>`:""}</details>`).join(""):'<p class="muted">尚无外部 AI 领取记录。完成 MCP 连接和外部任务配置后，这里显示实际调用结果。</p>';
+    $("#ai-runs").innerHTML=batches.length?batches.map(b=>`<details class="organizer-item"><summary>${esc(date(b.created_at))} · ${esc(statuses[b.state]||b.state)} · ${b.items.length} 封 · ${b.mode==="observe"?"观察":"执行"}</summary><p class="muted small">任务标识：${esc(b.run_key)} · 扫描 ${b.scanned} 封 · 规则范围版本 ${b.policy_version}</p>${b.items.map(item=>`<p><strong>${esc(item.message.subject||"（无主题）")}</strong> · ${esc(actions[item.action]||item.action)}<br /><span class="muted">${esc(item.reasons.join("；"))}</span></p>`).join("")}${b.decisions.map(d=>`<p>${esc(d.ref.slice(0,10))}… · ${esc(actions[d.action]||d.action)}${d.destination?` → ${esc(folderLabel(d.destination))}`:""} · ${esc(d.reason)}</p>`).join("")}${(b.operations||[]).map(o=>`<p>原邮箱任务：${esc(o.id)} · ${esc(o.state)}</p>`).join("")}${b.plan_ids.length?'<p class="muted small">实际写入、失败与核验结果可在「核验记录与 MCP」中查看。</p>':""}${b.state!=="cancelled"?`<button class="secondary" type="button" data-cancel-batch="${esc(b.id)}">停止本批剩余操作</button>`:""}</details>`).join(""):'<p class="muted">尚无外部 AI 领取记录。完成 MCP 连接和外部任务配置后，这里显示实际调用结果。</p>';
   }
   async function loadAccount() {
     const id=accountID(); $("#new-rule").disabled=!id; $("#automation-policy-form").hidden=!id;
@@ -56,14 +57,15 @@
     const previous=accountID();$("#rules-account").innerHTML=state.accounts.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} · ${esc(a.username)}</option>`).join("");
     if(state.accounts.some(a=>a.id===previous))$("#rules-account").value=previous;await loadAccount();
   };
-  $("#rules-account").addEventListener("change",run(loadAccount));$("#refresh-rules").addEventListener("click",run(loadAccount));$("#refresh-ai-runs").addEventListener("click",run(loadRuns));
+  $("#rules-account").addEventListener("change",run(loadAccount));$("#refresh-ai-runs").addEventListener("click",run(loadRuns));
   $("#policy-history").addEventListener("change",e=>$("#policy-since").disabled=!e.target.checked);
   $("#automation-policy-form").addEventListener("submit",run(async e=>{
     if(!policy)throw new Error("请先选择邮箱");
     const sources=checked("#policy-sources"),destinations=checked("#policy-destinations");
     const since=$("#policy-since").value,expires=$("#policy-expires").value;
     const input={...policy,enabled:$("#policy-enabled").checked,allow_internal:$("#policy-internal").checked,mode:$("#policy-mode").value,source_folders:sources,destinations,actions:$$('[name="policy-action"]:checked').map(x=>x.value),allow_body:$("#policy-body").checked,protect_unread:$("#policy-protect-unread").checked,protect_flagged:$("#policy-protect-flagged").checked,protected_senders:$("#policy-protected-senders").value.split(/\n/).map(x=>x.trim()).filter(Boolean),include_history:$("#policy-history").checked,since:since?Math.floor(new Date(`${since}T00:00:00+08:00`).getTime()/1000):0,expires:Math.floor(new Date(`${expires}T23:59:59+08:00`).getTime()/1000),max_batch:Number($("#policy-max-batch").value),stable_seconds:Number($("#policy-stable").value)*60};
-    await busy($('button[type="submit"]',e.currentTarget),"保存中…",async()=>{policy=await api(`/api/automation/policy/${encodeURIComponent(accountID())}`,{method:"PUT",body:JSON.stringify(input)});renderPolicy();notify("整理授权已保存，可到“定时与任务”配置触发方式");});
+    const form=e.currentTarget,gen=draftGen(form);
+    await busy($('button[type="submit"]',form),"保存中…",async()=>{policy=await api(`/api/automation/policy/${encodeURIComponent(accountID())}`,{method:"PUT",body:JSON.stringify(input)});const clean=settleDraft(form,gen);renderPolicy();notify(clean?"整理授权已保存，可在下方“整理任务”配置触发方式":"整理授权已保存；保存期间的新修改尚未保存");await window.automationChanged?.();});
   }));
   function groupAt(path){return path?path.split(".").reduce((g,i)=>g.groups[Number(i)],match):match;}
   function conditionOperators(field){return ["received_days","size"].includes(field)?["gte","lte"]:field==="sender"||field==="domain"?["equals","contains","not_contains","starts_with","ends_with","regex"]:textFields.includes(field)?["contains","equals","not_contains","starts_with","ends_with","regex"]:["equals"];}
@@ -84,7 +86,7 @@
     $("#rule-editor-title").textContent=editing.id?"编辑规则":"新建规则";$("#rule-template").value="custom";$("#rule-name").value=editing.name;$("#rule-priority").value=editing.priority;$("#rule-action").value=editing.action;$("#rule-instructions").value=editing.instructions||"";$("#rule-enabled").checked=editing.enabled;$$("input",$("#rule-also")).forEach(x=>x.checked=(editing.also||[]).includes(x.value));
     folderChecks("#rule-sources",editing.source_folders);$("#rule-destination").innerHTML='<option value="">选择原邮箱目录</option>'+folders().map(f=>`<option value="${esc(f.name)}">${esc(folderLabel(f.name))}</option>`).join("");$("#rule-destination").value=editing.destination;renderMatch();updateAction();$("#rule-editor-dialog").showModal();
   }
-  $("#new-rule").addEventListener("click",run(()=>openEditor()));$("#close-rule-editor").addEventListener("click",()=>$("#rule-editor-dialog").close());$("#rule-action").addEventListener("change",updateAction);
+  $("#new-rule").addEventListener("click",run(()=>openEditor()));$("#close-rule-editor").addEventListener("click",()=>closeGuarded($("#rule-editor-dialog")));guardForm($("#rule-editor"),"规则编辑");guardForm($("#automation-policy-form"),"整理授权");$("#rule-action").addEventListener("change",updateAction);
   $("#rule-conditions").addEventListener("input",e=>{
     const group=e.target.closest("[data-group-path]");if(!group)return;const g=groupAt(group.dataset.groupPath),el=e.target;
     if(el.matches("[data-condition-value]"))g.conditions[Number(el.dataset.conditionValue)].value=el.value;
@@ -117,7 +119,7 @@
     const also=$$("input:checked:not(:disabled)",$("#rule-also")).map(x=>x.value),all=[...also,action],opposite={mark_read:"mark_unread",flag:"unflag"};
     if(Object.entries(opposite).some(([a,b])=>all.includes(a)&&all.includes(b)))throw new Error("同时修改的标记互相冲突");if(also.length>2)throw new Error("最多同时修改 2 个标记");
     const input={...editing,name:$("#rule-name").value.trim(),priority:Number($("#rule-priority").value),enabled:$("#rule-enabled").checked,source_folders:sources,match,action,also,destination,instructions:action==="ai"?$("#rule-instructions").value.trim():""};
-    await busy($('button[type="submit"]',e.currentTarget),"保存中…",async()=>{await api(editing.id?`/api/rules/${encodeURIComponent(editing.id)}`:"/api/rules",{method:editing.id?"PUT":"POST",body:JSON.stringify(input)});rules=await api(`/api/rules?account_id=${encodeURIComponent(accountID())}`);renderRules();$("#rule-editor-dialog").close();notify("规则已保存；可先试运行查看命中");});
+    await busy($('button[type="submit"]',e.currentTarget),"保存中…",async()=>{await api(editing.id?`/api/rules/${encodeURIComponent(editing.id)}`:"/api/rules",{method:editing.id?"PUT":"POST",body:JSON.stringify(input)});rules=await api(`/api/rules?account_id=${encodeURIComponent(accountID())}`);renderRules();$("#rule-editor-dialog").close();notify("规则已保存；可先试运行查看命中");await window.automationChanged?.();});
   }));
   async function loadPreview(append=false){
     const out=await api("/api/rules/preview",{method:"POST",body:JSON.stringify({account_id:accountID(),rule_id:preview.ruleID,cursor:append?preview.cursor:"",limit:25})});preview.cursor=out.next_cursor;preview.count=(append?preview.count:0)+out.items.length;
@@ -129,8 +131,8 @@
   $("#rules-list").addEventListener("click",run(async e=>{
     const button=e.target.closest("[data-rule-command]");if(!button)return;const r=rules.find(r=>r.id===button.dataset.ruleId);if(!r)return;
     switch(button.dataset.ruleCommand){
-      case "edit":openEditor(r);break;case "clone":openEditor(r,true);break;
-      case "toggle":await api(`/api/rules/${encodeURIComponent(r.id)}`,{method:"PUT",body:JSON.stringify({...r,enabled:!r.enabled})});rules=await api(`/api/rules?account_id=${encodeURIComponent(accountID())}`);renderRules();notify(r.enabled?"规则已暂停":"规则已启用，等待任务调用");break;
+      case "edit":openEditor(r);break;case "clone":openEditor(r,true);break;case "task":await window.createTaskFromRule(r.id);break;
+      case "toggle":await api(`/api/rules/${encodeURIComponent(r.id)}`,{method:"PUT",body:JSON.stringify({...r,enabled:!r.enabled})});rules=await api(`/api/rules?account_id=${encodeURIComponent(accountID())}`);renderRules();notify(r.enabled?"规则已暂停":"规则已启用，等待任务调用");await window.automationChanged?.();break;
       case "preview":preview={ruleID:r.id,cursor:"",count:0};await loadPreview();$("#rule-preview-dialog").showModal();break;
       case "history":{const history=await api(`/api/rules/${encodeURIComponent(r.id)}/history`);$("#rule-history-items").innerHTML=history.map(v=>`<div class="organizer-item"><strong>v${v.version} · ${esc(v.name)}</strong><p>${esc(date(v.updated_at))} · ${v.enabled?"启用":"草稿 / 暂停"} · ${esc(describeAction({...v,destination:""}))}</p><p>${esc(describeGroup(v.match))}</p><p class="muted">${esc(v.source_folders.map(folderLabel).join("、"))}${v.destination?` → ${esc(folderLabel(v.destination))}`:""}</p></div>`).join("");$("#rule-history-dialog").showModal();break;}
     }

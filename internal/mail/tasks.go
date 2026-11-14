@@ -326,25 +326,8 @@ func (s *Service) saveTask(a Access, t Task, m *Mutation) (Task, error) {
 	if len(t.Name) < 1 || len(t.Name) > 120 || strings.ContainsAny(t.Name, "\x00\r\n") || !slices.Contains([]string{"manual", "internal", "external"}, t.Trigger) || !slices.Contains([]string{"rules", "ai"}, t.Engine) || !slices.Contains([]string{"observe", "execute"}, t.Mode) || !validNotificationPolicy(t.Notify, true) || t.MaxBatch < 1 || t.MaxBatch > p.MaxBatch || t.Since < 0 || t.Since > time.Now().Unix() || len(t.SourceFolders) == 0 || len(t.SourceFolders) > 20 || t.ExpectedSeconds < 0 || t.ExpectedSeconds > 604800 || (t.ExpectedSeconds > 0 && t.ExpectedSeconds < 3600) {
 		return t, ErrInput
 	}
-	for _, f := range t.SourceFolders {
-		if !slices.Contains(p.SourceFolders, f) {
-			return t, ErrDenied
-		}
-	}
-	if t.Engine == "ai" && t.Trigger == "internal" {
-		return t, ErrInput
-	}
-	if t.Engine == "ai" && strings.HasPrefix(a.Owner, AgentOwnerPrefix) {
-		return t, ErrCapability
-	}
-	if t.Trigger == "internal" && !p.AllowInternal {
-		return t, ErrDenied
-	}
-	if t.Mode == "execute" && p.Mode != "execute" {
-		return t, ErrDenied
-	}
-	if t.Enabled && (!p.Enabled || p.Expires <= time.Now().Unix() || p.AdminVersion != a.Version) {
-		return t, ErrDenied
+	if issues := taskPolicyIssues(a, t, p, time.Now().Unix()); len(issues) > 0 {
+		return t, issues[0].err
 	}
 	old := Task{}
 	if t.ID != "" {

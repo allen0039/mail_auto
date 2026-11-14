@@ -505,13 +505,11 @@ func (s *Service) SubmitAI(ctx context.Context, a Access, in AISubmitInput) (AIB
 		if item.Action != "ai" {
 			also = item.Also
 		}
-		for _, extra := range also {
-			if !slices.Contains(p.Actions, extra) {
-				return b, ErrDenied
-			}
+		if !actionsAllowed(p, d.Action, also) {
+			return b, ErrDenied
 		}
 		if d.Action == "move" {
-			if !slices.Contains(p.Destinations, d.Destination) || !a.Allows(b.AccountID, d.Destination, "read") {
+			if !destinationAllowed(p, d.Destination) || !a.Allows(b.AccountID, d.Destination, "read") {
 				return b, ErrDenied
 			}
 		} else if d.Destination != "" {

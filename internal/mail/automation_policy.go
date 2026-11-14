@@ -251,7 +251,7 @@ func (s *Service) authorizedAutomation(a Access, id string) (Access, AutomationP
 		return a, p, e
 	}
 	for _, f := range p.SourceFolders {
-		if !a.Allows(id, f, "read") || (len(account.Folders) > 0 && !slices.Contains(account.Folders, f)) {
+		if !a.Allows(id, f, "read") || sourceNotSynced(account, f) {
 			return a, p, ErrDenied
 		}
 	}

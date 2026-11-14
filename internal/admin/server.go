@@ -185,7 +185,7 @@ func (s *Server) Handler() http.Handler {
 				s.requestMCP(r).handler.ServeHTTP(w, r)
 				return
 			}
-			fail(w, 503, "MCP 尚未启用；请在「整理与 MCP」页面保存 HTTPS 地址并启用")
+			fail(w, 503, "MCP 尚未启用；请在「核验记录与 MCP」页面保存 HTTPS 地址并启用")
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/.well-known/oauth-") || strings.HasPrefix(r.URL.Path, "/oauth/") {
@@ -200,7 +200,7 @@ func (s *Server) Handler() http.Handler {
 			fail(w, 405, "method not allowed")
 			return
 		}
-		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/agent.js" && r.URL.Path != "/network.js" && r.URL.Path != "/style.css" {
+		if r.URL.Path != "/" && r.URL.Path != "/app.js" && r.URL.Path != "/organizer.js" && r.URL.Path != "/rules.js" && r.URL.Path != "/tasks.js" && r.URL.Path != "/automation.js" && r.URL.Path != "/agent.js" && r.URL.Path != "/network.js" && r.URL.Path != "/style.css" {
 			http.NotFound(w, r)
 			return
 		}

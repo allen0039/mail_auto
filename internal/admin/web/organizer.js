@@ -26,7 +26,7 @@
     destination.hidden = $("#bulk-action").value !== "move";
     destination.innerHTML = options(accounts.length === 1 ? folderNames(accounts[0]) : [], accounts.length > 1 ? "请分邮箱选择邮件" : "选择原邮箱目的文件夹");
     destination.value = previous;
-    $("#selection-note").textContent = accounts.length > 1 ? "分类移动请分邮箱选择；归档和回收站使用各邮箱分别保存的配置。" : "分类会移动原邮箱中的邮件，邮箱 App 和手机端同步后可见。目的文件夹为空时，请到「整理与 MCP」刷新或创建。";
+    $("#selection-note").textContent = accounts.length > 1 ? "分类移动请分邮箱选择；归档和回收站使用各邮箱分别保存的配置。" : "分类会移动原邮箱中的邮件，邮箱 App 和手机端同步后可见。目的文件夹为空时，请到「自动整理 → 整理设置」刷新或创建。";
   }
   window.clearMailSelection = () => { selected.clear(); window.restoreMailSelection(); };
   window.restoreMailSelection = () => {
@@ -82,14 +82,23 @@
     $("#provider-folders").innerHTML = items.length ? items.map(f => `<span class="badge">${esc(f.label || folderLabel(f.name))}</span>`).join("") : '<p class="muted">尚未发现文件夹，请刷新原邮箱文件夹。</p>';
     updateSelection();
   }
+  // Lives in 自动整理 → 整理设置. Returns the saved settings; a refresh does
+  // not overwrite an unsaved edit of the form.
   async function loadFolderSettings() {
     const id = $("#organizer-account").value;
-    if (!id) { renderFolders("", "", ""); return; }
+    if (!id) { renderFolders("", "", ""); return null; }
     const settings = await api(`/api/folder-settings/${encodeURIComponent(id)}`);
+    if (isDirty($("#folder-settings-form"))) {
+      $("#capability-result").textContent = "有未保存的修改；刷新没有覆盖你的编辑。";
+      return settings;
+    }
     renderFolders(id, settings.archive_folder, settings.trash_folder);
     $("#organizer-writes").checked = settings.writes_enabled;
     $("#capability-result").textContent = "刷新可读取原邮箱最新文件夹并检查整理能力；不会移动邮件。";
+    return settings;
   }
+  window.loadFolderSettings = loadFolderSettings;
+  guardForm($("#folder-settings-form"), "文件夹映射与写入开关");
   $("#organizer-account").addEventListener("change", run(loadFolderSettings));
   $("#probe-folders").addEventListener("click", run(async e => {
     const id = $("#organizer-account").value;
@@ -107,9 +116,11 @@
   $("#folder-settings-form").addEventListener("submit", run(async e => {
     const id = $("#organizer-account").value;
     if (!id) throw new Error("请先选择邮箱");
-    await busy($('button[type="submit"], button.primary', e.currentTarget), "保存中…", async () => {
+    const form = e.currentTarget, gen = draftGen(form);
+    await busy($('button[type="submit"], button.primary', form), "保存中…", async () => {
       await api(`/api/folder-settings/${encodeURIComponent(id)}`, {method: "PUT", body: JSON.stringify({archive_folder: $("#organizer-archive").value, trash_folder: $("#organizer-trash").value, writes_enabled: $("#organizer-writes").checked})});
-      notify("原邮箱整理设置已保存");
+      notify(settleDraft(form, gen) ? "原邮箱整理设置已保存" : "已保存；保存期间的新修改尚未保存");
+      await window.automationChanged?.();
     });
   }));
   $("#folder-create").addEventListener("submit", run(async e => {
@@ -176,7 +187,7 @@
     const previous = $("#organizer-account").value;
     $("#organizer-account").innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
     if (state.accounts.some(a => a.id === previous)) $("#organizer-account").value = previous;
-    await Promise.all([loadFolderSettings(), loadOperations(), loadTokens(), api("/api/mcp/settings").then(renderMCP)]);
+    await Promise.all([loadOperations(), loadTokens(), api("/api/mcp/settings").then(renderMCP)]);
   };
   window.checkOAuthConsent = async () => {
     const id = new URLSearchParams(location.search).get("oauth_request"); if (!id || oauthID === id) return;

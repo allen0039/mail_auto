@@ -25,7 +25,7 @@ func agentError(w http.ResponseWriter, e error) {
 	case errors.Is(e, telegram.ErrGrantRequired):
 		writeJSON(w, 422, map[string]string{"code": "grant_required", "error": "请先保存并启用有效的 Agent 授权（授权须在当前管理员凭据下保存）"})
 	case errors.Is(e, telegram.ErrCredentialMissing):
-		writeJSON(w, 422, map[string]string{"code": "telegram_credential_missing", "error": "请先在「TG 通知」保存有效的 Bot Token"})
+		writeJSON(w, 422, map[string]string{"code": "telegram_credential_missing", "error": "请先在「Telegram」页面保存有效的 Bot Token"})
 	case errors.Is(e, agent.ErrKeyRequired):
 		writeJSON(w, 422, map[string]string{"code": "key_required", "error": "请填写 API Key：新连接或更换了 API 地址的域名时需要重新输入密钥"})
 	case errors.Is(e, agent.ErrConnectionInUse):

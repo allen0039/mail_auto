@@ -27,6 +27,9 @@ func (s *Server) tasksAPI(w http.ResponseWriter, r *http.Request) bool {
 	case path == "/api/tasks" && r.Method == "GET":
 		out, e := s.Mail.Tasks(a, r.URL.Query().Get("account_id"))
 		respond(out, e)
+	case path == "/api/tasks/readiness" && r.Method == "GET":
+		out, e := s.Mail.TaskReadiness(a, r.URL.Query().Get("account_id"))
+		respond(out, e)
 	case path == "/api/tasks" && r.Method == "POST":
 		var in mail.Task
 		if decode(w, r, &in) {

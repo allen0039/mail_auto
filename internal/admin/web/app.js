@@ -23,6 +23,71 @@ const esc = (value) =>
       ],
   );
 const number = (value) => Number(value || 0).toLocaleString("zh-CN");
+
+// Unsaved-edit guard. A form opts in with guardForm(form, "名称"): user input
+// marks it dirty and bumps a generation counter. Loaders skip re-rendering a
+// dirty form; a save settles the draft only if nothing was typed while the
+// request was in flight. Drafts live only in page memory.
+const drafts = new Map();
+const extraDrafts = [];
+function guardForm(form, label) {
+  if (!form || drafts.has(form)) return;
+  form.dataset.guard = label;
+  drafts.set(form, { gen: 0, dirty: false });
+  const touch = (e) => {
+    if (e.target?.closest?.("[data-guard-ignore]")) return;
+    const d = drafts.get(form);
+    d.gen++;
+    d.dirty = true;
+  };
+  form.addEventListener("input", touch);
+  form.addEventListener("change", touch);
+}
+const isDirty = (form) => !!drafts.get(form)?.dirty;
+const draftGen = (form) => drafts.get(form)?.gen || 0;
+function markClean(form) {
+  const d = drafts.get(form);
+  if (d) d.dirty = false;
+}
+// Call with the generation captured at submit; true when the draft is now
+// clean (the saved values are what the form shows).
+function settleDraft(form, gen) {
+  if (draftGen(form) !== gen) return false;
+  markClean(form);
+  return true;
+}
+function dirtyLabels(scope) {
+  const out = [...drafts].filter(([f, d]) => d.dirty && (!scope || scope.contains(f))).map(([f]) => f.dataset.guard);
+  for (const x of extraDrafts) if ((!scope || scope.contains(x.root)) && x.dirty()) out.push(x.label);
+  return out;
+}
+// Asks before discarding unsaved edits inside scope (default: the whole page).
+function confirmDiscard(scope) {
+  const labels = dirtyLabels(scope);
+  if (!labels.length) return true;
+  if (!confirm(`有未保存的修改：${labels.join("、")}。放弃这些修改？`)) return false;
+  for (const [f] of drafts) if (!scope || scope.contains(f)) markClean(f);
+  for (const x of extraDrafts) if ((!scope || scope.contains(x.root)) && x.discard) x.discard();
+  return true;
+}
+// Closes a dialog unless the user keeps its unsaved edits.
+function closeGuarded(dialog) {
+  if (confirmDiscard(dialog)) dialog.close();
+}
+window.addEventListener("beforeunload", (e) => {
+  if (dirtyLabels().length) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+document.addEventListener("cancel", (e) => {
+  // Escape on a dialog with unsaved edits asks first.
+  if (e.target instanceof HTMLDialogElement && dirtyLabels(e.target).length && !confirmDiscard(e.target)) e.preventDefault();
+}, true);
+document.addEventListener("close", (e) => {
+  // A closed dialog has been saved or discarded.
+  if (e.target instanceof HTMLDialogElement) for (const [f] of drafts) if (e.target.contains(f)) markClean(f);
+}, true);
 // Delegated handlers must not cancel native interactions such as toggling a
 // <summary>. Only form submits and button clicks keep the old preventDefault.
 const shouldPreventDefault = (e) =>
@@ -460,11 +525,10 @@ const views = {
     "邮箱连接",
     "管理连接与访问范围，原始邮件保留在邮箱中。",
   ],
-  rules: ["MAIL RULES", "整理规则", "配置原邮箱的分类规则与任务授权范围。"],
-  tasks: ["MAIL TASKS", "定时与任务", "选择内置定时或外部 MCP 触发，统一查看原邮箱整理结果。"],
-  organizer: ["MAIL ORGANIZER", "整理与 MCP", "配置原邮箱文件夹分类、整理任务和 MCP 连接。"],
-  agent: ["AGENT & TELEGRAM", "Agent 与 Telegram", "配置内置管理 Agent 的模型、授权与 Telegram 私聊交互；默认关闭。"],
-  notifications: ["TASK NOTIFICATIONS", "TG 通知", "按需接收任务结果，成功时可以保持安静。"],
+  automation: ["AUTOMATION", "自动整理", "规则、任务和它们需要的整理设置集中在这里；任务不能运行时直接显示原因。"],
+  organizer: ["VERIFICATION & MCP", "核验记录与 MCP", "查看原邮箱写入的核验记录，配置外部 MCP 连接。"],
+  agent: ["AGENT & MODEL", "Agent 与模型", "配置内置管理 Agent 的模型连接与授权；默认关闭。"],
+  notifications: ["TELEGRAM", "Telegram", "Bot 凭据、任务通知与私聊交互集中在这里，通知与交互分别开关。"],
   audit: ["ACTIVITY LOG", "操作记录", "查看登录、同步和配置变更的足迹。"],
   network: ["OUTBOUND CONNECTIONS", "网络与代理", "管理全局、邮箱、TG 与 Agent 的出口，查看真实连接诊断。"],
   system: [
@@ -474,7 +538,14 @@ const views = {
   ],
 };
 
+// Old page names stay valid (links, saved hashes, other scripts) and open
+// the section of the page that now holds them.
+const viewAliases = { rules: ["automation", "#auto-rules"], tasks: ["automation", "#auto-tasks"] };
+const paneOf = (view) => viewAliases[view]?.[0] || view;
+
 async function showView(view) {
+  const section = viewAliases[view]?.[1];
+  view = paneOf(view);
   state.view = view;
   const [eyebrow, title, description] = views[view] || views.dashboard;
   $("#page-eyebrow").textContent = eyebrow;
@@ -497,12 +568,12 @@ async function showView(view) {
   if (view === "inbox") await search();
   if (view === "audit") await loadAudits();
   if (view === "organizer" && window.loadOrganizer) await window.loadOrganizer();
-  if (view === "rules" && window.loadRules) await window.loadRules();
-  if (view === "tasks" && window.loadTasks) await window.loadTasks();
+  if (view === "automation" && window.loadAutomation) await window.loadAutomation();
   if (view === "notifications" && window.loadNotifications) await window.loadNotifications();
   if (view === "agent" && window.loadAgent) await window.loadAgent();
   if (view === "network" && window.loadNetwork) await window.loadNetwork();
   if ((view === "agent" || view === "notifications") && window.loadNetworkPolicies) await window.loadNetworkPolicies();
+  if (section) $(section)?.scrollIntoView({ block: "start" });
 }
 
 function empty(title, description, action) {
@@ -660,15 +731,71 @@ async function loadAudits() {
     : '<tr><td colspan="4">暂无操作记录</td></tr>';
 }
 
+// Same allowlist as the server (mail.Providers); domains only pick a value
+// from it and never add hosts.
+const providerHosts = {
+  qq: ["imap.qq.com"],
+  netease: ["imap.163.com", "imap.126.com", "imap.yeah.net"],
+  icloud: ["imap.mail.me.com"],
+};
+const domainServers = {
+  "qq.com": ["qq", "imap.qq.com"],
+  "foxmail.com": ["qq", "imap.qq.com"],
+  "163.com": ["netease", "imap.163.com"],
+  "126.com": ["netease", "imap.126.com"],
+  "yeah.net": ["netease", "imap.yeah.net"],
+  "icloud.com": ["icloud", "imap.mail.me.com"],
+  "me.com": ["icloud", "imap.mail.me.com"],
+  "mac.com": ["icloud", "imap.mail.me.com"],
+};
+// For a new mailbox the name and server follow the address until the user
+// edits them; editing an existing mailbox never changes saved values.
+const accountAuto = { name: false, server: false };
+const domainOf = (address) => address.trim().toLowerCase().split("@")[1] || "";
+
 function updateProvider() {
-  const hosts = {
-    qq: ["imap.qq.com"],
-    netease: ["imap.163.com", "imap.126.com", "imap.yeah.net"],
-    icloud: ["imap.mail.me.com"],
-  };
-  $("#host").innerHTML = (hosts[$("#provider").value] || [])
+  $("#host").innerHTML = (providerHosts[$("#provider").value] || [])
     .map((h) => `<option>${h}</option>`)
     .join("");
+}
+
+function inferServer() {
+  const form = $("#account-form"), address = form.elements.username.value;
+  const domain = domainOf(address), match = domainServers[domain];
+  const note = $("#account-provider-note");
+  if (accountAuto.server && match) {
+    form.elements.provider.value = match[0];
+    updateProvider();
+    form.elements.host.value = match[1];
+    form.elements.port.value = 993;
+  }
+  if (accountAuto.name && address.includes("@")) {
+    const local = address.trim().split("@")[0];
+    const label = match ? { "qq.com": "QQ", "foxmail.com": "Foxmail", "163.com": "163", "126.com": "126", "yeah.net": "yeah", "icloud.com": "iCloud", "me.com": "iCloud", "mac.com": "iCloud" }[domain] : domain;
+    form.elements.name.value = `${label} · ${local}`.slice(0, 80);
+  }
+  if (!domain) note.textContent = "支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud。";
+  else if (match) note.textContent = `已识别：${providerNames[match[0]]} · ${form.elements.host.value}:${form.elements.port.value}`;
+  else if (accountAuto.server)
+    note.textContent = "无法根据域名识别服务商。目前支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud；若是这些服务的自定义域名，请在“高级设置”中选择服务商与主机。";
+  else note.textContent = `使用高级设置中的服务器：${form.elements.host.value}:${form.elements.port.value}`;
+  accountSummary();
+}
+
+// Lists what differs from the default for the address, so a collapsed
+// section never hides a custom value.
+function accountSummary() {
+  const form = $("#account-form"), parts = [];
+  const match = domainServers[domainOf(form.elements.username.value)];
+  const defaultHost = match ? match[1] : providerHosts[form.elements.provider.value]?.[0];
+  if (!match || form.elements.host.value !== defaultHost) parts.push(`${providerNames[form.elements.provider.value]} · ${form.elements.host.value}`);
+  if (Number(form.elements.port.value) !== 993) parts.push(`端口 ${form.elements.port.value}`);
+  const net = $("#account-network-policy");
+  if (net.selectedIndex > 0) parts.push(`连接方式：${net.options[net.selectedIndex].text}`);
+  const folders = form.elements.folders.value.split(/\r?\n/).filter((f) => f.trim()).length;
+  if (folders) parts.push(`指定 ${folders} 个文件夹`);
+  if ($("#credential-mode").value === "external") parts.push("外部 secret");
+  $("#account-advanced-summary").textContent = parts.length ? `（非默认：${parts.join("，")}）` : "";
 }
 
 function updateCredentialMode() {
@@ -685,6 +812,9 @@ function openAccount(account = null) {
   const form = $("#account-form");
   form.reset();
   state.editingAccount = account?.id || null;
+  accountAuto.name = !account;
+  accountAuto.server = !account;
+  $("#account-advanced").open = false;
   $("#account-error").textContent = "";
   $("#account-dialog-title").textContent = account ? "编辑邮箱配置" : "添加邮箱";
   $("#account-dialog-eyebrow").textContent = account ? "MANAGE MAILBOX" : "CONNECT A MAILBOX";
@@ -706,8 +836,22 @@ function openAccount(account = null) {
   if (account) form.elements.host.value = account.host;
   updateCredentialMode();
   if (window.fillAccountNetwork) window.fillAccountNetwork(account);
+  if (account) {
+    $("#account-provider-note").textContent = `当前服务器：${account.host}:${account.port}`;
+    accountSummary();
+  } else inferServer();
   $("#account-dialog").showModal();
 }
+
+$("#account-form").addEventListener("input", (e) => {
+  const name = e.target.name || e.target.id;
+  if (name === "name") accountAuto.name = false;
+  if (["provider", "host", "port"].includes(name)) accountAuto.server = false;
+  if (name === "username") inferServer();
+  else accountSummary();
+});
+$("#account-form").addEventListener("change", accountSummary);
+guardForm($("#account-form"), "邮箱设置");
 
 $("#credential-mode").addEventListener("change", () => {
   updateCredentialMode();
@@ -852,21 +996,27 @@ async function logout() {
 $("#logout").addEventListener("click", logout);
 $("#setup-logout").addEventListener("click", logout);
 
-$$(".nav-button").forEach((b) =>
-  b.addEventListener("click", () =>
-    showView(b.dataset.view).catch((e) => notify(e.message, true)),
-  ),
-);
+// Leaving a page with unsaved edits asks first; staying keeps the drafts.
+function navigate(view) {
+  const pane = $(`#${paneOf(state.view)}-pane`);
+  if (paneOf(view) !== paneOf(state.view) && pane && !confirmDiscard(pane)) return;
+  showView(view).catch((e) => notify(e.message, true));
+}
+$$(".nav-button").forEach((b) => b.addEventListener("click", () => navigate(b.dataset.view)));
 
 ["#add-account", "#side-add"].forEach((id) =>
   $(id).addEventListener("click", () => openAccount()),
 );
 
 $$("[data-close]").forEach((b) =>
-  b.addEventListener("click", () => $(`#${b.dataset.close}`).close()),
+  b.addEventListener("click", () => closeGuarded($(`#${b.dataset.close}`))),
 );
 
-$("#provider").addEventListener("change", updateProvider);
+$("#provider").addEventListener("change", () => {
+  accountAuto.server = false;
+  updateProvider();
+  accountSummary();
+});
 
 $("#account-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -880,9 +1030,14 @@ $("#account-form").addEventListener("submit", async (e) => {
   if (window.accountNetworkPolicy) data.proxy = window.accountNetworkPolicy();
   const editingID = state.editingAccount;
   $("#account-error").textContent = "";
+  if (!editingID && accountAuto.server && !domainServers[domainOf(data.username)]) {
+    $("#account-error").textContent = "无法根据域名识别服务商：请在“高级设置”中选择服务商与主机后再保存。";
+    $("#account-advanced").open = true;
+    return;
+  }
   try {
     await busy($("button[type=submit]", form), "正在加密保存…", async () => {
-      await api(editingID ? `/api/accounts/${encodeURIComponent(editingID)}` : "/api/accounts", {
+      const saved = await api(editingID ? `/api/accounts/${encodeURIComponent(editingID)}` : "/api/accounts", {
         method: editingID ? "PUT" : "POST",
         body: JSON.stringify(data),
       });
@@ -890,9 +1045,18 @@ $("#account-form").addEventListener("submit", async (e) => {
       $("#account-dialog").close();
       await refresh();
       await showView("accounts");
-      notify(editingID ? "邮箱配置已更新，建议先运行连接诊断，再同步邮件" : "邮箱已保存，建议先运行连接诊断");
+      // Show the result where the mailbox lives: its card carries the
+      // connection and background-sync state and the diagnosis button.
+      const card = $(`[data-account="${CSS.escape(saved?.id || editingID || "")}"]`);
+      if (card) {
+        card.scrollIntoView({ block: "center" });
+        card.classList.add("just-saved");
+        setTimeout(() => card.classList.remove("just-saved"), 4000);
+      }
+      notify(editingID ? "邮箱配置已更新；连接与同步状态见该邮箱卡片" : "邮箱已保存；后台自动同步会开始读取，状态见该邮箱卡片，可点“连接诊断”检查");
     });
   } catch (err) {
+    // The draft stays in the dialog; the error says what to do next.
     $("#account-error").textContent = err.message;
   }
 });
@@ -961,7 +1125,7 @@ document.addEventListener("click", (e) => {
 
   const quick = e.target.closest("[data-quick-nav]");
   if (quick) {
-    showView(quick.dataset.quickNav).catch((err) => notify(err.message, true));
+    navigate(quick.dataset.quickNav);
   }
 });
 

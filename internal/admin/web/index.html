@@ -14,6 +14,7 @@
     <script src="/organizer.js" defer></script>
     <script src="/rules.js" defer></script>
     <script src="/tasks.js" defer></script>
+    <script src="/automation.js" defer></script>
     <script src="/agent.js" defer></script>
     <script src="/network.js" defer></script>
   </head>
@@ -108,7 +109,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.7.2</span>
+          <span class="badge badge-subtle app-version-label">v0.8.0</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -120,7 +121,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.7.2</span>
+            <span class="app-version-label">v0.8.0</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -203,7 +204,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.7.2</span>
+            个人邮件工作台 <span class="app-version-label">v0.8.0</span>
           </div>
         </div>
 
@@ -239,17 +240,13 @@
           <div class="nav-group">
             <div class="nav-group-title">自动化与整理</div>
             <div class="nav-group-items">
-              <button data-view="rules" class="nav-button">
+              <button data-view="automation" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-rules"></use></svg>
-                <span>整理规则</span>
-              </button>
-              <button data-view="tasks" class="nav-button">
-                <svg class="icon" aria-hidden="true"><use href="#icon-tasks"></use></svg>
-                <span>定时与任务</span>
+                <span>自动整理</span>
               </button>
               <button data-view="organizer" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-mcp"></use></svg>
-                <span>整理与 MCP</span>
+                <span>核验记录与 MCP</span>
               </button>
             </div>
           </div>
@@ -260,11 +257,11 @@
             <div class="nav-group-items">
               <button data-view="agent" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-mcp"></use></svg>
-                <span>Agent 与 TG</span>
+                <span>Agent 与模型</span>
               </button>
               <button data-view="notifications" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-bell"></use></svg>
-                <span>TG 通知</span>
+                <span>Telegram</span>
               </button>
               <button data-view="audit" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-audit"></use></svg>
@@ -553,45 +550,47 @@
           <div id="account-list" class="account-grid"></div>
         </section>
 
-        <!-- ================================================================= -->
-        <!-- VIEW 4: Rules Pane                                               -->
-        <!-- ================================================================= -->
-        <section id="rules-pane" hidden>
-          <div class="organizer-stack">
-            <div class="rules-path">
-              <span>① 配置原邮箱规则</span>
-              <span aria-hidden="true">→</span>
-              <span>② 授权任务运行范围</span>
-              <span aria-hidden="true">→</span>
-              <span>③ 由定时或外部 MCP 触发</span>
-            </div>
 
+
+        <!-- ================================================================= -->
+        <!-- VIEW 4: Automation (rules, tasks and their settings)             -->
+        <!-- ================================================================= -->
+        <section id="automation-pane" hidden>
+          <div class="organizer-stack">
             <div class="panel organizer-card">
               <div class="panel-heading-clean">
                 <label class="account-selector-label">
                   <span>选择邮箱：</span>
-                  <select id="rules-account" aria-label="规则邮箱" class="max-w-account-select"></select>
+                  <select id="auto-account" aria-label="自动整理邮箱" class="max-w-account-select"></select>
                 </label>
-                <button id="refresh-rules" class="secondary" type="button">刷新规则与记录</button>
+                <button id="refresh-automation" class="secondary" type="button">刷新</button>
               </div>
-              <p id="rules-capability" class="muted capability-note"></p>
-            </div>
+              <select hidden aria-hidden="true" tabindex="-1" data-guard-ignore id="rules-account" aria-label="规则邮箱" class="max-w-account-select"></select>
+              <select hidden aria-hidden="true" tabindex="-1" data-guard-ignore id="tasks-account" aria-label="任务邮箱" class="max-w-account-select"></select>
+              <div id="auto-summary" class="auto-summary" aria-live="polite"></div>
+              <details id="auto-settings" class="auto-settings margin-t-12">
+                <summary>整理设置 <span id="auto-settings-note" class="muted small"></span></summary>
+                <div class="auto-settings-body">
+                  <h3 id="auto-folders">原邮箱写入与文件夹映射</h3>
+                  <p class="muted small">分类直接移动原邮箱中的邮件，网页邮箱和手机端同步后可见。</p>
+              <p class="muted small">分类直接移动原邮箱中的邮件，网页邮箱和手机端同步后可见。</p>
+              <form id="folder-settings-form" class="organizer-inline">
+                <select id="organizer-account" hidden aria-hidden="true" tabindex="-1" data-guard-ignore></select>
+                <button id="probe-folders" type="button" class="secondary">刷新原邮箱文件夹</button>
+                <label>归档文件夹（可选）<select id="organizer-archive"><option value="">未配置</option></select></label>
+                <label>回收站（可选）<select id="organizer-trash"><option value="">未配置</option></select></label>
+                <label class="checkbox-label"><input id="organizer-writes" type="checkbox" />允许整理原邮箱</label>
+                <button class="primary" type="submit">保存邮箱设置</button>
+              </form>
+              <p id="capability-result" class="muted capability-result-note"></p>
 
-            <article class="panel organizer-card">
-              <div class="panel-heading-clean">
-                <div>
-                  <h2>自定义整理规则</h2>
-                  <p class="muted small">先沿用原邮箱分类，再设置保留和归档条件。规则试运行只查看命中，不移动邮件。</p>
-                </div>
-                <button id="new-rule" class="primary" type="button">＋ 新建规则</button>
-              </div>
-              <div id="rules-list"></div>
-            </article>
-
-            <!-- Automation Policy Form -->
-            <article class="panel organizer-card">
-              <h2>任务整理授权</h2>
-              <p class="muted small margin-b-16">所有任务共用以下范围。内置定时需单独允许；修改授权会使旧批次失效。</p>
+              <form id="folder-create" class="organizer-inline margin-t-16">
+                <label>新建原邮箱文件夹<input name="name" type="text" maxlength="256" placeholder="例如：账单、工作、订阅" required /></label>
+                <button class="secondary" type="submit">在原邮箱创建</button>
+              </form>
+              <div id="provider-folders" class="organizer-inline margin-t-14" aria-live="polite"></div>
+                  <h3 id="auto-policy" class="margin-t-24">整理授权</h3>
+                  <p class="muted small margin-b-16">所有任务共用以下范围，任务只能在此范围内收紧。内置定时需单独允许；修改授权会使旧批次失效。</p>
               <form id="automation-policy-form" class="rules-form">
                 <div class="rules-grid">
                   <div>
@@ -661,12 +660,59 @@
                   <button class="primary" type="submit">保存整理授权</button>
                 </div>
               </form>
-            </article>
+                </div>
+              </details>
+              <p id="rules-capability" class="muted capability-note"></p>
+            </div>
 
+            <section id="auto-rules" class="organizer-stack">
+            <article class="panel organizer-card">
+              <div class="panel-heading-clean">
+                <div>
+                  <h2>自定义整理规则</h2>
+                  <p class="muted small">先沿用原邮箱分类，再设置保留和归档条件。规则试运行只查看命中，不移动邮件。</p>
+                </div>
+                <button id="new-rule" class="primary" type="button">＋ 新建规则</button>
+              </div>
+              <div id="rules-list"></div>
+            </article>
+            </section>
+
+            <section id="auto-tasks" class="organizer-stack">
+              <div class="panel organizer-card">
+                <div class="panel-heading-clean">
+                  <div>
+                    <h2>整理任务</h2>
+                    <p class="muted small">每项任务选择一种触发方式（手动、内置定时或外部 MCP）。固定规则任务不需要模型、Telegram 或 MCP。</p>
+                  </div>
+                  <div class="organizer-inline margin-none">
+                    <button id="refresh-tasks" class="secondary" type="button">刷新</button>
+                    <button id="new-task" class="primary" type="button">＋ 新建任务</button>
+                  </div>
+                </div>
+                <p id="tasks-policy-note" class="muted capability-note"></p>
+              </div>
+            <div id="tasks-list" class="organizer-stack"></div>
+            <article class="panel organizer-card">
+              <div class="panel-heading-clean">
+                <div>
+                  <h2 id="task-runs-title">运行记录</h2>
+                  <p class="muted small">任务结果与通知投递分开记录；外部任务的配置说明不代表已建立客户端定时任务。</p>
+                </div>
+                <button id="refresh-task-runs" class="secondary" type="button">刷新记录</button>
+              </div>
+              <div id="task-runs-list" class="margin-t-12">
+                <p class="muted">选择一项任务查看最近运行。</p>
+              </div>
+            </article>
+            </section>
+
+            <details class="panel organizer-card auto-external">
+              <summary>外部 AI（MCP）任务说明与批次记录</summary>
             <!-- External AI Task Prompt -->
             <article class="panel organizer-card">
               <h2>外部定时任务指引</h2>
-              <p class="muted small">先在「整理与 MCP」完成连接，再将任务说明交给支持 MCP 调用的客户端创建定时任务。</p>
+              <p class="muted small">先在「核验记录与 MCP」完成连接，再将任务说明交给支持 MCP 调用的客户端创建定时任务。</p>
               <div class="organizer-inline">
                 <label>
                   建议周期
@@ -684,7 +730,6 @@
                 <textarea id="ai-task-prompt" readonly rows="8" placeholder="选择邮箱并生成说明"></textarea>
               </label>
             </article>
-
             <!-- AI Batches Run History -->
             <article class="panel organizer-card">
               <div class="panel-heading-clean">
@@ -693,46 +738,7 @@
               </div>
               <div id="ai-runs" class="margin-t-12"></div>
             </article>
-          </div>
-        </section>
-
-        <!-- ================================================================= -->
-        <!-- VIEW 5: Tasks Pane                                               -->
-        <!-- ================================================================= -->
-        <section id="tasks-pane" hidden>
-          <div class="organizer-stack">
-            <div class="info-strip">
-              每项任务选择一种自动触发方式（内置定时或外部 MCP），也可随时手动运行。分类与归档写回原邮箱。
-            </div>
-
-            <div class="panel organizer-card">
-              <div class="panel-heading-clean">
-                <label class="account-selector-label">
-                  <span>选择邮箱：</span>
-                  <select id="tasks-account" aria-label="任务邮箱" class="max-w-account-select"></select>
-                </label>
-                <div class="organizer-inline margin-none">
-                  <button id="refresh-tasks" class="secondary" type="button">刷新</button>
-                  <button id="new-task" class="primary" type="button">＋ 新建任务</button>
-                </div>
-              </div>
-              <p id="tasks-policy-note" class="muted capability-note"></p>
-            </div>
-
-            <div id="tasks-list" class="organizer-stack"></div>
-
-            <article class="panel organizer-card">
-              <div class="panel-heading-clean">
-                <div>
-                  <h2 id="task-runs-title">运行记录</h2>
-                  <p class="muted small">任务结果与通知投递分开记录；外部任务的配置说明不代表已建立客户端定时任务。</p>
-                </div>
-                <button id="refresh-task-runs" class="secondary" type="button">刷新记录</button>
-              </div>
-              <div id="task-runs-list" class="margin-t-12">
-                <p class="muted">选择一项任务查看最近运行。</p>
-              </div>
-            </article>
+            </details>
           </div>
         </section>
 
@@ -741,25 +747,7 @@
         <!-- ================================================================= -->
         <section id="organizer-pane" hidden>
           <div class="organizer-stack">
-            <article class="panel organizer-card">
-              <h2>原邮箱文件夹分类</h2>
-              <p class="muted small">分类直接移动原邮箱中的邮件，网页邮箱和手机端同步后可见。</p>
-              <form id="folder-settings-form" class="organizer-inline">
-                <label>邮箱<select id="organizer-account" required></select></label>
-                <button id="probe-folders" type="button" class="secondary">刷新原邮箱文件夹</button>
-                <label>归档文件夹（可选）<select id="organizer-archive"><option value="">未配置</option></select></label>
-                <label>回收站（可选）<select id="organizer-trash"><option value="">未配置</option></select></label>
-                <label class="checkbox-label"><input id="organizer-writes" type="checkbox" />允许整理原邮箱</label>
-                <button class="primary" type="submit">保存邮箱设置</button>
-              </form>
-              <p id="capability-result" class="muted capability-result-note"></p>
-
-              <form id="folder-create" class="organizer-inline margin-t-16">
-                <label>新建原邮箱文件夹<input name="name" type="text" maxlength="256" placeholder="例如：账单、工作、订阅" required /></label>
-                <button class="secondary" type="submit">在原邮箱创建</button>
-              </form>
-              <div id="provider-folders" class="organizer-inline margin-t-14" aria-live="polite"></div>
-            </article>
+            <div class="info-strip">原邮箱写入开关、归档 / 回收站映射和整理授权已移到 <button type="button" class="text-button" data-quick-nav="automation">自动整理 → 整理设置</button>。本页保留写入核验记录与 MCP 连接。</div>
 
             <article class="panel organizer-card">
               <div class="panel-heading-clean">
@@ -807,18 +795,25 @@
         <section id="notifications-pane" hidden>
           <div class="organizer-stack">
             <article class="panel organizer-card">
-              <h2>Telegram 自动化通知</h2>
-              <p class="muted small">通知只包含任务名称、处理数量和错误摘要，默认不包含邮件正文、发件人隐私信息。</p>
+              <h2>Telegram 概览</h2>
+              <div id="tg-overview" class="tg-overview" aria-live="polite"></div>
+              <details class="help-details margin-t-10">
+                <summary>说明</summary>
+                <p class="muted small">一个 Bot 同时用于任务通知和私聊交互，两者分别开关、互不覆盖：通知发往下方设置的 Chat ID，私聊绑定不会改动它。通知只包含任务名称、处理数量和错误摘要，不包含邮件正文。</p>
+              </details>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>Bot 与任务通知</h2>
               <div class="network-inline margin-t-16">
                 <label>TG 连接方式<select id="telegram-network-policy" data-network-scope="telegram"></select></label>
                 <button type="button" class="secondary" data-network-save="telegram">保存 TG 连接方式</button>
                 <button type="button" class="secondary" data-network-check="telegram">诊断 TG 连接</button>
               </div>
-              <p class="muted small">通知、机器人收取命令、回复与按钮回调共用此设置；代理失败不自动直连。</p>
+              <p class="muted small">通知与私聊交互共用此出口；代理失败不自动直连。</p>
               <div id="telegram-network-result" role="status" aria-live="polite"></div>
 
               <form id="telegram-form" class="rules-form margin-t-16">
-                <label class="checkbox-label"><input id="telegram-enabled" type="checkbox" />启用 Telegram 通知</label>
                 <div class="rules-grid">
                   <label>
                     Bot Token
@@ -832,6 +827,7 @@
                   </label>
                 </div>
 
+                <label class="checkbox-label"><input id="telegram-enabled" type="checkbox" />发送任务通知（与私聊交互开关相互独立）</label>
                 <div class="rules-grid">
                   <label>
                     默认通知策略
@@ -849,12 +845,28 @@
                 </div>
 
                 <div class="organizer-inline">
-                  <button type="submit" class="primary">保存通知设置</button>
+                  <button type="submit" class="primary">保存 Bot 与通知设置</button>
                   <button id="telegram-check" type="button" class="secondary">验证机器人</button>
                   <button id="telegram-test" type="button" class="secondary">发送测试通知</button>
                 </div>
                 <p id="telegram-status" class="muted margin-t-10" role="status"></p>
               </form>
+            </article>
+
+            <article class="panel organizer-card">
+              <h2>私聊交互</h2>
+              <p class="muted small">使用上方保存的 Bot；开关与任务通知相互独立。</p>
+              <div id="agent-telegram-state" class="margin-t-12"></div>
+              <div class="organizer-inline margin-t-12">
+                <button id="agent-telegram-toggle" type="button" class="primary">开启交互</button>
+                <button id="agent-bind-code" type="button" class="secondary">生成绑定码</button>
+                <button id="agent-unbind" type="button" class="secondary danger-btn">解除绑定</button>
+              </div>
+              <p id="agent-bind-output" class="margin-t-10" role="status"></p>
+              <details class="help-details margin-t-10">
+                <summary>说明</summary>
+                <p class="muted small">交互需要 Agent 已启用（「Agent 与模型」页面）。仅支持长轮询；若 Bot 已设置 webhook 会报告冲突且不会删除。Telegram 服务端最多保留 24 小时更新，离线更久的消息无法补齐。对话中请求执行任务只发送确认卡片；<code>/run &lt;task_id&gt;</code> 可直接运行一次已启用任务。关闭后用同一 Bot 重新开启会保留绑定。</p>
+              </details>
             </article>
 
             <article class="panel organizer-card">
@@ -973,24 +985,13 @@
               </form>
             </article>
 
-            <article class="panel organizer-card">
-              <h2>Telegram 私聊交互</h2>
-              <p class="muted small">复用「TG 通知」中保存的 Bot Token；交互开关与通知开关相互独立，通知仍发往原通知 Chat。仅支持长轮询；若 Bot 已设置 webhook 会报告冲突且不会删除。Telegram 服务端最多保留 24 小时更新，离线超过该时间的消息无法补齐。对话中请求执行任务只会发送确认卡片；<code>/run &lt;task_id&gt;</code> 可直接运行一次已启用任务。关闭后用同一 Bot 重新开启会保留绑定。</p>
-              <div id="agent-telegram-state" class="margin-t-12"></div>
-              <div class="organizer-inline margin-t-12">
-                <button id="agent-telegram-toggle" type="button" class="primary">开启交互</button>
-                <button id="agent-bind-code" type="button" class="secondary">生成绑定码</button>
-                <button id="agent-unbind" type="button" class="secondary danger-btn">解除绑定</button>
-              </div>
-              <p id="agent-bind-output" class="margin-t-10" role="status"></p>
-            </article>
 
             <article class="panel organizer-card">
               <div class="panel-heading-clean">
                 <h2>近期 Agent 记录</h2>
                 <button id="agent-refresh" type="button" class="secondary">刷新</button>
               </div>
-              <p class="muted small">只显示状态、工具名称、结果代码和业务对象 ID，不展示对话原文。规则与任务的实际状态以「整理规则」「定时与任务」为准。</p>
+              <p class="muted small">只显示状态、工具名称、结果代码和业务对象 ID，不展示对话原文。规则与任务的实际状态以「自动整理」为准。</p>
               <div id="agent-records" class="margin-t-12"></div>
             </article>
           </div>
@@ -1140,7 +1141,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.7.2</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.8.0</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1184,76 +1185,80 @@
           </button>
         </header>
 
-        <p class="muted small">请先在邮箱服务商（如 QQ / 163 / iCloud）设置中开启 IMAP，并生成专用授权码。</p>
+        <p class="muted small">先在邮箱服务商（QQ / 163 / iCloud 等）设置中开启 IMAP，并生成专用授权码。</p>
         <p id="account-edit-note" class="info-strip margin-t-10" hidden>
           修改邮箱地址、服务商、主机或端口会重建本地索引。原始邮件不受影响。
         </p>
 
-        <div class="form-grid margin-t-16">
-          <label>
-            显示名称
-            <input name="name" type="text" placeholder="例如：个人 QQ 邮箱" maxlength="80" required />
-          </label>
-          <label>
-            邮箱服务商
-            <select name="provider" id="provider">
-              <option value="qq">QQ 邮箱</option>
-              <option value="netease">网易邮箱 (163/126/yeah)</option>
-              <option value="icloud">iCloud 邮箱</option>
-            </select>
-          </label>
-        </div>
-
-        <label class="margin-t-12">
+        <label class="margin-t-16">
           邮箱地址
-          <input name="username" type="email" autocomplete="off" maxlength="254" placeholder="name@qq.com" required />
+          <input name="username" type="email" autocomplete="off" maxlength="254" placeholder="name@163.com" required />
+          <small id="account-provider-note" aria-live="polite">支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud。</small>
         </label>
-
-        <div class="form-grid margin-t-12">
-          <label>
-            IMAP 主机
-            <select name="host" id="host"></select>
-          </label>
-          <label>
-            TLS 端口
-            <input name="port" type="number" min="1" max="65535" step="1" value="993" required />
-          </label>
-        </div>
-
-        <label class="margin-t-12">
-          邮箱连接方式
-          <select id="account-network-policy"></select>
-          <small>跟随全局、强制直连或指定代理；代理失败不自动直连。代理配置在“网络与代理”管理。</small>
-        </label>
-
-        <label class="margin-t-12">
-          同步文件夹（可选）
-          <textarea name="folders" rows="2" maxlength="32768" placeholder="留空读取全部文件夹；指定时每行一个"></textarea>
-          <small>默认留空，同步收件箱、已发送、归档等所有可用文件夹。</small>
-        </label>
-
-        <label class="margin-t-12">
-          授权方式
-          <select id="credential-mode">
-            <option value="keep" hidden>保留当前授权（无需重新输入）</option>
-            <option value="password" selected>输入授权码 / 应用专用密码</option>
-            <option value="external">使用外部 secret 文件</option>
-          </select>
-        </label>
-
-        <div id="external-option" hidden class="margin-t-10">
-          <label>
-            secret 文件名
-            <input name="secret_file" type="text" maxlength="128" placeholder="qq_password" />
-            <small>挂载于 secret_dir 目录下的文件名称。</small>
-          </label>
-        </div>
 
         <label id="password-label" class="margin-t-12">
           授权码 / 应用专用密码
           <input name="password" type="password" autocomplete="new-password" maxlength="4096" />
           <small id="account-password-hint">保存后加密存储，不会明文回显；切勿填写邮箱网页登录密码。</small>
         </label>
+
+        <label class="margin-t-12">
+          显示名称
+          <input name="name" type="text" placeholder="根据邮箱地址自动生成" maxlength="80" required />
+          <small>自动生成，可修改。</small>
+        </label>
+
+        <details id="account-advanced" class="margin-t-12">
+          <summary>高级设置 <span id="account-advanced-summary" class="muted small"></span></summary>
+          <div class="form-grid margin-t-12">
+            <label>
+              邮箱服务商
+              <select name="provider" id="provider">
+                <option value="qq">QQ 邮箱</option>
+                <option value="netease">网易邮箱 (163/126/yeah)</option>
+                <option value="icloud">iCloud 邮箱</option>
+              </select>
+            </label>
+            <label>
+              IMAP 主机
+              <select name="host" id="host"></select>
+            </label>
+          </div>
+
+          <label class="margin-t-12">
+            TLS 端口
+            <input name="port" type="number" min="1" max="65535" step="1" value="993" required />
+          </label>
+
+          <label class="margin-t-12">
+            邮箱连接方式
+            <select id="account-network-policy"></select>
+            <small>跟随全局、强制直连或指定代理；代理失败不自动直连。代理配置在“网络与代理”管理。</small>
+          </label>
+
+          <label class="margin-t-12">
+            同步文件夹（可选）
+            <textarea name="folders" rows="2" maxlength="32768" placeholder="留空读取全部文件夹；指定时每行一个"></textarea>
+            <small>默认留空，同步收件箱、已发送、归档等所有可用文件夹。</small>
+          </label>
+
+          <label class="margin-t-12">
+            授权方式
+            <select id="credential-mode">
+              <option value="keep" hidden>保留当前授权（无需重新输入）</option>
+              <option value="password" selected>输入授权码 / 应用专用密码</option>
+              <option value="external">使用外部 secret 文件</option>
+            </select>
+          </label>
+
+          <div id="external-option" hidden class="margin-t-10">
+            <label>
+              secret 文件名
+              <input name="secret_file" type="text" maxlength="128" placeholder="qq_password" />
+              <small>挂载于 secret_dir 目录下的文件名称。</small>
+            </label>
+          </div>
+        </details>
 
         <p id="account-error" class="form-error" role="alert"></p>
 

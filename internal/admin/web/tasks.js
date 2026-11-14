@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  let tasks = [], policy = null, editing = null, selectedTask = "", telegram = null, timer = null, rules = [];
+  let tasks = [], policy = null, editing = null, selectedTask = "", telegram = null, timer = null, rules = [], readiness = {};
   let detailMode = null, detailSeq = 0, preview = null, previewSeq = 0, previewAbort = null;
   const active = (s) => ["queued", "running", "awaiting_ai"].includes(s);
   const labels = {
@@ -37,6 +37,42 @@
   const triggers = { manual: "仅手动", internal: "内置定时", external: "外部 MCP", monitor: "外部触发监测" };
   const policies = { inherit: "继承默认", off: "关闭", failures: "仅失败", changes: "有变更或失败", all: "每次结束" };
   const deliveries = { not_required: "无需通知", pending: "待发送", retry: "重试中", sending: "投递中", sent: "已发送", failed: "投递失败", suppressed: "已停止投递" };
+  const ruleName = (id) => rules.find((r) => r.id === id)?.name || id;
+  const issueText = {
+    source_not_authorized: (i) => `源目录「${folderLabel(i.target)}」不在整理授权的源目录中`,
+    ai_engine_internal: () => "外部 AI 判断不能使用内置定时",
+    ai_engine_agent: () => "内置 Agent 不能使用外部 AI 判断",
+    internal_not_allowed: () => "整理授权未允许内置定时",
+    execute_not_allowed: () => "整理授权为“只观察”，任务不能写入原邮箱",
+    policy_disabled: () => "整理授权未开启“允许任务领取邮件”",
+    policy_expired: () => "整理授权已到期",
+    policy_admin_changed: () => "管理员账号变更后，整理授权需要重新保存",
+    source_not_synced: (i) => `源目录「${folderLabel(i.target)}」不在该邮箱的同步文件夹中`,
+    rules_changed: () => "绑定的规则已修改、停用或有更高优先级规则加入，请编辑任务重新确认规则",
+    writes_disabled: () => "未打开“允许整理原邮箱”写入开关",
+    action_not_allowed: (i) => `规则「${ruleName(i.target)}」的动作未在整理授权中允许`,
+    destination_not_allowed: (i) => `规则「${ruleName(i.target)}」的目标目录未在整理授权中允许`,
+    archive_folder_missing: (i) => `规则「${ruleName(i.target)}」需要归档文件夹，但尚未配置`,
+    trash_folder_missing: (i) => `规则「${ruleName(i.target)}」需要回收站，但尚未配置`,
+    task_paused: () => "任务已暂停，启用后才会按计划运行",
+  };
+  const fixLabels = { policy: "打开整理授权", folders: "打开文件夹映射", account: "编辑邮箱", rules: "编辑任务", task: "编辑任务" };
+  // The latest run in plain words. Only server counts are used; a state that
+  // cannot be broken down is said to be unknown rather than guessed.
+  function lastResult(run) {
+    if (!run) return ["尚未运行", ""];
+    if (active(run.state) || !run.finalized) return ["运行中", runPhase(run)];
+    if (run.state === "failed" || run.state === "interrupted" || run.failed > 0)
+      return ["执行失败", `${run.failed ? `${run.failed} 封写入失败` : "本轮未完成"}${run.error_code ? ` · ${run.error_code}` : ""}`];
+    if (run.unknown > 0 || run.state === "needs_verification") return ["写入待核验", `${run.unknown} 封结果尚未确认，不算成功也不算失败`];
+    if (run.completed > 0) return ["已整理", `${run.completed} 封已核验整理${run.protected ? `，${run.protected} 封保护跳过` : ""}`];
+    if (run.mode === "observe" && run.claimed > 0) return ["观察完成", `${run.claimed} 封命中，只记录不移动`];
+    if (run.protected > 0 && run.claimed === 0) return ["保护跳过", `${run.protected} 封因未读、星标或保护联系人跳过`];
+    if (run.needs_ai > 0) return ["需外部 AI", `${run.needs_ai} 封需要外部 AI 判断，已保留原位`];
+    if (run.kept > 0) return ["保留原位", `${run.kept} 封按规则保留`];
+    if (run.state === "noop" && run.claimed === 0) return ["没有可处理的邮件", `扫描 ${run.scanned} 封，没有命中规则的可处理邮件`];
+    return [labels[run.state] || "结果未知", "服务器没有提供可细分的原因"];
+  }
   const wrap = (fn) => async (e) => {
     if (shouldPreventDefault(e)) e.preventDefault();
     try {
@@ -85,7 +121,7 @@
     $('#task-engine option[value="ai"]').disabled = internal;
     if (internal) $("#task-engine").value = "rules";
     $("#task-trigger-note").textContent = internal
-      ? "服务器按时执行固定规则，不启动 AI；需要先在整理规则中允许内置定时。"
+      ? "服务器按时执行固定规则，不启动 AI；需要先在上方“整理设置 → 整理授权”中允许内置定时。"
       : external
       ? "请在实际支持 MCP 的客户端创建周期任务。本项目保存配置后等待调用，不会替你建立外部日程。"
       : "保存后不自动运行。外部 AI 判断需要从挂载 MCP 的客户端发起，网页支持预览。";
@@ -93,6 +129,21 @@
       $("#task-engine").value !== "rules" ||
       !rules.some((r) => r.enabled && r.action === "ai" && r.source_folders.some((f) => checked().includes(f)));
     renderTaskRuleOptions();
+  }
+
+  function resultHTML(t) {
+    const run = readiness[t.id]?.last_run;
+    const [title, detail] = lastResult(run);
+    return `<p class="task-last-result"><strong>最近结果：${esc(title)}</strong>${detail ? ` · <span class="muted">${esc(detail)}</span>` : ""}${run ? ` · <span class="muted small">${esc(date(run.created_at))}</span> <button type="button" class="text-button" data-task-command="history" data-task-id="${esc(t.id)}">运行记录</button>${run.unknown || run.failed ? ' <button type="button" class="text-button" data-quick-nav="organizer">核验记录</button>' : ""}` : ""}</p>`;
+  }
+  function issuesHTML(t) {
+    const r = readiness[t.id];
+    if (!r) return '<p class="muted small">运行条件：未能读取</p>';
+    const blocking = r.issues.filter((i) => i.blocking), notes = r.issues.filter((i) => !i.blocking);
+    if (!blocking.length) return `<p class="task-ready small">✔ 运行条件已满足${notes.length ? `（${esc(notes.map((i) => (issueText[i.code] || (() => i.code))(i)).join("；"))}）` : ""}</p>`;
+    return `<div class="task-blockers" role="note"><strong>不能按当前配置运行：</strong><ul>${blocking
+      .map((i) => `<li>${esc((issueText[i.code] || (() => `未知原因`))(i))} <span class="muted small">（${esc(i.code)}）</span> <button type="button" class="text-button" data-task-fix="${esc(i.area)}" data-task-id="${esc(t.id)}">${fixLabels[i.area] || "查看"}</button></li>`)
+      .join("")}</ul></div>`;
   }
 
   function renderTasks() {
@@ -115,14 +166,16 @@
                     ${t.trigger_mode === "internal" ? `<span class="small muted">下次运行</span><strong>${t.enabled && t.next_run_at ? esc(date(t.next_run_at)) : "暂停中"}</strong>` : t.trigger_mode === "external" ? `<span class="small muted">最近触发</span><strong>${t.last_triggered ? esc(date(t.last_triggered)) : "等待外部调用"}</strong>` : '<span class="muted">按需手动运行</span>'}
                   </div>
                 </div>
-                <p class="muted small"><span class="task-last-result">最近结果：${labels[t.last_state] || "尚未运行"}</span> · 通知：${policies[t.notify]}${t.trigger_mode === "external" ? " · 客户端日程需在外部建立" : ""}</p>
+                ${resultHTML(t)}
+                <p class="muted small">通知：${policies[t.notify]}${t.trigger_mode === "external" ? " · 客户端日程需在外部建立" : ""}</p>
+                ${issuesHTML(t)}
                 <div class="organizer-inline">
                   ${[["preview", "预览影响"], ["edit", "编辑"], ["toggle", t.enabled ? "暂停" : "启用"], ["run", "手动运行"], ["history", "运行记录"], ["detail", t.trigger_mode === "external" || t.engine === "ai" ? "外部调用说明" : "配置详情"]].map(([cmd, text]) => `<button type="button" class="secondary" data-task-command="${cmd}" data-task-id="${esc(t.id)}" ${cmd === "run" && t.engine === "ai" ? 'disabled title="请从外部 MCP 客户端运行 AI 任务"' : ""}>${text}</button>`).join("")}
                 </div>
               </article>`,
           )
           .join("")
-      : '<article class="panel organizer-card"><h2>选择适合你的触发方式</h2><p class="muted">先在“整理规则”配置规则与授权，再创建任务。固定条件可选内置定时，内容理解可交给外部 AI。</p></article>';
+      : '<article class="panel organizer-card"><h2>选择适合你的触发方式</h2><p class="muted">先在上方建立规则，并在“整理设置”中配置授权，再创建任务。固定条件可选内置定时，内容理解可交给外部 AI。</p></article>';
   }
 
   async function loadAccount() {
@@ -136,11 +189,14 @@
       $("#tasks-policy-note").textContent = "请先添加邮箱并配置任务整理授权。";
       return;
     }
-    [tasks, policy, rules] = await Promise.all([
+    let ready;
+    [tasks, policy, rules, ready] = await Promise.all([
       api(`/api/tasks?account_id=${encodeURIComponent(key)}`),
       api(`/api/automation/policy/${encodeURIComponent(key)}`),
       api(`/api/rules?account_id=${encodeURIComponent(key)}`),
+      api(`/api/tasks/readiness?account_id=${encodeURIComponent(key)}`).catch(() => []),
     ]);
+    readiness = Object.fromEntries(ready.map((r) => [r.task_id, r]));
     $("#tasks-policy-note").textContent = `整理授权${policy.enabled ? "已启用" : "未启用"} · ${policy.mode === "observe" ? "观察上限" : "允许执行"} · 每批最多 ${policy.max_batch} 封 · 内置定时${policy.allow_internal ? "已允许" : "未允许"}`;
     renderTasks();
     if (!tasks.some((t) => t.id === selectedTask)) selectedTask = tasks[0]?.id || "";
@@ -175,31 +231,30 @@
     }
     const runs = await api(`/api/tasks/${encodeURIComponent(t.id)}/runs`);
     t.last_state = runs[0]?.state || "";
+    if (readiness[t.id] && runs[0]) readiness[t.id].last_run = runs[0];
     const card = $(`[data-task-card="${t.id}"]`);
-    if (card) {
-      const res = $(".task-last-result", card);
-      if (res) res.textContent = `最近结果：${labels[t.last_state] || "尚未运行"}`;
-    }
+    const res = card && $(".task-last-result", card);
+    if (res) res.outerHTML = resultHTML(t);
     renderDetails(
       $("#task-runs-list"),
       runs.length
         ? runs
             .map(
               (r) =>
-                `<details class="organizer-item" data-key="${esc(r.id)}" ${active(r.state) ? "open" : ""}><summary>${esc(date(r.created_at))} · ${labels[r.state] || esc(r.state)} · ${triggers[r.source] || esc(r.source)}</summary><div class="task-counts"><span>扫描 <strong>${r.scanned}</strong></span><span>领取 <strong>${r.claimed}</strong></span><span>已核验整理 <strong>${r.completed}</strong></span><span>保留 / 保护 <strong>${r.kept + r.protected}</strong></span><span>失败 <strong>${r.failed}</strong></span><span>排队 <strong>${r.queued || 0}</strong></span><span>执行中 <strong>${r.running || 0}</strong></span><span>待核验 <strong>${r.unknown}</strong></span></div><p class="muted small">${esc(runPhase(r))}${r.progress_at ? ` · 最近进度 ${esc(date(r.progress_at))}` : ""} · ${active(r.state) || !r.finalized ? "已用" : "耗时"} ${esc(elapsed(r))}</p>${r.mode === "observe" ? '<p class="muted">观察模式，本轮不移动邮件。</p>' : ""}${r.needs_ai ? `<p class="task-warning">${r.needs_ai} 封需要外部 AI 判断，已保留原位。</p>` : ""}${r.flag_warnings ? `<p class="task-warning">${r.flag_warnings} 封已移动完成，但附加的标记修改未应用或未确认（不算失败）。请到“整理与 MCP”的整理任务中查看原因，在邮箱中核对并按需手动修改。</p>` : ""}${r.has_more ? `<p class="muted">仍有候选，可继续处理。</p><button type="button" class="secondary" data-task-continue="${esc(r.id)}">继续处理本任务</button>` : ""}${r.error_code ? `<p class="form-error">${esc(r.error_code)}</p>` : ""}<p class="muted small">任务 v${r.task_version} · 授权 v${r.policy_version} · 通知：${deliveries[r.notification_state] || esc(r.notification_state)}${r.notification_error ? ` · ${esc(r.notification_error)}` : ""}</p><p class="muted small">运行标识：${esc(r.id)}${r.batch_id ? ` · 批次：${esc(r.batch_id)}` : ""}</p><p class="muted small">计划、实际写入和未知结果核验请到“整理与 MCP”查看；停止不等于撤销。</p>${active(r.state) ? `<button type="button" class="secondary" data-task-cancel="${esc(r.id)}">取消本轮剩余操作</button>` : ""}</details>`,
+                `<details class="organizer-item" data-key="${esc(r.id)}" ${active(r.state) ? "open" : ""}><summary>${esc(date(r.created_at))} · ${labels[r.state] || esc(r.state)} · ${triggers[r.source] || esc(r.source)}</summary><div class="task-counts"><span>扫描 <strong>${r.scanned}</strong></span><span>领取 <strong>${r.claimed}</strong></span><span>已核验整理 <strong>${r.completed}</strong></span><span>保留 / 保护 <strong>${r.kept + r.protected}</strong></span><span>失败 <strong>${r.failed}</strong></span><span>排队 <strong>${r.queued || 0}</strong></span><span>执行中 <strong>${r.running || 0}</strong></span><span>待核验 <strong>${r.unknown}</strong></span></div><p class="muted small">${esc(runPhase(r))}${r.progress_at ? ` · 最近进度 ${esc(date(r.progress_at))}` : ""} · ${active(r.state) || !r.finalized ? "已用" : "耗时"} ${esc(elapsed(r))}</p>${r.mode === "observe" ? '<p class="muted">观察模式，本轮不移动邮件。</p>' : ""}${r.needs_ai ? `<p class="task-warning">${r.needs_ai} 封需要外部 AI 判断，已保留原位。</p>` : ""}${r.flag_warnings ? `<p class="task-warning">${r.flag_warnings} 封已移动完成，但附加的标记修改未应用或未确认（不算失败）。请到“核验记录与 MCP”查看原因，在邮箱中核对并按需手动修改。</p>` : ""}${r.has_more ? `<p class="muted">仍有候选，可继续处理。</p><button type="button" class="secondary" data-task-continue="${esc(r.id)}">继续处理本任务</button>` : ""}${r.error_code ? `<p class="form-error">${esc(r.error_code)}</p>` : ""}<p class="muted small">任务 v${r.task_version} · 授权 v${r.policy_version} · 通知：${deliveries[r.notification_state] || esc(r.notification_state)}${r.notification_error ? ` · ${esc(r.notification_error)}` : ""}</p><p class="muted small">运行标识：${esc(r.id)}${r.batch_id ? ` · 批次：${esc(r.batch_id)}` : ""}</p><p class="muted small">计划、实际写入和未知结果核验请到“核验记录与 MCP”查看；停止不等于撤销。</p>${active(r.state) ? `<button type="button" class="secondary" data-task-cancel="${esc(r.id)}">取消本轮剩余操作</button>` : ""}</details>`,
             )
             .join("")
         : '<p class="muted">尚无运行记录。外部模式等待实际 MCP 调用。</p>',
     );
-    if (runs.some((r) => active(r.state) || !r.finalized) && state.view === "tasks") {
+    if (runs.some((r) => active(r.state) || !r.finalized) && state.view === "automation") {
       timer = setTimeout(() => {
-        if (state.view === "tasks" && state.session) loadRuns().catch(() => {});
+        if (state.view === "automation" && state.session) loadRuns().catch(() => {});
       }, 3000);
     }
   }
 
-  function openEditor(t = null) {
-    if (!policy?.source_folders?.length) throw new Error("请先在“整理规则”配置任务源目录与授权");
+  function openEditor(t = null, prefill = null) {
+    if (!policy?.source_folders?.length) throw new Error("请先在“整理设置 → 整理授权”中选择源目录并保存");
     editing = t
       ? structuredClone(t)
       : {
@@ -224,6 +279,7 @@
             weekday: 0,
             timezone: "Asia/Shanghai",
           },
+          ...(prefill || {}),
         };
     $("#task-editor-title").textContent = editing.id ? "编辑整理任务" : "新建整理任务";
     $("#save-task").textContent = editing.id ? "保存修改" : "保存为暂停观察任务";
@@ -328,7 +384,32 @@
   $("#refresh-tasks").addEventListener("click", wrap(loadAccount));
   $("#new-task").addEventListener("click", wrap(() => openEditor()));
   $("#refresh-task-runs").addEventListener("click", wrap(loadRuns));
-  $("#close-task-editor").onclick = () => $("#task-editor-dialog").close();
+  $("#close-task-editor").onclick = () => closeGuarded($("#task-editor-dialog"));
+  guardForm($("#task-editor"), "任务编辑");
+
+  // “创建任务” from a rule: same account, the rule's sources that the grant
+  // allows, and the rule bound together with every enabled rule of equal or
+  // higher priority on those sources (the server refuses to skip them).
+  window.createTaskFromRule = async (ruleID) => {
+    if (!confirmDiscard($("#task-editor-dialog"))) return;
+    if (account() !== $("#rules-account").value) {
+      $("#tasks-account").value = $("#rules-account").value;
+      await loadAccount();
+    }
+    const rule = rules.find((r) => r.id === ruleID);
+    if (!rule) throw new Error("规则已不存在，请刷新");
+    if (!rule.enabled) throw new Error("请先启用这条规则，再从它创建任务");
+    const sources = rule.source_folders.filter((f) => (policy?.source_folders || []).includes(f));
+    if (!sources.length) throw new Error("这条规则的源目录不在整理授权范围内：请先在“整理设置 → 整理授权”中允许");
+    const bound = rules.filter((r) => r.enabled && r.priority <= rule.priority && r.source_folders.some((f) => sources.includes(f)));
+    openEditor(null, {
+      name: rule.name.slice(0, 110) + " 任务",
+      source_folders: sources,
+      rule_ids: bound.map((r) => r.id),
+      rule_versions: Object.fromEntries(bound.map((r) => [r.id, r.version])),
+    });
+    $("#task-editor-error").textContent = bound.length > 1 ? `已同时绑定 ${bound.length - 1} 条同源且优先级更高的规则，保证处理顺序不变。请检查后保存。` : "请检查后保存；新任务保存为暂停的观察任务。";
+  };
   $("#task-detail-dialog").addEventListener("close", closeTaskDetail);
   $("#close-task-detail").onclick = () => {
     closeTaskDetail();
@@ -425,6 +506,14 @@
   $("#tasks-list").addEventListener(
     "click",
     wrap(async (e) => {
+      const fix = e.target.closest("[data-task-fix]");
+      if (fix) {
+        const area = fix.dataset.taskFix, t = tasks.find((x) => x.id === fix.dataset.taskId);
+        if (area === "policy" || area === "folders") window.openAutomationSettings?.(area);
+        else if (area === "account") openAccount(state.accounts.find((a) => a.id === t?.account_id));
+        else if (t) openEditor(t);
+        return;
+      }
       const b = e.target.closest("[data-task-command]");
       if (!b) return;
       const t = tasks.find((t) => t.id === b.dataset.taskId);
@@ -750,7 +839,29 @@
     }),
   );
 
+  function renderOverview() {
+    const i = window.tgInteraction?.();
+    const rows = [];
+    const row = (ok, text, todo = "") => rows.push(`<li><span class="${ok ? "ok" : "no"}">${ok ? "✔" : "○"}</span><span>${esc(text)}</span>${todo ? `<span class="muted small">${esc(todo)}</span>` : ""}</li>`);
+    if (telegram) {
+      row(telegram.configured, telegram.configured ? "Bot Token 已保存" : "Bot Token 未保存", telegram.configured ? "" : "在下方填写 Bot Token 并保存");
+      row(telegram.enabled, telegram.enabled ? `任务通知已开启 · ${policies[telegram.policy]}` : "任务通知未开启", telegram.enabled && !telegram.chat_id ? "需要填写接收通知的 Chat ID" : "");
+      if (telegram.chat_id) row(true, `通知发往 ${telegram.chat_id}`);
+    }
+    if (i) {
+      row(i.enabled && i.state === "online", i.enabled ? `私聊交互：${{ online: "在线", starting: "启动中", conflict: "冲突", error: "异常", off: "已关闭" }[i.state] || i.state}` : "私聊交互未开启", i.error_code ? `需要处理：${i.error_code}` : i.enabled && !i.credential_ready ? "需要先保存有效的 Bot Token" : "");
+      row(!!i.binding, i.binding ? `已绑定私聊（用户 ${i.binding.user_id}）` : "尚未绑定私聊", i.enabled && !i.binding ? "生成绑定码后在 Telegram 私聊 Bot 发送" : "");
+    }
+    $("#tg-overview").innerHTML = `<ul class="agent-status-list">${rows.join("")}</ul>`;
+  }
+  window.renderTgOverview = renderOverview;
+
   function renderTelegram() {
+    renderOverview();
+    if (isDirty($("#telegram-form"))) {
+      $("#telegram-status").textContent = "有未保存的修改；刷新没有覆盖你的编辑。";
+      return;
+    }
     $("#telegram-enabled").checked = telegram.enabled;
     $("#telegram-chat").value = telegram.chat_id;
     $("#telegram-policy").value = telegram.policy;
@@ -778,15 +889,18 @@
   }
 
   window.loadNotifications = async () => {
-    telegram = await api("/api/notifications/telegram");
+    const [t] = await Promise.all([api("/api/notifications/telegram"), window.loadInteraction?.()]);
+    telegram = t;
     renderTelegram();
     await loadDeliveries();
   };
+  guardForm($("#telegram-form"), "Telegram 设置");
 
   $("#telegram-form").addEventListener(
     "submit",
     wrap(async (e) => {
-      await busy($('button[type="submit"]', e.currentTarget), "保存中…", async () => {
+      const form = e.currentTarget, gen = draftGen(form);
+      await busy($('button[type="submit"]', form), "保存中…", async () => {
         telegram = await request("/api/notifications/telegram", "PUT", {
           version: telegram.version,
           enabled: $("#telegram-enabled").checked,
@@ -796,9 +910,11 @@
           bot_token: $("#telegram-token").value.trim(),
           clear_token: $("#telegram-clear").checked,
         });
+        // A late response must not wipe edits made while it was in flight.
+        const clean = settleDraft(form, gen);
         renderTelegram();
         await loadDeliveries();
-        notify("通知设置已保存；尚未发送测试消息");
+        notify(clean ? "设置已保存；尚未发送测试消息" : "设置已保存；保存期间的新修改尚未保存");
       });
     }),
   );

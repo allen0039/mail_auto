@@ -30,7 +30,7 @@
       line(configured, "模型配置完成", configured ? provider.model : ""),
       line(caps.tool_loop === "ok", "模型检测通过（含工具调用）", caps.tool_loop && caps.tool_loop !== "ok" ? caps.tool_loop : caps.tool_loop_at ? `检测于 ${time(caps.tool_loop_at)}` : "未检测"),
       line(!!provider?.enabled, "Agent 已启用"),
-      line(!!interaction?.credential_ready, "TG 凭据有效（来自 TG 通知设置）"),
+      line(!!interaction?.credential_ready, "TG 凭据有效（来自 Telegram 页面）"),
       line(interaction?.state === "online", "轮询在线", stateLabels[interaction?.state] || interaction?.state || ""),
       line(!!interaction?.binding, "已绑定私聊", interaction?.binding ? `用户 ${interaction.binding.user_id}` : ""),
       line(write, "拥有写入相关授权", grantOK ? grant.actions.map((a) => actionLabels[a] || a).join("、") : "未授权或已过期"),
@@ -388,6 +388,15 @@
     $("#agent-records").innerHTML = `<p class="muted small">排队轮次：${out.queued}</p><h3>轮次</h3>${turns || '<p class="muted">暂无记录。</p>'}<h3>确认方案</h3>${props || '<p class="muted">暂无。</p>'}<h3>关联任务运行</h3>${links || '<p class="muted">暂无。</p>'}`;
   }
 
+  // The private-chat card lives on the Telegram page; it shares this state.
+  window.tgInteraction = () => interaction;
+  window.loadInteraction = async () => {
+    interaction = await api("/api/telegram/interaction");
+    renderInteraction();
+    if (provider) renderCapabilities();
+    window.renderTgOverview?.();
+  };
+
   window.loadAgent = async () => {
     const [, g, i, accs] = await Promise.all([loadConnections(true), api("/api/agent/grant"), api("/api/telegram/interaction"), api("/api/accounts")]);
     grant = g.grant;
@@ -465,7 +474,8 @@
     await busy($("#agent-telegram-toggle"), "处理中…", async () => {
       interaction = await request("/api/telegram/interaction", "PUT", { version: interaction.version, enabled: !interaction.enabled });
       renderInteraction();
-      renderCapabilities();
+      if (provider) renderCapabilities();
+      window.renderTgOverview?.();
       notify(interaction.enabled ? "交互已开启：此前积压的消息不会触发管理动作" : "交互已关闭：未开始的 Agent 工作已取消");
     });
   }));
@@ -480,7 +490,7 @@
     await request("/api/telegram/unbind", "POST", {});
     $("#agent-bind-output").textContent = "";
     notify("已解除绑定");
-    await window.loadAgent();
+    await window.loadInteraction();
   }));
 
   $("#agent-refresh").addEventListener("click", wrap(loadRecords));

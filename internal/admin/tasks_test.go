@@ -47,6 +47,23 @@ func TestTasksAndNotificationsHTTPBoundary(t *testing.T) {
 	if w = b.request("POST", "/api/tasks/"+task.ID+"/preview", "{}", true); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	// Readiness is a GET under /api/tasks/ but is not a task ID: it must
+	// route to the read-only report and write nothing.
+	var runs, audits int
+	_ = auth.Store.DB.QueryRow("SELECT (SELECT count(*) FROM task_runs),(SELECT count(*) FROM audits)").Scan(&runs, &audits)
+	w = b.request("GET", "/api/tasks/readiness?account_id="+a.ID, "", false)
+	var ready []mail.TaskReadiness
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &ready) != nil || len(ready) != 1 || ready[0].TaskID != task.ID || ready[0].Ready || ready[0].Issues[0].Code != "policy_disabled" {
+		t.Fatal("readiness", w.Code, w.Body.String())
+	}
+	var runs2, audits2 int
+	_ = auth.Store.DB.QueryRow("SELECT (SELECT count(*) FROM task_runs),(SELECT count(*) FROM audits)").Scan(&runs2, &audits2)
+	if runs2 != runs || audits2 != audits {
+		t.Fatal("readiness wrote state", runs, runs2, audits, audits2)
+	}
+	if w = b.request("POST", "/api/tasks/readiness?account_id="+a.ID, "{}", true); w.Code == 200 {
+		t.Fatal("readiness accepted a write method")
+	}
 	if w = b.request("PUT", "/api/notifications/telegram", `{"version":0,"enabled":false,"chat_id":"123456789","policy":"failures","bot_token":"123456789:abcdefghijklmnopqrstuvwxyz0123456789"}`, false); w.Code != 403 {
 		t.Fatal(w.Code)
 	}

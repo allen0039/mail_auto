@@ -24,7 +24,7 @@
     proxy_socks5_failed: "SOCKS5 隧道失败，请核对认证、目标解析和代理出口",
     proxy_tls_failed: "代理证书校验失败，请核对代理地址与证书",
     target_tls_failed: "目标 TLS 校验或握手失败，请检查出口和目标证书",
-    telegram_credential_missing: "请先在 TG 通知保存 Bot Token",
+    telegram_credential_missing: "请先在 Telegram 页面保存 Bot Token",
     provider_destination_blocked: "模型地址解析到非公网目标，连接被拒绝",
     network_timeout: "网络连接超时",
     network_connection_failed: "连接失败，请检查网络及 DNS",

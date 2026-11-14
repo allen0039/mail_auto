@@ -2277,3 +2277,80 @@ dialog::backdrop {
 .model-picker button { flex: 0 0 auto; }
 #model-advanced summary { cursor: pointer; }
 .plain-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+
+/* 0.8.0: automation hub, task readiness, Telegram overview, mailbox dialog */
+.auto-summary-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 16px;
+  margin: 12px 0 0;
+}
+.auto-summary-list div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+.auto-summary-list dt {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.auto-summary-list dd {
+  margin: 2px 0 0;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+.auto-summary-list .is-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-bg);
+}
+.auto-summary-list .is-warning dd {
+  color: var(--warning-text);
+}
+.auto-settings > summary,
+.auto-external > summary,
+#account-advanced > summary,
+.help-details > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.auto-settings-body {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+}
+.auto-external > summary {
+  font-size: 16px;
+}
+.task-blockers {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+.task-blockers ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.task-blockers li {
+  overflow-wrap: anywhere;
+}
+.task-ready {
+  color: var(--success-text);
+}
+.task-last-result {
+  margin: 8px 0 4px;
+  overflow-wrap: anywhere;
+}
+.help-details > summary {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.account-card.just-saved,
+[data-account].just-saved {
+  outline: 2px solid var(--primary-border);
+  outline-offset: 2px;
+}
