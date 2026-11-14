@@ -76,6 +76,9 @@ const (
 	CodeToolUnsupported = "tool_call_unsupported"
 	CodeEmpty           = "provider_empty_response"
 	CodeConfig          = "provider_config_invalid"
+	// CodeModelsUnsupported means the endpoint offers no usable model list;
+	// the model name can still be entered manually.
+	CodeModelsUnsupported = "provider_models_unsupported"
 )
 
 // Error is a classified provider failure.

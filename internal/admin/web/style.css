@@ -2255,3 +2255,24 @@ dialog::backdrop {
   border-radius: 8px;
   overflow-wrap: anywhere;
 }
+
+/* Model connections */
+.model-current {
+  padding: 8px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.model-current.is-active {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+.model-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.model-picker input { flex: 1 1 auto; min-width: 0; }
+.model-picker button { flex: 0 0 auto; }
+#model-advanced summary { cursor: pointer; }

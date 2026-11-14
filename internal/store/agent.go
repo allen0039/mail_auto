@@ -70,6 +70,36 @@ UPDATE telegram_reply_outbox SET state='suppressed',error_code='schema_upgrade' 
 	return e
 }
 
+// LegacyConnection marks a schema 12 provider whose configuration still has
+// to be copied into a saved connection. The copy needs the vault (each
+// secret is encrypted for its own record), so the agent runtime completes it
+// at startup before the admin server listens.
+const LegacyConnection = "legacy:pending"
+
+// migrateAgentConnections adds the schema 13 saved model connections. The
+// current provider row stays the only configuration the runtime reads; its
+// version, enabled state and capabilities are untouched, so running state and
+// frozen proposals survive the upgrade. No mail index is rebuilt.
+func migrateAgentConnections(tx *sql.Tx, current int) error {
+	if _, e := tx.Exec(`CREATE TABLE IF NOT EXISTS agent_provider_connections(id TEXT PRIMARY KEY,version INTEGER NOT NULL,name TEXT NOT NULL,config TEXT NOT NULL,secret BLOB NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`); e != nil {
+		return e
+	}
+	var n int
+	if e := tx.QueryRow("SELECT count(*) FROM pragma_table_info('agent_provider_settings') WHERE name='connection_id'").Scan(&n); e != nil {
+		return e
+	}
+	if n == 0 {
+		if _, e := tx.Exec("ALTER TABLE agent_provider_settings ADD COLUMN connection_id TEXT NOT NULL DEFAULT ''"); e != nil {
+			return e
+		}
+	}
+	if current >= 13 {
+		return nil
+	}
+	_, e := tx.Exec("UPDATE agent_provider_settings SET connection_id=? WHERE id=1 AND connection_id=''", LegacyConnection)
+	return e
+}
+
 // cleanupAgent applies the agent/Telegram retention: conversation and reply
 // payloads after 7 days, idempotency and minimal records after 60 days. It
 // only touches terminal records; pending proposals, queued or running turns,

@@ -43,6 +43,8 @@ type Runtime struct {
 	Mail        *mail.Service
 	Tools       *mailtools.Registry
 	NewProvider func(modelprovider.Settings) (modelprovider.Provider, error)
+	// ModelLister replaces the HTTP model list in tests.
+	ModelLister func(ctx context.Context, baseURL, key string) ([]string, error)
 	Limits      Limits
 
 	settingsMu sync.Mutex

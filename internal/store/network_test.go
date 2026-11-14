@@ -24,7 +24,7 @@ PRAGMA user_version=11;`)
 	defer database.Close()
 	var version, count int
 	database.DB.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 12 {
+	if version != SchemaVersion {
 		t.Fatal(version)
 	}
 	for _, table := range []string{"accounts", "mailboxes", "messages"} {

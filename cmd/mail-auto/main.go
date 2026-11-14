@@ -135,6 +135,11 @@ func run(args []string) error {
 	// The agent and Telegram workers start idle: nothing polls, calls a model
 	// or writes until an administrator enables and binds them.
 	runtime := agent.New(st, vault, service)
+	// Completes the schema 13 model-connection upgrade (needs the vault) and
+	// verifies it before anything is served.
+	if e = runtime.MigrateConnections(); e != nil {
+		return e
+	}
 	interactive := telegram.New(st, vault, service, runtime)
 	runtime.Start(ctx)
 	interactive.Start(ctx)

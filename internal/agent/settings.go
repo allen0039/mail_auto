@@ -32,6 +32,7 @@ type ProviderSettings struct {
 	TimeoutSeconds int          `json:"timeout_seconds"`
 	MaxTokensParam string       `json:"max_tokens_param"`
 	KeyConfigured  bool         `json:"key_configured"`
+	ConnectionID   string       `json:"connection_id"`
 	Capabilities   Capabilities `json:"capabilities"`
 	UpdatedAt      int64        `json:"updated_at"`
 }
@@ -67,14 +68,15 @@ type providerConfig struct {
 }
 
 type storedProvider struct {
-	version    int
-	enabled    bool
-	instanceID string
-	cfg        providerConfig
-	secret     []byte
-	keyGen     int
-	caps       Capabilities
-	updated    int64
+	version      int
+	enabled      bool
+	instanceID   string
+	connectionID string
+	cfg          providerConfig
+	secret       []byte
+	keyGen       int
+	caps         Capabilities
+	updated      int64
 }
 
 var errNotAdmin = mail.ErrDenied
@@ -87,10 +89,16 @@ func (r *Runtime) requireAdmin(a mail.Access) error {
 	return nil
 }
 
-func (r *Runtime) loadProvider() (storedProvider, error) {
+type queryer interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func (r *Runtime) loadProvider() (storedProvider, error) { return loadProviderQ(r.Store.DB) }
+
+func loadProviderQ(q queryer) (storedProvider, error) {
 	var p storedProvider
 	var cfg, caps string
-	err := r.Store.DB.QueryRow("SELECT version,enabled,instance_id,config,secret,key_generation,capabilities,updated_at FROM agent_provider_settings WHERE id=1").Scan(&p.version, &p.enabled, &p.instanceID, &cfg, &p.secret, &p.keyGen, &caps, &p.updated)
+	err := q.QueryRow("SELECT version,enabled,instance_id,connection_id,config,secret,key_generation,capabilities,updated_at FROM agent_provider_settings WHERE id=1").Scan(&p.version, &p.enabled, &p.instanceID, &p.connectionID, &cfg, &p.secret, &p.keyGen, &caps, &p.updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storedProvider{cfg: providerConfig{APIType: "chat_completions", TimeoutSeconds: 60}}, nil
 	}
@@ -124,7 +132,42 @@ func (p storedProvider) view() ProviderSettings {
 	if !caps.Current {
 		caps = Capabilities{}
 	}
-	return ProviderSettings{Version: p.version, Enabled: p.enabled, APIType: p.cfg.APIType, BaseURL: p.cfg.BaseURL, Endpoint: endpoint, Model: p.cfg.Model, TimeoutSeconds: p.cfg.TimeoutSeconds, MaxTokensParam: p.cfg.MaxTokensParam, KeyConfigured: len(p.secret) > 0, Capabilities: caps, UpdatedAt: p.updated}
+	return ProviderSettings{Version: p.version, Enabled: p.enabled, APIType: p.cfg.APIType, BaseURL: p.cfg.BaseURL, Endpoint: endpoint, Model: p.cfg.Model, TimeoutSeconds: p.cfg.TimeoutSeconds, MaxTokensParam: p.cfg.MaxTokensParam, KeyConfigured: len(p.secret) > 0, ConnectionID: p.publicConnectionID(), Capabilities: caps, UpdatedAt: p.updated}
+}
+
+func (p storedProvider) publicConnectionID() string {
+	if p.connectionID == store.LegacyConnection {
+		return ""
+	}
+	return p.connectionID
+}
+
+// normalizeConfig validates the shared provider fields. An empty base URL is
+// allowed here; callers that need one check it.
+func normalizeConfig(baseURL, model string, timeout int, maxParam string) (providerConfig, error) {
+	if timeout == 0 {
+		timeout = 60
+	}
+	model = strings.TrimSpace(model)
+	if timeout < 10 || timeout > 120 || len(model) > 200 || strings.ContainsAny(model, "\r\n\x00") {
+		return providerConfig{}, mail.ErrInput
+	}
+	if maxParam != "" && maxParam != "max_tokens" && maxParam != "max_completion_tokens" {
+		return providerConfig{}, mail.ErrInput
+	}
+	base := strings.TrimSpace(baseURL)
+	if base != "" {
+		normalized, _, err := modelprovider.NormalizeBaseURL(base)
+		if err != nil {
+			return providerConfig{}, mail.ErrInput
+		}
+		base = normalized
+	}
+	return providerConfig{APIType: "chat_completions", BaseURL: base, Model: model, TimeoutSeconds: timeout, MaxTokensParam: maxParam}, nil
+}
+
+func validKey(key string) bool {
+	return len(key) <= 4096 && !strings.ContainsAny(key, " \r\n\t\x00")
 }
 
 // ready reports whether the provider may serve the write-capable agent:
@@ -156,34 +199,24 @@ func (r *Runtime) SaveProvider(a mail.Access, in ProviderInput) (ProviderSetting
 		return old.view(), mail.ErrConflict
 	}
 	in.APIKey = strings.TrimSpace(in.APIKey)
-	if in.TimeoutSeconds == 0 {
-		in.TimeoutSeconds = 60
-	}
-	if in.TimeoutSeconds < 10 || in.TimeoutSeconds > 120 || (in.APIKey != "" && in.ClearKey) || len(in.APIKey) > 4096 || strings.ContainsAny(in.APIKey, " \r\n\t\x00") {
+	cfg, err := normalizeConfig(in.BaseURL, in.Model, in.TimeoutSeconds, in.MaxTokensParam)
+	if err != nil || (in.APIKey != "" && in.ClearKey) || !validKey(in.APIKey) {
 		return old.view(), mail.ErrInput
 	}
-	if in.MaxTokensParam != "" && in.MaxTokensParam != "max_tokens" && in.MaxTokensParam != "max_completion_tokens" {
-		return old.view(), mail.ErrInput
-	}
-	in.Model = strings.TrimSpace(in.Model)
-	if len(in.Model) > 200 || strings.ContainsAny(in.Model, "\r\n\x00") {
-		return old.view(), mail.ErrInput
-	}
-	base := strings.TrimSpace(in.BaseURL)
-	if base != "" {
-		normalized, _, err := modelprovider.NormalizeBaseURL(base)
-		if err != nil {
-			return old.view(), mail.ErrInput
-		}
-		base = normalized
-	}
+	base := cfg.BaseURL
+	in.Model = cfg.Model
 	next := old
 	if next.instanceID == "" {
 		next.instanceID = credentials.Random(12)
 	}
 	next.version = old.version + 1
 	next.enabled = in.Enabled
-	next.cfg = providerConfig{APIType: "chat_completions", BaseURL: base, Model: in.Model, TimeoutSeconds: in.TimeoutSeconds, MaxTokensParam: in.MaxTokensParam}
+	next.cfg = cfg
+	if next.cfg != old.cfg || in.ClearKey || in.APIKey != "" {
+		// Edited outside a saved connection: the current configuration no
+		// longer matches the connection it was applied from.
+		next.connectionID = ""
+	}
 	if in.ClearKey {
 		next.secret = []byte{}
 		next.keyGen++
@@ -208,41 +241,12 @@ func (r *Runtime) SaveProvider(a mail.Access, in ProviderInput) (ProviderSetting
 		return old.view(), ErrToolLoopUnverified
 	}
 	next.updated = time.Now().Unix()
-	cfg, _ := json.Marshal(next.cfg)
-	caps, _ := json.Marshal(map[string]any{"digest": next.caps.Digest, "chat": next.caps.Chat, "chat_at": next.caps.ChatAt, "tool_loop": next.caps.ToolLoop, "tool_loop_at": next.caps.ToolAt})
 	tx, err := r.Store.DB.Begin()
 	if err != nil {
 		return old.view(), err
 	}
 	defer tx.Rollback()
-	if old.version == 0 {
-		_, err = tx.Exec("INSERT INTO agent_provider_settings(id,version,enabled,instance_id,config,secret,key_generation,capabilities,updated_at) VALUES(1,?,?,?,?,?,?,?,?)", next.version, next.enabled, next.instanceID, string(cfg), next.secret, next.keyGen, string(caps), next.updated)
-	} else {
-		var res sql.Result
-		res, err = tx.Exec("UPDATE agent_provider_settings SET version=?,enabled=?,config=?,secret=?,key_generation=?,capabilities=?,updated_at=? WHERE id=1 AND version=?", next.version, next.enabled, string(cfg), next.secret, next.keyGen, string(caps), next.updated, old.version)
-		if err == nil {
-			if n, _ := res.RowsAffected(); n != 1 {
-				return old.view(), mail.ErrConflict
-			}
-		}
-	}
-	if err != nil {
-		return old.view(), err
-	}
-	// Every configuration save is a new Agent generation: proposals frozen
-	// under another version can no longer be confirmed or applied. Disabling
-	// also cancels queued and running turns. Fixed tasks enabled on their own
-	// keep running under their own authorization.
-	now := time.Now().Unix()
-	if _, err = tx.Exec("UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE state IN ('pending','accepted','applying') AND config_version<>?", map[bool]string{true: "config_changed", false: "agent_disabled"}[next.enabled], now, next.version); err != nil {
-		return old.view(), err
-	}
-	if !next.enabled {
-		if _, err = tx.Exec("UPDATE agent_turns SET state='cancelled',error_code='agent_disabled',updated_at=? WHERE state IN ('queued','running')", now); err != nil {
-			return old.view(), err
-		}
-	}
-	if err = store.Audit(tx, "agent.provider.save", "chat_completions", map[bool]string{true: "enabled", false: "disabled"}[next.enabled]); err != nil {
+	if err = persistProvider(tx, old, next, "agent.provider.save"); err != nil {
 		return old.view(), err
 	}
 	if err = tx.Commit(); err != nil {
@@ -252,6 +256,42 @@ func (r *Runtime) SaveProvider(a mail.Access, in ProviderInput) (ProviderSetting
 		r.cancelCurrent("provider_disabled")
 	}
 	return next.view(), nil
+}
+
+// persistProvider writes next over old (optimistically on old.version) and
+// applies the generation rules of a configuration change: proposals frozen
+// under another version can no longer be confirmed or applied, and disabling
+// also cancels queued and running turns. Fixed tasks enabled on their own
+// keep running under their own authorization.
+func persistProvider(tx *sql.Tx, old, next storedProvider, audit string) error {
+	cfg, _ := json.Marshal(next.cfg)
+	caps, _ := json.Marshal(map[string]any{"digest": next.caps.Digest, "chat": next.caps.Chat, "chat_at": next.caps.ChatAt, "tool_loop": next.caps.ToolLoop, "tool_loop_at": next.caps.ToolAt})
+	var err error
+	if old.version == 0 {
+		_, err = tx.Exec("INSERT INTO agent_provider_settings(id,version,enabled,instance_id,connection_id,config,secret,key_generation,capabilities,updated_at) VALUES(1,?,?,?,?,?,?,?,?,?)", next.version, next.enabled, next.instanceID, next.connectionID, string(cfg), next.secret, next.keyGen, string(caps), next.updated)
+		if err != nil {
+			return mail.ErrConflict
+		}
+	} else {
+		var res sql.Result
+		res, err = tx.Exec("UPDATE agent_provider_settings SET version=?,enabled=?,connection_id=?,config=?,secret=?,key_generation=?,capabilities=?,updated_at=? WHERE id=1 AND version=?", next.version, next.enabled, next.connectionID, string(cfg), next.secret, next.keyGen, string(caps), next.updated, old.version)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n != 1 {
+			return mail.ErrConflict
+		}
+	}
+	now := time.Now().Unix()
+	if _, err = tx.Exec("UPDATE agent_proposals SET state='invalidated',error_code=?,updated_at=? WHERE state IN ('pending','accepted','applying') AND config_version<>?", map[bool]string{true: "config_changed", false: "agent_disabled"}[next.enabled], now, next.version); err != nil {
+		return err
+	}
+	if !next.enabled {
+		if _, err = tx.Exec("UPDATE agent_turns SET state='cancelled',error_code='agent_disabled',updated_at=? WHERE state IN ('queued','running')", now); err != nil {
+			return err
+		}
+	}
+	return store.Audit(tx, audit, "chat_completions", map[bool]string{true: "enabled", false: "disabled"}[next.enabled])
 }
 
 // ErrToolLoopUnverified rejects enabling without a passing tool-loop check.
@@ -277,7 +317,14 @@ func (r *Runtime) providerClientRoute(p storedProvider, route network.Route) (mo
 	if err != nil {
 		return nil, &modelprovider.Error{Code: modelprovider.CodeConfig}
 	}
-	s := modelprovider.Settings{BaseURL: p.cfg.BaseURL, Model: p.cfg.Model, APIKey: key, Timeout: time.Duration(p.cfg.TimeoutSeconds) * time.Second, MaxTokensParam: p.cfg.MaxTokensParam}
+	return r.clientFor(p.cfg.settings(key), route)
+}
+
+func (c providerConfig) settings(key string) modelprovider.Settings {
+	return modelprovider.Settings{BaseURL: c.BaseURL, Model: c.Model, APIKey: key, Timeout: time.Duration(c.TimeoutSeconds) * time.Second, MaxTokensParam: c.MaxTokensParam}
+}
+
+func (r *Runtime) clientFor(s modelprovider.Settings, route network.Route) (modelprovider.Provider, error) {
 	if r.NewProvider != nil {
 		return r.NewProvider(s)
 	}

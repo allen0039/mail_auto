@@ -108,7 +108,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.6.1</span>
+          <span class="badge badge-subtle app-version-label">v0.7.0</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -120,7 +120,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.6.1</span>
+            <span class="app-version-label">v0.7.0</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -203,7 +203,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.6.1</span>
+            个人邮件工作台 <span class="app-version-label">v0.7.0</span>
           </div>
         </div>
 
@@ -876,52 +876,76 @@
             </article>
 
             <article class="panel organizer-card">
-              <h2>模型（OpenAI 兼容 Chat Completions）</h2>
-              <p class="muted small">仅允许 HTTPS 公网地址；不跟随重定向。连接方式由下方设置控制，不读取系统代理。API Key 加密保存且不回显。修改模型或有效网络出口后需重新检测，工具闭环检测通过后才能启用。</p>
-              <div class="network-inline margin-t-16">
-                <label>Agent 连接方式<select id="agent-network-policy" data-network-scope="agent"></select></label>
-                <button type="button" class="secondary" data-network-save="agent">保存 Agent 连接方式</button>
-                <button type="button" class="secondary" data-network-check="agent">诊断 Agent 连接</button>
-              </div>
-              <div id="agent-network-result" role="status" aria-live="polite"></div>
-              <form id="agent-provider-form" class="rules-form margin-t-16">
+              <h2>模型连接</h2>
+              <p class="muted small">支持 OpenAI 兼容 Chat Completions 接口，可保存多个连接。选好连接和模型后点击“检测并使用”：检测通过才会生效，失败时当前配置保持不变。密钥加密保存且不回显。</p>
+              <p id="model-current" class="model-current margin-t-10" role="status"></p>
+              <form id="model-form" class="rules-form margin-t-16" autocomplete="off">
                 <div class="rules-grid">
-                  <label>Base URL（API 根地址）
-                    <input id="agent-base-url" type="url" maxlength="512" placeholder="https://api.example.com/v1" />
-                    <small id="agent-endpoint">请求地址：—</small>
+                  <label>已保存连接
+                    <select id="model-connection"></select>
                   </label>
-                  <label>模型
-                    <input id="agent-model" type="text" maxlength="200" placeholder="手工填写模型名称" />
+                  <label id="model-preset-field">服务商
+                    <select id="model-preset"></select>
+                    <small>预设只填入地址，接口须兼容 Chat Completions 并支持工具调用。</small>
                   </label>
                 </div>
                 <div class="rules-grid">
+                  <label>API 地址
+                    <input id="model-base-url" type="url" maxlength="512" placeholder="https://api.example.com/v1" required />
+                    <small id="model-endpoint">请求地址：—</small>
+                  </label>
                   <label>API Key
-                    <input id="agent-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="留空表示保留原密钥" />
-                    <small id="agent-key-note">未保存密钥。</small>
-                  </label>
-                  <label>单次请求超时（秒）
-                    <input id="agent-timeout" type="number" min="10" max="120" value="60" />
+                    <input id="model-key" type="password" autocomplete="new-password" maxlength="4096" placeholder="填写密钥" />
+                    <small id="model-key-note"></small>
                   </label>
                 </div>
                 <div class="rules-grid">
-                  <label>输出长度参数
-                    <select id="agent-max-param">
-                      <option value="">不发送（默认）</option>
-                      <option value="max_tokens">max_tokens</option>
-                      <option value="max_completion_tokens">max_completion_tokens</option>
-                    </select>
+                  <label>模型
+                    <span class="model-picker">
+                      <input id="model-model" type="text" list="model-options" maxlength="200" placeholder="点击“获取模型”后搜索选择，或直接输入" required />
+                      <button id="model-fetch" type="button" class="secondary">获取模型</button>
+                    </span>
+                    <datalist id="model-options"></datalist>
+                    <small id="model-list-note"></small>
                   </label>
-                  <div class="form-checkbox-stack">
-                    <label class="checkbox-label"><input id="agent-enabled" type="checkbox" />启用 Agent（需工具闭环检测通过）</label>
-                    <label class="checkbox-label"><input id="agent-clear-key" type="checkbox" />删除已保存的 API Key 并停用</label>
+                  <label>连接名称
+                    <input id="model-name" type="text" maxlength="60" placeholder="留空自动使用域名" />
+                  </label>
+                </div>
+                <details id="model-advanced" class="margin-t-10">
+                  <summary>高级设置<span id="model-advanced-summary" class="muted small"></span></summary>
+                  <div class="rules-grid margin-t-10">
+                    <label>单次请求超时（秒）
+                      <input id="model-timeout" type="number" min="10" max="120" value="60" />
+                    </label>
+                    <label>输出长度参数
+                      <select id="model-max-param">
+                        <option value="">不发送（默认）</option>
+                        <option value="max_tokens">max_tokens</option>
+                        <option value="max_completion_tokens">max_completion_tokens</option>
+                      </select>
+                    </label>
                   </div>
+                  <div class="network-inline margin-t-10">
+                    <label>Agent 连接方式<select id="agent-network-policy" data-network-scope="agent"></select></label>
+                    <button type="button" class="secondary" data-network-save="agent">保存 Agent 连接方式</button>
+                    <button type="button" class="secondary" data-network-check="agent">诊断 Agent 连接</button>
+                  </div>
+                  <div id="agent-network-result" role="status" aria-live="polite"></div>
+                  <p class="muted small margin-t-10">仅允许 HTTPS 公网地址，不跟随重定向，不读取系统代理。有效网络出口变化后 Agent 会暂停，需重新检测。</p>
+                  <div class="organizer-inline margin-t-10">
+                    <button id="model-check-chat" type="button" class="secondary">聊天测试（当前生效配置）</button>
+                  </div>
+                </details>
+                <div class="organizer-inline margin-t-16">
+                  <button id="model-activate" type="submit" class="primary">检测并使用</button>
+                  <button id="model-save" type="button" class="secondary">仅保存为备用</button>
+                  <button id="model-cancel" type="button" class="secondary">取消修改</button>
+                  <button id="model-delete" type="button" class="secondary danger-btn">删除连接</button>
+                  <button id="model-disable" type="button" class="secondary">停用 Agent</button>
                 </div>
-                <div class="organizer-inline">
-                  <button type="submit" class="primary">保存模型设置</button>
-                  <button id="agent-check-chat" type="button" class="secondary">聊天测试</button>
-                  <button id="agent-check-tool" type="button" class="secondary">工具闭环测试</button>
-                </div>
-                <p id="agent-provider-status" class="muted margin-t-10" role="status"></p>
+                <p class="muted small margin-t-10">“检测并使用”会向模型发送 2 次简短请求（只用本地回显工具，不处理邮件），确认支持工具调用后才切换。</p>
+                <p id="model-status" class="margin-t-10" role="status" aria-live="polite"></p>
               </form>
             </article>
 
@@ -1121,7 +1145,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.6.1</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.7.0</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>

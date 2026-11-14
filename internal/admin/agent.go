@@ -21,13 +21,17 @@ func agentError(w http.ResponseWriter, e error) {
 	var te *telegram.APIError
 	switch {
 	case errors.Is(e, agent.ErrToolLoopUnverified):
-		writeJSON(w, 422, map[string]string{"code": "tool_call_unsupported", "error": "当前配置尚未通过工具闭环检测，不能启用 Agent；请先保存配置并运行“工具闭环测试”"})
+		writeJSON(w, 422, map[string]string{"code": "tool_call_unsupported", "error": "当前配置尚未通过检测，不能启用 Agent；请在“模型连接”中点击“检测并使用”"})
 	case errors.Is(e, telegram.ErrGrantRequired):
 		writeJSON(w, 422, map[string]string{"code": "grant_required", "error": "请先保存并启用有效的 Agent 授权（授权须在当前管理员凭据下保存）"})
 	case errors.Is(e, telegram.ErrCredentialMissing):
 		writeJSON(w, 422, map[string]string{"code": "telegram_credential_missing", "error": "请先在「TG 通知」保存有效的 Bot Token"})
+	case errors.Is(e, agent.ErrKeyRequired):
+		writeJSON(w, 422, map[string]string{"code": "key_required", "error": "请填写 API Key：新连接或更换了 API 地址的域名时需要重新输入密钥"})
+	case errors.Is(e, agent.ErrConnectionInUse):
+		writeJSON(w, 409, map[string]string{"code": "connection_in_use", "error": "该连接正在被 Agent 使用：请先切换到其他连接，或停用 Agent 后再删除"})
 	case errors.As(e, &pe):
-		writeJSON(w, 422, map[string]string{"code": pe.Code, "error": "模型服务检测失败：" + pe.Code})
+		writeJSON(w, 422, map[string]string{"code": pe.Code, "error": ModelErrorText(pe.Code)})
 	case errors.As(e, &te):
 		writeJSON(w, 422, map[string]string{"code": te.Code, "error": "Telegram 检测失败：" + te.Code})
 	case errors.Is(e, mail.ErrConflict):
@@ -41,6 +45,34 @@ func agentError(w http.ResponseWriter, e error) {
 	default:
 		writeJSON(w, 422, map[string]string{"code": "operation_failed", "error": "操作未完成，请稍后重试"})
 	}
+}
+
+// ModelErrorText explains a model-provider result code in Chinese with the
+// next step. The code itself stays in the response for diagnosis.
+func ModelErrorText(code string) string {
+	text := map[string]string{
+		modelprovider.CodeAuth:              "API Key 无效或无权访问：请检查密钥是否正确、是否已过期或欠费",
+		modelprovider.CodeRateLimited:       "模型服务限流：请稍后重试，或检查账户额度",
+		modelprovider.CodeUnavailable:       "模型服务暂时不可用：请稍后重试",
+		modelprovider.CodeTimeout:           "请求超时：请检查网络与连接方式，或在高级设置中调大超时",
+		modelprovider.CodeNetwork:           "无法连接模型服务：请检查 API 地址、网络与 Agent 连接方式（代理）",
+		modelprovider.CodeBadRequest:        "模型服务拒绝请求：请确认模型名称正确；部分模型需要在高级设置中选择输出长度参数",
+		modelprovider.CodeInvalidResponse:   "模型返回的内容不符合 Chat Completions 格式：请确认该地址兼容 OpenAI 接口",
+		modelprovider.CodeTruncated:         "模型输出被截断：请在高级设置中调整输出长度参数",
+		modelprovider.CodeTooLarge:          "模型服务响应过大",
+		modelprovider.CodeRedirect:          "API 地址发生重定向（不会跟随）：请填写最终的 API 根地址",
+		modelprovider.CodeDestination:       "API 地址不是允许的公网 HTTPS 地址",
+		modelprovider.CodeToolUnsupported:   "该模型未能完成工具调用检测：请换用支持工具调用（function calling）的模型",
+		modelprovider.CodeEmpty:             "模型返回了空内容：请换用其他模型后重试",
+		modelprovider.CodeConfig:            "连接参数不完整或无效：请检查 API 地址、模型与密钥",
+		modelprovider.CodeModelsUnsupported: "该服务未提供可用的模型列表：请直接手动填写模型名称",
+		"config_changed":                    "检测期间配置已被修改（其他页面、网络出口或另一次检测）：请刷新后重试；当前生效配置未改变",
+		"cancelled":                         "检测已取消",
+	}[code]
+	if text == "" {
+		text = "检测未通过"
+	}
+	return text + "（" + code + "）"
 }
 
 func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) bool {
@@ -79,6 +111,39 @@ func (s *Server) agentAPI(w http.ResponseWriter, r *http.Request) bool {
 		if decode(w, r, &in) {
 			out, code, e := s.Agent.CheckProvider(r.Context(), a, in.Kind)
 			respond(map[string]any{"provider": out, "kind": in.Kind, "result": code, "ok": code == "ok"}, e)
+		}
+	case path == "/api/agent/connections" && r.Method == http.MethodGet:
+		respond(s.Agent.Connections(a))
+	case path == "/api/agent/connections" && r.Method == http.MethodPost:
+		var in agent.ConnectionInput
+		if decode(w, r, &in) {
+			respond(s.Agent.SaveConnection(a, in))
+		}
+	case path == "/api/agent/connections/delete" && r.Method == http.MethodPost:
+		var in struct {
+			ID      string `json:"id"`
+			Version int    `json:"version"`
+		}
+		if decode(w, r, &in) {
+			e := s.Agent.DeleteConnection(a, in.ID, in.Version)
+			respond(map[string]bool{"deleted": e == nil}, e)
+		}
+	case path == "/api/agent/connections/models" && r.Method == http.MethodPost:
+		var in agent.ModelsInput
+		if decode(w, r, &in) {
+			models, e := s.Agent.ListModels(r.Context(), a, in)
+			respond(map[string]any{"models": models}, e)
+		}
+	case path == "/api/agent/connections/activate" && r.Method == http.MethodPost:
+		var in agent.ActivateInput
+		if decode(w, r, &in) {
+			out, e := s.Agent.Activate(r.Context(), a, in)
+			if e == nil && !out.OK {
+				// A failed check is a normal answer: nothing changed.
+				writeJSON(w, 200, map[string]any{"ok": false, "result": out.Result, "message": ModelErrorText(out.Result), "provider": out.Provider})
+				return true
+			}
+			respond(out, e)
 		}
 	case path == "/api/agent/grant" && r.Method == http.MethodGet:
 		g, e := s.Mail.CurrentAgentGrant(a)

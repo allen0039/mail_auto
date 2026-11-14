@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  let provider = null, grant = null, interaction = null, accounts = [], folders = {};
+  let provider = null, connections = [], grant = null, interaction = null, accounts = [], folders = {};
   const request = (url, method, body) => api(url, { method, body: JSON.stringify(body) });
   const wrap = (fn) => async (e) => {
     if (shouldPreventDefault(e)) e.preventDefault();
@@ -28,8 +28,7 @@
     const write = grantOK && grant.actions.some((a) => a !== "read");
     $("#agent-capabilities").innerHTML = [
       line(configured, "模型配置完成", configured ? provider.model : ""),
-      line(caps.chat === "ok", "聊天可用", caps.chat && caps.chat !== "ok" ? caps.chat : caps.chat_at ? `检测于 ${time(caps.chat_at)}` : "未检测"),
-      line(caps.tool_loop === "ok", "工具闭环可用", caps.tool_loop && caps.tool_loop !== "ok" ? caps.tool_loop : caps.tool_loop_at ? `检测于 ${time(caps.tool_loop_at)}` : "未检测"),
+      line(caps.tool_loop === "ok", "模型检测通过（含工具调用）", caps.tool_loop && caps.tool_loop !== "ok" ? caps.tool_loop : caps.tool_loop_at ? `检测于 ${time(caps.tool_loop_at)}` : "未检测"),
       line(!!provider?.enabled, "Agent 已启用"),
       line(!!interaction?.credential_ready, "TG 凭据有效（来自 TG 通知设置）"),
       line(interaction?.state === "online", "轮询在线", stateLabels[interaction?.state] || interaction?.state || ""),
@@ -39,25 +38,278 @@
     ].join("");
   }
 
-  function renderProvider() {
-    $("#agent-base-url").value = provider.base_url || "";
-    $("#agent-model").value = provider.model || "";
-    $("#agent-timeout").value = provider.timeout_seconds || 60;
-    $("#agent-max-param").value = provider.max_tokens_param || "";
-    $("#agent-enabled").checked = !!provider.enabled;
-    $("#agent-clear-key").checked = false;
-    $("#agent-key").value = "";
-    $("#agent-key-note").textContent = provider.key_configured ? "已保存密钥（不回显）；留空表示保留。" : "未保存密钥。";
-    $("#agent-endpoint").textContent = `请求地址：${provider.endpoint || "—"}`;
-    const caps = provider.capabilities || {};
-    $("#agent-provider-status").textContent = provider.enabled
-      ? "Agent 已启用。"
-      : caps.tool_loop === "ok"
-        ? "工具闭环检测已通过，可勾选“启用 Agent”后保存。"
-        : caps.chat === "ok"
-          ? "可聊天，未验证工具调用：不能启用写操作 Agent。"
-          : "尚未检测。";
+  // ---- 模型连接 ----
+  // The form is an in-memory draft: nothing is applied until “检测并使用”
+  // passes, and a refresh never overwrites unsaved edits. Model lists live
+  // only on this page and belong to one connection + address + key; any
+  // switch or edit bumps listToken so a late response is discarded.
+  const presets = [
+    ["", "自定义兼容接口", ""],
+    ["openai", "OpenAI", "https://api.openai.com/v1"],
+    ["deepseek", "DeepSeek", "https://api.deepseek.com/v1"],
+    ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1"],
+    ["dashscope", "阿里云百炼", "https://dashscope.aliyuncs.com/compatible-mode/v1"],
+    ["siliconflow", "硅基流动", "https://api.siliconflow.cn/v1"],
+  ];
+  let selected = "", dirty = false, listToken = 0;
+  const current = () => connections.find((c) => c.id === selected) || null;
+  const endpointOf = (base) => {
+    try {
+      const u = new URL(base.trim());
+      return u.protocol === "https:" ? `${u.origin}${u.pathname.replace(/\/+$/, "")}/chat/completions` : "仅支持 https 地址";
+    } catch {
+      return "—";
+    }
+  };
+  const providerCodes = {
+    tool_call_unsupported: "模型不支持工具调用", provider_auth_failed: "密钥无效", provider_network_error: "网络错误",
+    provider_timeout: "超时", provider_request_rejected: "请求被拒绝", provider_destination_blocked: "地址不允许",
+  };
+
+  function resetModelList(note = "") {
+    listToken++;
+    $("#model-options").innerHTML = "";
+    $("#model-list-note").textContent = note;
   }
+
+  function renderCurrent() {
+    const p = provider;
+    const conn = connections.find((c) => c.id === p.connection_id);
+    const caps = p.capabilities || {};
+    let text;
+    if (p.enabled && caps.tool_loop === "ok") {
+      text = `当前生效：${conn ? conn.name : "未保存的配置"} · ${p.model}（检测于 ${time(caps.tool_loop_at)}）`;
+    } else if (p.base_url) {
+      text = `Agent 未启用。上次配置：${conn ? conn.name : p.base_url} · ${p.model || "未选模型"}${caps.tool_loop && caps.tool_loop !== "ok" ? `；检测未通过（${caps.tool_loop}）` : ""}`;
+    } else {
+      text = "尚未配置模型。选择服务商、填写密钥并选择模型后点击“检测并使用”。";
+    }
+    $("#model-current").textContent = text;
+    $("#model-current").classList.toggle("is-active", !!(p.enabled && caps.tool_loop === "ok"));
+    $("#model-disable").hidden = !p.enabled;
+  }
+
+  function renderConnectionOptions() {
+    $("#model-connection").innerHTML = connections.map((c) => {
+      const tag = c.active ? (provider.enabled ? "（使用中）" : "（上次使用）") : "";
+      return `<option value="${esc(c.id)}">${esc(c.name)}${tag} · ${esc(c.model || "未选模型")}</option>`;
+    }).join("") + '<option value="">＋ 添加新连接</option>';
+    $("#model-connection").value = selected;
+  }
+
+  function advancedSummary() {
+    const t = Number($("#model-timeout").value) || 60, m = $("#model-max-param").value;
+    const parts = [];
+    if (t !== 60) parts.push(`超时 ${t} 秒`);
+    if (m) parts.push(m);
+    const net = $("#agent-network-policy");
+    if (net && net.value && net.selectedIndex > 0) parts.push(`连接方式：${net.options[net.selectedIndex].text}`);
+    $("#model-advanced-summary").textContent = parts.length ? `（当前非默认：${parts.join("，")}）` : "";
+  }
+
+  function fillForm() {
+    const c = current();
+    const isNew = !c;
+    $("#model-preset-field").hidden = !isNew;
+    $("#model-preset").value = "";
+    $("#model-name").value = c?.name || "";
+    $("#model-base-url").value = c?.base_url || "";
+    $("#model-model").value = c?.model || "";
+    $("#model-key").value = "";
+    $("#model-timeout").value = c?.timeout_seconds || 60;
+    $("#model-max-param").value = c?.max_tokens_param || "";
+    $("#model-endpoint").textContent = `请求地址：${c?.endpoint || endpointOf($("#model-base-url").value)}`;
+    keyNote();
+    $("#model-delete").hidden = isNew || !!(c.active && provider.enabled);
+    // For the connection in use, saving without checking would look like a
+    // change that is not in effect; the only primary action is 检测并使用.
+    $("#model-save").hidden = !!(c && c.active && provider.enabled);
+    $("#model-cancel").hidden = true;
+    $("#model-status").textContent = c?.pending ? "该连接有已保存但尚未生效的修改：点击“检测并使用”后生效。" : "";
+    dirty = false;
+    resetModelList();
+    advancedSummary();
+  }
+
+  function keyNote() {
+    const c = current();
+    let note = "首次使用须填写密钥。";
+    if (c?.key_configured) {
+      const same = (() => {
+        try {
+          return new URL($("#model-base-url").value.trim()).origin === new URL(c.base_url).origin;
+        } catch {
+          return false;
+        }
+      })();
+      note = same ? "已保存密钥（不回显）；留空继续使用。" : "API 地址的域名已更改，须重新填写密钥。";
+    }
+    $("#model-key-note").textContent = note;
+    $("#model-key").placeholder = c?.key_configured ? "留空表示保留原密钥" : "填写密钥";
+  }
+
+  function markDirty() {
+    dirty = true;
+    $("#model-cancel").hidden = false;
+    $("#model-status").textContent = "有未应用的修改。";
+  }
+
+  function draftBody() {
+    const c = current();
+    return {
+      id: c?.id || "",
+      version: c?.version || 0,
+      name: $("#model-name").value.trim(),
+      base_url: $("#model-base-url").value.trim(),
+      model: $("#model-model").value.trim(),
+      api_key: $("#model-key").value.trim(),
+      timeout_seconds: Number($("#model-timeout").value) || 60,
+      max_tokens_param: $("#model-max-param").value,
+    };
+  }
+
+  async function loadConnections(keepDraft) {
+    const out = await api("/api/agent/connections");
+    connections = out.connections;
+    provider = out.provider;
+    if (keepDraft && dirty && (selected === "" || connections.some((c) => c.id === selected))) {
+      renderConnectionOptions();
+      renderCurrent();
+      return;
+    }
+    if (!connections.some((c) => c.id === selected)) {
+      selected = (connections.find((c) => c.active) || connections[0] || { id: "" }).id;
+    }
+    renderConnectionOptions();
+    renderCurrent();
+    fillForm();
+  }
+
+  $("#model-preset").innerHTML = presets.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join("");
+  $("#model-preset").addEventListener("change", () => {
+    const preset = presets.find(([id]) => id === $("#model-preset").value);
+    if (preset && preset[2]) {
+      $("#model-base-url").value = preset[2];
+      if (!$("#model-name").value.trim() || presets.some(([, label]) => label === $("#model-name").value.trim())) $("#model-name").value = preset[1];
+    }
+    $("#model-base-url").dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  $("#model-connection").addEventListener("change", () => {
+    if (dirty && !confirm("放弃当前未应用的修改？")) {
+      $("#model-connection").value = selected;
+      return;
+    }
+    selected = $("#model-connection").value;
+    fillForm();
+  });
+
+  $("#model-form").addEventListener("input", (e) => {
+    if (e.target.id === "model-preset" || e.target.id === "model-connection" || e.target.id === "agent-network-policy") return;
+    if (e.target.id === "model-base-url" || e.target.id === "model-key") {
+      resetModelList("地址或密钥已更改，请重新获取模型列表。");
+      $("#model-endpoint").textContent = `请求地址：${endpointOf($("#model-base-url").value)}`;
+      keyNote();
+    }
+    if (e.target.id === "model-timeout" || e.target.id === "model-max-param") advancedSummary();
+    markDirty();
+  });
+  $("#model-form").addEventListener("change", (e) => {
+    if (e.target.id === "model-max-param") {
+      advancedSummary();
+      markDirty();
+    }
+    if (e.target.id === "agent-network-policy") advancedSummary();
+  });
+
+  $("#model-fetch").addEventListener("click", wrap(async () => {
+    const body = draftBody();
+    if (!body.base_url) throw new Error("请先填写 API 地址");
+    const token = ++listToken;
+    $("#model-list-note").textContent = "正在获取模型列表…";
+    await busy($("#model-fetch"), "获取中…", async () => {
+      try {
+        const out = await request("/api/agent/connections/models", "POST", { id: body.id, base_url: body.base_url, api_key: body.api_key });
+        if (token !== listToken) return; // switched or edited meanwhile
+        $("#model-options").innerHTML = out.models.map((m) => `<option value="${esc(m)}"></option>`).join("");
+        $("#model-list-note").textContent = out.models.length
+          ? `已获取 ${out.models.length} 个模型：在“模型”框中输入关键字搜索，或直接填写。`
+          : "模型列表为空：请直接填写模型名称。";
+        if (out.models.length) $("#model-model").focus();
+      } catch (err) {
+        if (token === listToken) $("#model-list-note").textContent = `${err.message}。仍可直接填写模型名称。`;
+      }
+    });
+  }));
+
+  $("#model-form").addEventListener("submit", wrap(async (e) => {
+    const body = draftBody();
+    if (!body.base_url || !body.model) throw new Error("请填写 API 地址并选择或输入模型");
+    const at = selected;
+    await busy($("#model-activate"), "检测中…", async () => {
+      $("#model-status").textContent = "正在检测（约 5–30 秒）…";
+      const out = await request("/api/agent/connections/activate", "POST", { ...body, provider_version: provider.version });
+      if (!out.ok) {
+        provider = out.provider || provider;
+        $("#model-status").textContent = `检测未通过，当前生效配置未改变：${out.message || out.result}`;
+        notify("检测未通过，未切换", true);
+        renderCurrent();
+        renderCapabilities();
+        return;
+      }
+      if (selected === at) {
+        selected = out.connection?.id || selected;
+        dirty = false;
+      }
+      await loadConnections(true);
+      renderCapabilities();
+      $("#model-status").textContent = out.unchanged ? "该配置已在使用中，无需重新检测。" : "检测通过，已切换并启用。";
+      notify(out.unchanged ? "配置未变化" : "已检测并使用新的模型连接");
+    });
+  }));
+
+  $("#model-save").addEventListener("click", wrap(async () => {
+    const body = draftBody();
+    if (!body.base_url) throw new Error("请填写 API 地址");
+    await busy($("#model-save"), "保存中…", async () => {
+      const saved = await request("/api/agent/connections", "POST", body);
+      selected = saved.id;
+      dirty = false;
+      await loadConnections();
+      $("#model-status").textContent = "已保存为备用连接，当前生效配置未改变。";
+      notify("连接已保存");
+    });
+  }));
+
+  $("#model-cancel").addEventListener("click", () => fillForm());
+
+  $("#model-delete").addEventListener("click", wrap(async () => {
+    const c = current();
+    if (!c || !confirm(`删除连接“${c.name}”？其保存的密钥会一并删除。`)) return;
+    await request("/api/agent/connections/delete", "POST", { id: c.id, version: c.version });
+    selected = "";
+    dirty = false;
+    await loadConnections();
+    notify("连接已删除");
+  }));
+
+  $("#model-disable").addEventListener("click", wrap(async () => {
+    if (!confirm("停用 Agent？排队和进行中的 Agent 工作会取消，待确认方案失效；已启用的固定任务不受影响。")) return;
+    const p = provider;
+    await request("/api/agent/provider", "PUT", { version: p.version, enabled: false, base_url: p.base_url, model: p.model, timeout_seconds: p.timeout_seconds, max_tokens_param: p.max_tokens_param });
+    await loadConnections(true);
+    renderCapabilities();
+    notify("Agent 已停用");
+  }));
+
+  $("#model-check-chat").addEventListener("click", wrap(async () => {
+    await busy($("#model-check-chat"), "检测中…", async () => {
+      const out = await request("/api/agent/provider/check", "POST", { kind: "chat" });
+      provider = out.provider;
+      renderCapabilities();
+      $("#model-status").textContent = out.ok ? "聊天测试通过（当前生效配置）。" : `聊天测试未通过：${providerCodes[out.result] || out.result}`;
+    });
+  }));
 
   function renderGrant() {
     const current = grant || { accounts: [], folders: {}, actions: ["read"], enabled: true };
@@ -97,49 +349,17 @@
   }
 
   window.loadAgent = async () => {
-    const [p, g, i, accs] = await Promise.all([api("/api/agent/provider"), api("/api/agent/grant"), api("/api/telegram/interaction"), api("/api/accounts")]);
-    provider = p;
+    const [, g, i, accs] = await Promise.all([loadConnections(true), api("/api/agent/grant"), api("/api/telegram/interaction"), api("/api/accounts")]);
     grant = g.grant;
     interaction = i;
     accounts = accs;
     folders = {};
     await Promise.all(accounts.map(async (a) => (folders[a.id] = await api(`/api/accounts/${encodeURIComponent(a.id)}/folders`).catch(() => []))));
-    renderProvider();
     renderGrant();
     renderInteraction();
     renderCapabilities();
     await loadRecords();
   };
-
-  $("#agent-provider-form").addEventListener("submit", wrap(async (e) => {
-    await busy($('button[type="submit"]', e.currentTarget), "保存中…", async () => {
-      provider = await request("/api/agent/provider", "PUT", {
-        version: provider.version,
-        enabled: $("#agent-enabled").checked,
-        base_url: $("#agent-base-url").value.trim(),
-        model: $("#agent-model").value.trim(),
-        timeout_seconds: Number($("#agent-timeout").value) || 60,
-        max_tokens_param: $("#agent-max-param").value,
-        api_key: $("#agent-key").value.trim(),
-        clear_key: $("#agent-clear-key").checked,
-      });
-      renderProvider();
-      renderCapabilities();
-      notify("模型设置已保存");
-    });
-  }));
-
-  for (const [selector, kind, label] of [["#agent-check-chat", "chat", "聊天测试"], ["#agent-check-tool", "tool_loop", "工具闭环测试"]]) {
-    $(selector).addEventListener("click", wrap(async () => {
-      await busy($(selector), "检测中…", async () => {
-        const out = await request("/api/agent/provider/check", "POST", { kind });
-        provider = out.provider;
-        renderProvider();
-        renderCapabilities();
-        $("#agent-provider-status").textContent = out.ok ? `${label}通过。` : `${label}未通过：${out.result}`;
-      });
-    }));
-  }
 
   $("#agent-grant-form").addEventListener("change", (e) => {
     const box = e.target.closest("fieldset[data-account]");
