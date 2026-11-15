@@ -36,3 +36,6 @@
 *.log
 *.tar
 *.tar.gz
+
+# UI check development dependencies (installed from scripts/ui-check/package-lock.json)
+/scripts/ui-check/node_modules/

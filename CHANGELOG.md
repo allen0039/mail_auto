@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.9 — 2026-11-15
+
+验证与发布核对（轻量优化交付一，A／B 两项）；只改 CI、开发检查依赖、新增只读核对脚本与文档，产品代码与界面行为不变；数据库仍为 schema 13，无迁移；现有任务、每批数量、未读/星标保护、历史范围、通知目的地和模型连接不变，不设置每日处理额度。
+
+- A：GitHub Actions 新增独立 `ui` job，与 Go 检查并行，每次 push 与 PR 运行。复用 `scripts/ui-check/run.sh` 的四套检查（settings／model／ownership／task-editor，1280／375／390 px）与 27 项门禁回归（核对 `pass 27`、`skipped 0`），最后核对没有遗留临时实例或目录。`scripts/ui-check/package.json`／`package-lock.json` 固定 `puppeteer-core` 25.16.0，浏览器为同版本对应的 Chrome for Testing 156.0.8078.47，Node 24.14.0；依赖只用于检查，不进入运行镜像（`.dockerignore` 不含 `scripts/`），不建立前端构建系统。`run.sh` 与 `run-checks.cjs` 未改动。
+- B：新增 `scripts/release-verify/release_verify.py`，按参数（版本、提交、SSH 目标、Compose 目录、升级前备份）只读重新采集发布证据，输出脱敏 JSON 与简短结论：远端 main／标签与发布提交（发布后纯文档更新单独说明）、版本与 latest 摘要和双架构、服务器镜像与对应平台 config、版本／健康／重启、文件夹同步、部署后自然任务分类、升级前后配置表／任务用户字段／主密钥一致性（任务运行字段单列）。退出码 0 全部匹配、1 不一致、3 证据缺失（未核对）、2 参数错误。附 16 项夹具测试，在 CI 的 Go 检查 job 中运行。用法见运维文档「发布后只读核对」。
+
 ## 0.8.8 — 2026-11-15
 
 修复 0.8.7 独立审计 DP-01（P2，邮箱窗口草稿保护）；只改 `app.js` 中邮箱窗口的两处处理，不新增功能；数据库仍为 schema 13，无迁移；现有任务、每批数量、未读/星标保护、历史范围、通知目的地和模型连接不变，不设置每日处理额度。

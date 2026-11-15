@@ -21,6 +21,8 @@ jobs:
           if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
       - run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: release-verify fixture tests
+        run: python3 -m unittest discover -s scripts/release-verify -v
       - run: docker compose config --quiet
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
@@ -28,3 +30,50 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+
+  # Admin UI checks (scripts/ui-check) on a throwaway local instance. Development
+  # dependencies only: nothing here enters the runtime image (see .dockerignore).
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Chrome for Testing build pinned by puppeteer-core 25.16.0 (package-lock.json).
+      CHROME_VERSION: 156.0.8078.47
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - name: Install pinned check dependencies
+        run: npm ci --prefix scripts/ui-check --no-audit --no-fund
+      - name: Install Chrome for Testing ${{ env.CHROME_VERSION }}
+        run: |
+          cd scripts/ui-check
+          path="$(npx --no-install browsers install "chrome@$CHROME_VERSION" --path "$RUNNER_TEMP/browsers" | tail -n 1 | cut -d' ' -f2-)"
+          test -x "$path"
+          "$path" --version
+          echo "CHROME_PATH=$path" >> "$GITHUB_ENV"
+          # Ubuntu 24.04 blocks the unprivileged user namespaces Chrome's sandbox
+          # needs for a browser outside the system package; allow them on this VM.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: UI checks (settings, model, ownership, task-editor at 1280/375/390)
+        run: scripts/ui-check/run.sh
+      - name: UI gate regression (27 cases, none skipped)
+        env:
+          PUPPETEER: puppeteer-core
+        run: |
+          set -o pipefail
+          node --test --test-reporter=tap scripts/ui-check/gate-test.cjs | tee "$RUNNER_TEMP/gate.tap"
+          grep -qx '# pass 27' "$RUNNER_TEMP/gate.tap"
+          grep -qx '# skipped 0' "$RUNNER_TEMP/gate.tap"
+      - name: No check instance or temporary files left
+        if: always()
+        run: |
+          dirs="$(find "${TMPDIR:-/tmp}" -maxdepth 1 \( -name 'mail-auto-ui-check.*' -o -name 'gate-fixture-*' \) | wc -l)"
+          procs="$(pgrep -fc 'mail-auto-ui-check\.' || true)"
+          echo "leftover directories=$dirs instance processes=$procs"
+          test "$dirs" -eq 0 && test "$procs" -eq 0

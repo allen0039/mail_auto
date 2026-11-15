@@ -1,0 +1,9 @@
+{
+  "name": "mail-auto-ui-check",
+  "private": true,
+  "description": "Development-only dependencies for scripts/ui-check (not part of the runtime image).",
+  "devDependencies": {
+    "@puppeteer/browsers": "3.2.6",
+    "puppeteer-core": "25.16.0"
+  }
+}

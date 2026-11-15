@@ -127,7 +127,7 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 
 | 情况 | 例子 | 做法 | 会丢失什么 |
 | --- | --- | --- | --- |
-| 同 schema 小版本回滚 | 0.8.8 → 0.8.7（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
+| 同 schema 小版本回滚 | 0.8.9 → 0.8.8（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
 | 跨 schema 恢复 | 0.7.x（schema 13）→ 0.6.x（schema 12） | 旧二进制拒绝打开更新的 schema，只换镜像无法启动。停止服务，按下方「联合恢复」把**升级前快照与配套主密钥**放入新卷，再启动旧镜像；0.5.x 起的快照还须按对应小节执行 `bootstrap recover` | 快照之后的全部本地变化：运行记录、规则与任务修改、新增连接、Agent 与 Telegram 记录 |
 
 两种方式都不会撤销已经写入原邮箱的移动或标记；回退后重新同步并人工核对远端状态，不要重放旧任务。不要手工修改 `PRAGMA user_version`，也不要把升级后的 WAL 混入旧快照。
@@ -136,6 +136,34 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 
 `ma down` 保留命名卷；`ma down -v` 明确删除数据和密钥，仅在决定清空实例时使用。
 
+
+## 发布后只读核对
+
+`scripts/release-verify/release_verify.py` 在本机重新采集一次发布证据（不替代独立审计）：本机读取 git 远端 `main`／版本标签与镜像仓库，服务器部分通过 SSH 把同一脚本交给 `python3 -` 执行，只读取 `docker inspect`、`/healthz`、`/readyz` 和 SQLite（`mode=ro`、`query_only`）。它不拉取或部署镜像、不改配置、不触发任务或模型、不写邮件、不核验或重放待核验操作，也不清理备份和镜像。需要本机有 `git`、`docker buildx`，服务器有 `python3`、`docker`、`curl`，SSH 用户能读取数据卷与密钥卷（一般为 root）。
+
+```bash
+scripts/release-verify/release_verify.py --version 0.8.9 --commit <发布提交> \
+  --ssh <SSH 目标> --compose-dir <服务器上的 Compose 目录> \
+  --backup <服务器上的升级前备份目录>
+```
+
+备份目录须含升级前一致性快照 `mail-auto.db` 与 `keys/master.key`（即「升级与回退」中的备份）。可选 `--image`（默认 `allen0039/mail-auto`）、`--service`（默认 `app`）、`--remote`（默认 `origin`）、`--repo`。先 `git fetch`，否则发布后的 `main` 无法在本机比较，结果为未核对。
+
+标准输出是一份脱敏 JSON（不含 SSH 目标、Compose 路径、邮箱、文件夹名、通知目的地、密钥或密钥摘要；ID 只保留前 8 位），标准错误是逐项简短结论。必检项：
+
+| 项 | 内容 |
+| --- | --- |
+| `git.tag` / `git.main` | 版本标签指向发布提交；远端 `main` 等于发布提交，或其后只有文档（`docs/`、`*.md`）更新并列出文件 |
+| `image.latest_is_version` / `image.platforms` | 版本标签与 `latest` 的 index 摘要相同；含 linux/amd64 与 linux/arm64 |
+| `server.image` | 运行容器的 ImageID 等于该版本 index 中服务器平台的 config 摘要（并报告 RepoDigest 是否为该 index） |
+| `server.version` / `server.health` / `server.restarts` | `/healthz`、`/readyz` 版本与就绪；容器运行且 healthy；重启次数为 0 |
+| `sync.folders` | 容器启动后完成同步的文件夹数等于文件夹总数，并给出最近同步时间 |
+| `tasks.post_deploy_runs` | 容器启动后的自然运行，按无运行、noop、成功、失败、待核验、进行中分类计数；无运行或待核验为未核对，失败为不一致；只有 noop 时注明不是真实写入证明 |
+| `config.tables` / `tasks.user_fields` / `master_key` | 与升级前备份比较 16 张配置表（逐行）、任务用户字段与 schema；主密钥在服务器内逐字节比较，只输出布尔值 |
+
+任务的 `cursor`、`last_triggered`、`next_run_at`、`next_times`、`last_state` 以及表列 `next_run_at`、`updated_at` 属于运行字段，单列在 `evidence.server.task_runtime_fields`，不算用户配置变化。
+
+退出码：`0` 全部必检项匹配；`1` 至少一项不一致；`3` 没有不一致，但至少一项未核对（缺备份、权限不足、命令失败、数据缺失、尚无部署后运行、文件夹未同步完）；`2` 参数错误。缺证据时一律标为未核对，不会输出通过。脚本不等待下一次调度，没有新运行就立即报告。夹具测试：`python3 -m unittest discover -s scripts/release-verify`（CI 的 Go 检查 job 中运行）。
 
 ## 全历史同步升级
 
