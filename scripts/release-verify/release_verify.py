@@ -158,20 +158,22 @@ def classify_run(state, payload):
 
     Only a finalized run with no write in flight and a known final state can
     count as evidence; anything else (still running, cancelled but not settled,
-    missing or malformed summary, unknown state) is reported as such."""
+    missing or malformed summary, unknown state) is reported as such.
+
+    A definite failure comes first: a failed/partial/interrupted state or a
+    well-formed failed count above 0 is "failed" whatever else is pending or
+    missing. A malformed failed value is neither a failure nor 0."""
+    counts = {k: count(payload, k) for k in REQUIRED_COUNTS} if isinstance(payload, dict) else {}
+    if state in ("failed", "partial", "interrupted") or (counts.get("failed") or 0) > 0:
+        return "failed"
     if not isinstance(payload, dict):
         return "missing_evidence"
     if state in ("queued", "running", "awaiting_ai"):
         return "running"
-    if state in ("failed", "partial", "interrupted"):
-        return "failed"
     if state == "needs_verification":
         return "needs_verification"
-    counts = {k: count(payload, k) for k in REQUIRED_COUNTS}
     if None in counts.values() or not isinstance(payload.get("finalized"), bool):
         return "missing_evidence"
-    if counts["failed"]:
-        return "failed"
     if counts["unknown"]:
         return "needs_verification"
     if not payload["finalized"] or counts["queued"] or counts["running"]:

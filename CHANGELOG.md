@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.12 — 2026-11-15
+
+修复 0.8.11 独立复验 RV-05（P2，只读发布核对入口的失败优先级）；只改 `scripts/release-verify/release_verify.py` 的运行分类及其测试，产品代码、界面、CI 与 UI 检查不变；数据库仍为 schema 13，无迁移；现有任务、每批数量、未读/星标保护、历史范围、通知目的地和模型连接不变，不设置每日处理额度。
+
+- RV-05：`classify_run` 先判断明确失败。状态为 failed、partial、interrupted，或格式有效的 failed 计数大于 0 时，判为 failed（不一致，exit 1），不再被同一运行的 needs_verification 状态、进行中状态、其他字段缺失或格式错误覆盖。服务在 `Failed>0` 后又因 `Unknown>0` 把状态改为 needs_verification 的运行因此报为失败。
+- 没有明确失败时保持 0.8.11 行为：缺失或格式错误的必要字段、待核验、未知状态、未收尾和操作查询失败仍为未核对（无其他不一致时 exit 3）；格式错误的 failed 既不算失败也不当 0；noop、observed、completed 与有效零值照常通过。
+- 夹具测试 37 → 45 项，核对完整 JSON、终端结论与退出码。
+
 ## 0.8.11 — 2026-11-15
 
 修复 0.8.10 独立复验 RV-04（P2，只读发布核对入口的证据完整性）；只改 `scripts/release-verify/release_verify.py` 及其测试，产品代码、界面、CI 与 UI 检查不变；数据库仍为 schema 13，无迁移；现有任务、每批数量、未读/星标保护、历史范围、通知目的地和模型连接不变，不设置每日处理额度。

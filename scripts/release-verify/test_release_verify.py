@@ -137,6 +137,7 @@ class Fixture:
         code = rv.main(self.args(**kw), run=self.run, out=out, err=err)
         report = json.loads(out.getvalue())
         self.last_output = out.getvalue() + err.getvalue()
+        self.last_err = err.getvalue()
         return code, report
 
     def files_digest(self):
@@ -688,6 +689,125 @@ class EvidenceCompletenessTest(unittest.TestCase):
         code, check, report = self.task_check()
         self.assertEqual((code, check["status"]), (1, "unverified"))
         self.assertIn("server.version", report["mismatched"])
+
+
+class FailurePrecedenceTest(unittest.TestCase):
+    """RV-05: a definite failure is a mismatch even when other evidence is pending or missing."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.fx = Fixture(self._tmp.name)
+        self.fx.sql("live", "DELETE FROM task_runs")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def report_for(self, runs):
+        self.fx.sql("live", "DELETE FROM task_runs")
+        for i, (state, payload) in enumerate(runs):
+            add_run(self.fx, "r%d" % i, state, payload, created=STARTED + 10 + i)
+        code, report = self.fx.execute()
+        check = next(c for c in report["checks"] if c["id"] == "tasks.post_deploy_runs")
+        line = next(l for l in self.fx.last_err.splitlines() if "tasks.post_deploy_runs" in l)
+        return code, report, check, line
+
+    def assertMismatch(self, runs, text="failed"):
+        code, report, check, line = self.report_for(runs)
+        self.assertEqual((code, report["exit_code"], report["result"]), (1, 1, "mismatch"))
+        self.assertEqual(report["mismatched"], ["tasks.post_deploy_runs"])
+        self.assertEqual(check["status"], "mismatch")
+        self.assertIn(text, check["detail"])
+        self.assertTrue(line.split()[0] == "mismatch", line)
+        self.assertIn("release-verify 0.8.9: mismatch (exit 1)", self.fx.last_err)
+        return report
+
+    def assertUnverified(self, runs, text):
+        code, report, check, line = self.report_for(runs)
+        self.assertEqual((code, report["exit_code"], report["result"]), (3, 3, "unverified"))
+        self.assertEqual((report["mismatched"], report["unverified"]), ([], ["tasks.post_deploy_runs"]))
+        self.assertIn(text, check["detail"])
+        self.assertTrue(line.split()[0] == "unverified", line)
+        self.assertIn("release-verify 0.8.9: unverified (exit 3)", self.fx.last_err)
+
+    def test_audit_repro_needs_verification_with_failed_count(self):
+        report = self.assertMismatch([("needs_verification", final(failed=2, unknown=1))], "failed 1")
+        run = report["evidence"]["server"]["runs_since_start"][0]
+        self.assertEqual((run["class"], run["failed"], run["unknown"]), ("failed", 2, 1))
+
+    def test_valid_failed_count_wins_over_missing_or_malformed_fields(self):
+        for state in ("cancelled", "completed", "noop", "needs_verification", "running", "future_state"):
+            for broken in ({"finalized": None}, {"unknown": None}, {"queued": None}, {"running": None},
+                           {"unknown": "1"}, {"queued": -1}, {"finalized": "yes"}, {"running": 1, "finalized": False}):
+                with self.subTest(state=state, broken=broken):
+                    payload = final(failed=2)
+                    for k, v in broken.items():
+                        if v is None:
+                            payload.pop(k)
+                        else:
+                            payload[k] = v
+                    self.assertMismatch([(state, payload)])
+        self.assertMismatch([("cancelled", {"failed": 2})])
+
+    def test_failure_states_win_without_any_counts(self):
+        for state in ("failed", "partial", "interrupted"):
+            for payload in ({"finalized": False}, "{not json", final(failed="x")):
+                with self.subTest(state=state, payload=payload):
+                    self.assertMismatch([(state, payload)])
+
+    def test_failure_among_pending_runs_and_missing_operations(self):
+        self.fx.sql("live", "DROP TABLE operations")
+        self.assertMismatch([("needs_verification", final(unknown=1)), ("noop", {"finalized": True}),
+                             ("completed", final(failed=1, claimed=2, completed=1))])
+
+    def test_invalid_failed_value_is_neither_failure_nor_zero(self):
+        for bad in ("2", -1, 2.0, True, None, [2]):
+            with self.subTest(failed=bad):
+                payload = final()
+                if bad is None:
+                    payload.pop("failed")
+                else:
+                    payload["failed"] = bad
+                self.assertUnverified([("noop", payload)], "missing_evidence 1")
+
+    def test_no_definite_failure_stays_unverified(self):
+        cases = [
+            ([("needs_verification", final(unknown=1))], "needs_verification 1"),
+            ([("needs_verification", {"finalized": True})], "needs_verification 1"),
+            ([("noop", final(unknown=1))], "needs_verification 1"),
+            ([("noop", {"finalized": True})], "missing_evidence 1"),
+            ([("completed", final(finalized=False))], "not_finalized 1"),
+            ([("future_state", final())], "unknown_state 1"),
+            ([("running", final(finalized=False, running=1))], "running 1"),
+            ([("noop", final(failed=0, unknown=0))], "noop 1"),  # with an operations failure below
+        ]
+        for runs, text in cases[:-1]:
+            with self.subTest(runs=runs):
+                self.assertUnverified(runs, text)
+        self.fx.sql("live", "ALTER TABLE operations RENAME TO operations_raw")
+        self.fx.sql("live", "CREATE VIEW operations AS SELECT id,state FROM operations_raw")
+        self.assertUnverified(cases[-1][0], "operations_since_start not collected: sqlite error (OperationalError)")
+
+    def test_normal_states_and_zero_values_still_pass(self):
+        for state, payload, text in [("noop", final(), "noop 1"), ("observed", final(claimed=3), "observed 1"),
+                                     ("completed", final(claimed=2, completed=2), "succeeded 1")]:
+            with self.subTest(state=state):
+                code, report, check, line = self.report_for([(state, payload)])
+                self.assertEqual((code, report["result"], check["status"]), (0, "match", "match"))
+                self.assertIn(text, check["detail"])
+                self.assertIn("release-verify 0.8.9: match (exit 0)", self.fx.last_err)
+                run = report["evidence"]["server"]["runs_since_start"][0]
+                self.assertEqual([run[k] for k in rv.REQUIRED_COUNTS], [0, 0, 0, 0])
+
+    def test_rv04_original_repros_unchanged(self):
+        self.assertUnverified([("noop", {"finalized": True})], "missing_evidence 1")
+        add_run(self.fx, "r9", "noop", final())
+        self.fx.sql("live", "INSERT INTO operations VALUES('op-new','running',?,?)", STARTED + 20, STARTED + 20)
+        self.fx.sql("live", "ALTER TABLE operations RENAME TO operations_raw")
+        self.fx.sql("live", "CREATE VIEW operations AS SELECT id,state FROM operations_raw")
+        code, report = self.fx.execute()
+        self.assertEqual((code, report["result"]), (3, "unverified"))
+        self.assertEqual(report["evidence"]["server"]["open_operations"], {"needs_verification": 1, "running": 1})
+        self.assertIsNone(report["evidence"]["server"]["operations_since_start"])
 
 
 if __name__ == "__main__":
