@@ -241,6 +241,48 @@ func TestTaskExplicitRuleBindingSnapshotsVersions(t *testing.T) {
 	}
 }
 
+// The editor's “确认采用当前规则版本” only sends the current versions with an
+// otherwise unchanged task: saving the old binding after a rule edit is a
+// conflict, the same task with the current versions saves under its own ID with
+// its other settings, and a disabled rule still blocks the binding.
+func TestTaskSaveAdoptsCurrentRuleVersionOnlyWhenSent(t *testing.T) {
+	s, _, admin, _, task, m := taskFixture(t, "observe", "manual", "rules")
+	rules, e := s.Rules(admin, m.AccountID)
+	if e != nil || len(rules) != 1 {
+		t.Fatal(rules, e)
+	}
+	task.RuleIDs = []string{rules[0].ID}
+	task.RuleVersions = map[string]int{rules[0].ID: rules[0].Version}
+	task.MaxBatch = 7
+	saved, e := s.SaveTask(admin, task)
+	if e != nil {
+		t.Fatal(e)
+	}
+	old := rules[0].Version
+	rules[0].Name = "改过的规则"
+	edited, e := s.SaveRule(admin, rules[0])
+	if e != nil || edited.Version == old {
+		t.Fatal(edited, e)
+	}
+	if _, e = s.SaveTask(admin, saved); !errors.Is(e, ErrConflict) {
+		t.Fatal("old binding saved after the rule changed", e)
+	}
+	adopt := saved
+	adopt.RuleVersions = map[string]int{rules[0].ID: edited.Version}
+	got, e := s.SaveTask(admin, adopt)
+	if e != nil || got.ID != saved.ID || got.RuleVersions[rules[0].ID] != edited.Version || len(got.RuleIDs) != 1 || got.MaxBatch != 7 || got.Mode != saved.Mode || got.Enabled != saved.Enabled {
+		t.Fatal(got, e)
+	}
+	edited.Enabled = false
+	if edited, e = s.SaveRule(admin, edited); e != nil {
+		t.Fatal(e)
+	}
+	got.RuleVersions = map[string]int{rules[0].ID: edited.Version}
+	if _, e = s.SaveTask(admin, got); !errors.Is(e, ErrInput) {
+		t.Fatal("disabled rule accepted", e)
+	}
+}
+
 func TestTaskBindingCannotSkipHigherPriorityRule(t *testing.T) {
 	s, _, admin, _, task, m := taskFixture(t, "observe", "manual", "rules")
 	rules, e := s.Rules(admin, m.AccountID)

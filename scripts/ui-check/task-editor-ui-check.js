@@ -1,10 +1,11 @@
-// Mail Auto 0.8.6–0.8.7 task editor and task error regression check (lightweight
+// Mail Auto 0.8.6–0.8.13 task editor and task error regression check (lightweight
 // plan, suggestions 2 and 3): default fields, the “更多设置” fold and its
 // summary, open-and-save of existing tasks without losing fields, checks on
 // folded fields, save / enable / run failure messages, and stale responses
 // after edits, reopening or a mailbox switch. 0.8.7: the summary states what
 // the grant still enforces (LE-01) and the write note follows a task created
-// while edits continued (LE-02). It replaces the page's API with
+// while edits continued (LE-02). 0.8.13: bound rule versions and the explicit
+// “确认采用当前规则版本” (lightweight plan item C). It replaces the page's API with
 // an in-memory fake, so it needs no mailbox and sends nothing anywhere.
 // Usage: run through scripts/ui-check/run.sh, or open a throwaway instance,
 // log in and evaluate this file. Resolves to {pass, results}.
@@ -32,7 +33,9 @@
   let grantOver = {}; // per-case grant changes (LE-01)
   const policy = (id) => ({ ...grantBase(id), ...grantOver });
   const grantBase = (id) => ({ account_id: id, version: 4, enabled: true, mode: "execute", source_folders: ["INBOX", "Archive"], destinations: ["Archive"], actions: ["move"], allow_internal: true, protect_unread: true, protect_flagged: true, protected_senders: [], max_batch: 20, stable_seconds: 180, include_history: true, since: 0, expires: now + 86400 * 20 });
-  const rules = (id) => [
+  let ruleOver = null; // per-case rule list changes (item C)
+  const rules = (id) => (ruleOver ? ruleOver(id, baseRules(id)) : baseRules(id));
+  const baseRules = (id) => [
     { id: "r1-" + id, account_id: id, name: "账单归档", version: 3, priority: 10, enabled: true, source_folders: ["INBOX"], match: { mode: "all", conditions: [], groups: [] }, action: "move", also: [], destination: "Archive" },
     { id: "r2-" + id, account_id: id, name: "通知归档", version: 5, priority: 20, enabled: true, source_folders: ["INBOX"], match: { mode: "all", conditions: [], groups: [] }, action: "move", also: [], destination: "Archive" },
   ];
@@ -81,6 +84,7 @@
     }
     gets++;
     const id = owner(url);
+    if (url.startsWith("/api/rules?") && gates["rules-" + id]) await gates["rules-" + id].p;
     if (url === "/api/accounts") return accounts;
     if (url === "/api/status") return { version: "0.8.6", accounts: 2, messages: 0, unread: 0, folders: 0 };
     if (url === "/api/network") return { version: 1, global: { mode: "direct" }, agent: { mode: "inherit" }, telegram: { mode: "inherit" }, profiles: [] };
@@ -422,7 +426,162 @@
       check(`LE-02 下次保存（${mode}）：PUT 已创建任务与新版本，不重复创建，带较新字段`, req?.method === "PUT" && req.url === "/api/tasks/t-new" && req.body.version === 1 && req.body.mode === mode && req.body.name === "创建后较新名称-" + mode && sent.filter((x) => x.method === "POST" && x.url === "/api/tasks").length === 1, JSON.stringify(req && { url: req.url, method: req.method, version: req.body.version, mode: req.body.mode }));
     }
 
-    // ---- 9. Layout at this width (custom task, fold open) ----
+    // ---- 9. Item C: bound rule versions and the explicit adoption of current versions ----
+    // t-custom binds 账单归档 v2 (current v3) and 通知归档 v5 (current).
+    const rv = () => $("#task-rule-versions");
+    const adoptBtn = () => rv().querySelector("[data-adopt-rule-versions]");
+    const bump = (rid, version) => (id, list) => list.map((r) => (r.id === rid + "-" + id ? { ...r, version } : r));
+    await reset("a1");
+    await openTask("t-custom");
+    check("C 版本显示：所选规则的绑定版本、当前版本及动作与目标", !rv().hidden && rv().innerText.includes("账单归档：绑定 v2，当前 v3") && rv().innerText.includes("通知归档：绑定 v5（当前版本）") && rv().innerText.includes("移到指定目录 →"), rv().innerText);
+    check("C 规则已更新、同一组规则可用：提供“确认采用当前规则版本”", !!adoptBtn() && adoptBtn().type === "button", rv().innerText);
+    check("C 打开编辑器不算修改", !isDirty($("#task-editor")));
+    // Not confirmed: refreshing the list, opening the fold and editing other fields keep the old binding.
+    let g3 = gets;
+    $("#refresh-tasks").click();
+    await until(() => gets > g3 + 2);
+    await wait(60);
+    $("#task-more").open = true;
+    edit("#task-limit", "9");
+    req = await submit();
+    check("C 未确认：刷新、展开更多设置、修改其他字段后仍按旧绑定版本保存", req?.method === "PUT" && same(req.body.rule_versions, custom.rule_versions) && same(req.body.rule_ids, custom.rule_ids) && req.body.max_batch === 9 && diff({ ...req.body, max_batch: 7 }, custom).length === 0, JSON.stringify(req?.body?.rule_versions));
+
+    // Confirm: draft only, then the save carries just the version change and the user's edits.
+    await reset("a1");
+    await openTask("t-custom");
+    edit("#task-name", "草稿名称");
+    edit("#task-notify", "all");
+    let n0 = sent.length;
+    adoptBtn().click();
+    await wait(30);
+    check("C 确认后只改草稿：不发送任何请求", sent.length === n0, sent.map((x) => x.url).join(","));
+    check("C 确认后标为未保存、说明保存后生效、按钮消失", isDirty($("#task-editor")) && rv().innerText.includes("账单归档：绑定 v2，已确认采用当前 v3（保存后生效）") && !adoptBtn() && err().includes("保存修改"), [rv().innerText, err()]);
+    check("C 确认不重置其他未保存字段", $("#task-name").value === "草稿名称" && $("#task-notify").value === "all" && $("#task-limit").value === "7" && $("#task-frequency-select").value === "cron" && $("#task-timezone").value === "America/New_York");
+    $("#close-task-editor").click();
+    await wait(20);
+    check("C 确认后的草稿受未保存保护：关闭时询问并保留", asked.length === 1 && $("#task-editor-dialog").open && rv().innerText.includes("已确认采用当前 v3"));
+    req = await submit();
+    const changed = diff(req?.body || {}, custom);
+    check("C 保存：PUT 原任务，只有版本绑定和用户修改的字段变化", req?.method === "PUT" && req.url === "/api/tasks/t-custom" && req.body.id === "t-custom" && req.body.version === 6 && same(changed, ["notify", "rule_versions"]) && req.body.name === "草稿名称", changed.join(","));
+    check("C 保存：所选规则采用当前版本，规则 ID 集合不变", same(req?.body?.rule_versions, { "r1-a1": 3, "r2-a1": 5 }) && same(req?.body?.rule_ids, ["r1-a1", "r2-a1"]), JSON.stringify(req?.body?.rule_versions));
+    check("C 不自动改为全部规则、不新建任务、不运行", req?.body?.rule_ids?.length === 2 && sent.length === 1 && !sent.some((x) => x.method === "POST"), sent.map((x) => x.method + " " + x.url).join(","));
+
+    // Cancel and reopen: the confirmation lived only in the discarded draft.
+    await reset("a1");
+    await openTask("t-custom");
+    adoptBtn().click();
+    answer = true;
+    $("#close-task-editor").click();
+    await wait(20);
+    answer = false;
+    await openTask("t-custom");
+    check("C 取消后重开：恢复原绑定，需重新确认", rv().innerText.includes("账单归档：绑定 v2，当前 v3") && !!adoptBtn() && !isDirty($("#task-editor")), rv().innerText);
+    $("#task-rules-all").checked = true;
+    $("#task-rules-all").dispatchEvent(new Event("change", { bubbles: true }));
+    check("C 改为全部启用规则时不显示版本绑定", rv().hidden);
+
+    // Blocked: deleted, disabled, not applicable, a higher-priority rule to include.
+    const blocked = [
+      ["规则已删除", (id, list) => list.filter((r) => r.id !== "r2-" + id), "原绑定的规则已删除"],
+      ["规则已停用", (id, list) => list.map((r) => (r.id === "r2-" + id ? { ...r, enabled: false } : r)), "「通知归档」已停用"],
+      ["规则不适用于源目录", (id, list) => list.map((r) => (r.id === "r2-" + id ? { ...r, source_folders: ["Spam"] } : r)), "不适用于所选源目录"],
+      ["需纳入更高优先级规则", (id, list) => [{ ...list[0], id: "r0-" + id, name: "最高优先", priority: 1, version: 1 }, ...list], "需要同时绑定优先级更高或相同的启用规则：「最高优先」"],
+    ];
+    for (const [label, over, text] of blocked) {
+      ruleOver = over;
+      await reset("a1");
+      await openTask("t-custom");
+      check(`C 阻断（${label}）：不提供确认，说明原因并沿用规则选择`, !adoptBtn() && rv().querySelector(".task-warning")?.textContent.includes(text), rv().innerText);
+      answers.push(failure(409, "rules_changed", { area: "rules" }));
+      req = await submit();
+      check(`C 阻断（${label}）：保存仍按旧版本提交，由服务器检查`, req?.body?.rule_versions?.["r1-a1"] === 2 && $("#task-editor-dialog").open, JSON.stringify(req?.body?.rule_versions));
+    }
+    ruleOver = null;
+
+    // Rules change again: before confirming (shown after a refresh), and after confirming (save conflict).
+    await reset("a1");
+    await openTask("t-custom");
+    edit("#task-name", "并发草稿");
+    ruleOver = bump("r1", 4);
+    g3 = gets;
+    $("#refresh-tasks").click();
+    await until(() => gets > g3 + 2);
+    await wait(60);
+    check("C 确认前规则再变：刷新后显示新的当前版本，草稿不变", rv().innerText.includes("账单归档：绑定 v2，当前 v4") && $("#task-name").value === "并发草稿", rv().innerText);
+    adoptBtn().click();
+    ruleOver = bump("r1", 5);
+    answers.push(failure(409, "rules_changed", { area: "rules" }));
+    g3 = gets;
+    req = await submit();
+    await until(() => gets > g3 + 2);
+    await wait(60);
+    check("C 确认后规则再变：保存冲突说明并提示重新确认", req?.body?.rule_versions?.["r1-a1"] === 4 && err().includes("绑定的规则在此期间已被修改或停用") && err().includes("确认采用当前规则版本") && err().includes("跟随账号全部启用规则"), err());
+    check("C 冲突后：草稿保留、编辑器打开、没有自动重试或静默更新", $("#task-editor-dialog").open && $("#task-name").value === "并发草稿" && isDirty($("#task-editor")) && sent.length === 1 && rv().innerText.includes("账单归档：绑定 v4，当前 v5") && !!adoptBtn(), [rv().innerText, sent.length]);
+    adoptBtn().click();
+    req = await submit();
+    check("C 再次确认后保存：采用最新版本", req?.body?.rule_versions?.["r1-a1"] === 5 && req.body.name === "并发草稿", JSON.stringify(req?.body?.rule_versions));
+    ruleOver = null;
+
+    // A late rule list for the same editor only updates the display; the draft keeps what was confirmed.
+    await reset("a1");
+    await openTask("t-custom");
+    adoptBtn().click();
+    ruleOver = bump("r1", 9);
+    release = hold("rules-a1");
+    $("#refresh-tasks").click();
+    await wait(40);
+    release();
+    await until(() => rv().innerText.includes("当前 v9"));
+    req = await submit();
+    check("C 迟到的规则列表：只更新显示，草稿仍为确认时的版本", req?.body?.rule_versions?.["r1-a1"] === 3, JSON.stringify(req?.body?.rule_versions));
+    ruleOver = null;
+
+    // A→B→A: A's late rule list does not reach B's page or editor; back on A the binding is A's own.
+    await reset("a1");
+    ruleOver = bump("r1", 8);
+    release = hold("rules-a1");
+    $("#refresh-tasks").click();
+    await wait(30);
+    await switchTo("a2");
+    await openTask("t-b");
+    release();
+    await wait(150);
+    check("C A 的迟到规则列表不影响 B 的页面与编辑器", $("#tasks-list").innerText.includes("任务-B") && $("#task-editor-dialog").open && $("#task-name").value === "任务-B" && rv().hidden && !isDirty($("#task-editor")));
+    answer = true;
+    $("#close-task-editor").click();
+    await wait(20);
+    answer = false;
+    ruleOver = null;
+    await switchTo("a1");
+    await openTask("t-custom");
+    check("C 切回 A：按 A 的当前规则显示并可确认", rv().innerText.includes("账单归档：绑定 v2，当前 v3") && !!adoptBtn(), rv().innerText);
+
+    // Saving while confirming (LE-02 style): the save carries the old binding, the confirmation stays in the draft.
+    await reset("a1");
+    await openTask("t-custom");
+    release = hold("save");
+    $("#task-editor").requestSubmit();
+    await until(() => sent.length === 1);
+    adoptBtn().click();
+    release();
+    await until(() => err().includes("保存期间的新修改尚未保存"));
+    await wait(60);
+    check("C 保存期间确认：已保存旧绑定，编辑器保留确认后的草稿", sent[0].body.rule_versions["r1-a1"] === 2 && $("#task-editor-dialog").open && isDirty($("#task-editor")) && rv().innerText.includes("账单归档：绑定 v2，已确认采用当前 v3（保存后生效）"), [JSON.stringify(sent[0].body.rule_versions), rv().innerText]);
+    req = await submit();
+    check("C 保存期间确认：下次保存更新同一任务的新版本并带确认的版本", req?.method === "PUT" && req.url === "/api/tasks/t-custom" && req.body.version === 7 && req.body.rule_versions["r1-a1"] === 3, JSON.stringify(req && { version: req.body.version, v: req.body.rule_versions }));
+    await reset("a1");
+    await openTask("t-custom");
+    adoptBtn().click();
+    release = hold("save");
+    $("#task-editor").requestSubmit();
+    await until(() => sent.length === 1);
+    edit("#task-name", "确认后保存中编辑");
+    release();
+    await until(() => err().includes("保存期间的新修改尚未保存"));
+    await wait(60);
+    check("C 确认后保存期间继续编辑：确认的版本已保存，较新名称保留", sent[0].body.rule_versions["r1-a1"] === 3 && $("#task-name").value === "确认后保存中编辑" && rv().innerText.includes("账单归档：绑定 v3（当前版本）") && !adoptBtn(), rv().innerText);
+
+    // ---- 10. Layout at this width (custom task, fold open) ----
     await reset("a1");
     await openTask("t-custom");
     const dialog = $("#task-editor-dialog");

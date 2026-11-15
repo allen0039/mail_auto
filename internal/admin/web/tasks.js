@@ -4,6 +4,9 @@
   // autoRequire in app.js); nothing here acts on another mailbox's cache.
   let tasks = [], policy = null, editing = null, selectedTask = "", telegram = null, timer = null, rules = [], readiness = {}, loaded = null;
   let detailMode = null, detailSeq = 0, preview = null, previewSeq = 0, previewAbort = null;
+  // Rule versions the open editor's task was bound to when it was opened (or
+  // last saved); only for display next to the draft's own rule_versions.
+  let boundAtOpen = {};
   // Last failed enable / pause / run per task of the shown mailbox, kept on the
   // card until that task's next successful action or a mailbox switch.
   let actionErrors = {};
@@ -93,7 +96,7 @@
           : { text: `任务已在其他位置更新，这次没有${verb}。列表已刷新为最新配置，请确认后再试。`, refresh: true };
       case "rules_changed":
         return save
-          ? { text: `绑定的规则在此期间已被修改或停用，不能按原版本保存。${kept}可改为“跟随账号全部启用规则”后保存，或从规则列表的“创建任务”按最新版本重新绑定。` }
+          ? { text: `绑定的规则在此期间已被修改或停用，不能按原版本保存。${kept}规则列表已刷新：可在规则范围处查看版本，确认采用当前规则版本后再保存；也可改为“跟随账号全部启用规则”。`, refresh: true }
           : { text: `${verb}未完成：${issueText.rules_changed()}。`, area: "rules", refresh: true };
       case "task_limit_reached":
         return { text: `每个邮箱最多保存 50 项任务，已达到上限，新任务没有保存。${kept}` };
@@ -165,6 +168,71 @@
           )
           .join("")
       : '<p class="muted small">当前源目录没有可绑定的启用规则；可继续使用全部规则模式。</p>';
+    renderRuleVersions();
+  }
+
+  // Bound rule versions. A task keeps the versions it was saved with; a rule
+  // edited since then makes the server refuse the task (rules_changed) until
+  // the binding is updated. The editor shows bound and current versions, and
+  // only an explicit “确认采用当前规则版本” puts the current versions into the
+  // draft (still to be saved). Opening, refreshing or saving never does it.
+  const ruleActions = { move: "移到指定目录", archive: "移入归档目录", trash: "移入回收站", keep: "保留原位", ai: "由 AI 判断", mark_read: "标为已读", mark_unread: "标为未读", flag: "加星标", unflag: "取消星标" };
+  const ruleTarget = (r) => `${ruleActions[r.action] || r.action}${r.destination ? ` → ${folderLabel(r.destination)}` : ""}`;
+  const applies = (r, sources) => r.source_folders.some((f) => sources.includes(f));
+  // Why the selected rules cannot take their current versions, or "". The same
+  // conditions the server checks on save (tasks.go resolveTaskRulesFrom): every
+  // bound rule still exists, is enabled and applies to a chosen source folder,
+  // and every enabled rule of equal or higher priority on those folders is bound.
+  function adoptBlocker(ids, sources) {
+    if (!autoLoaded(loaded) || loaded.account !== editing.account_id) return "正在加载该邮箱的规则，请稍后";
+    const gone = (editing.rule_ids || []).filter((id) => !ids.includes(id));
+    if (gone.some((id) => !rules.some((r) => r.id === id))) return "原绑定的规则已删除";
+    if (gone.length) return "原绑定的规则不适用于所选源目录，或已从规则选择中取消";
+    const picked = ids.map((id) => rules.find((r) => r.id === id));
+    if (picked.some((r) => !r)) return "所选规则已删除";
+    if (picked.some((r) => !r.enabled)) return `规则「${picked.find((r) => !r.enabled).name}」已停用`;
+    if (picked.some((r) => !applies(r, sources))) return "所选规则不适用于所选源目录";
+    const max = Math.max(...picked.map((r) => r.priority));
+    const missing = rules.filter((r) => r.enabled && r.priority <= max && applies(r, sources) && !ids.includes(r.id));
+    if (missing.length) return `需要同时绑定优先级更高或相同的启用规则：${missing.map((r) => `「${r.name}」`).join("、")}`;
+    return "";
+  }
+  function renderRuleVersions() {
+    const box = $("#task-rule-versions");
+    if (!editing || $("#task-rules-all").checked) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    const ids = selectedRuleIDs(), sources = checked();
+    const current = autoLoaded(loaded) && loaded.account === editing.account_id;
+    const draft = editing.rule_versions || {};
+    const outdated = [];
+    const lines = ids.concat((editing.rule_ids || []).filter((id) => !ids.includes(id))).map((id) => {
+      const r = current ? rules.find((x) => x.id === id) : null;
+      const bound = draft[id], orig = boundAtOpen[id];
+      if (!r) return `<li>${current ? "一条原绑定的规则已删除" : "规则加载中"}${bound ? `（绑定 v${bound}）` : ""}</li>`;
+      const notes = [!r.enabled && "已停用", !applies(r, sources) && "不适用于所选源目录", !ids.includes(id) && "未选中"].filter(Boolean);
+      let text;
+      if (!bound) text = `新选择，保存时绑定当前 v${r.version}`;
+      else if (bound !== r.version) {
+        if (ids.includes(id)) outdated.push(id);
+        text = `绑定 v${bound}，当前 v${r.version}`;
+      } else if (orig && orig !== bound) text = `绑定 v${orig}，已确认采用当前 v${r.version}（保存后生效）`;
+      else text = `绑定 v${bound}（当前版本）`;
+      return `<li class="${bound && bound !== r.version ? "is-outdated" : ""}">${esc(r.name)}：${esc(text)} · ${esc(ruleTarget(r))}${notes.length ? ` · ${esc(notes.join("，"))}` : ""}</li>`;
+    });
+    let action = "";
+    if (outdated.length) {
+      const blocker = adoptBlocker(ids, sources);
+      action = blocker
+        ? `<p class="task-warning">绑定的规则版本已过期，不能直接采用当前版本：${esc(blocker)}。请调整上方的规则选择或改为跟随全部启用规则；保存时服务器仍会检查。</p>`
+        : `<p>保存前需要确认采用当前规则版本，否则服务器会拒绝按旧版本保存。确认只更新所选规则的版本绑定，仍需保存任务，不会改变规则范围、源目录或其他设置。</p><button type="button" class="secondary" data-adopt-rule-versions>确认采用当前规则版本</button>`;
+    } else if ((editing.rule_ids || []).some((id) => !ids.includes(id)) && current) {
+      action = `<p class="task-warning">${esc(adoptBlocker(ids, sources) || "原绑定的规则已不在规则选择中")}。请调整上方的规则选择；保存时服务器仍会检查。</p>`;
+    }
+    box.innerHTML = `<p>规则版本：</p><ul>${lines.join("")}</ul>${action}`;
+    box.hidden = !lines.length;
   }
 
   function updateFields() {
@@ -336,6 +404,8 @@
     readiness = Object.fromEntries(ready.map((r) => [r.task_id, r]));
     $("#tasks-policy-note").textContent = `整理授权${policy.enabled ? "已启用" : "未启用"} · ${policy.mode === "observe" ? "观察上限" : "允许执行"} · 每批最多 ${policy.max_batch} 封 · 内置定时${policy.allow_internal ? "已允许" : "未允许"}`;
     renderTasks();
+    // Newer rule versions are shown in an open editor; its draft is not touched.
+    if (editing && $("#task-editor-dialog").open) renderRuleVersions();
     if (!tasks.some((t) => t.id === selectedTask)) selectedTask = tasks[0]?.id || "";
     await loadRuns();
   }
@@ -427,6 +497,7 @@
           },
           ...(prefill || {}),
         };
+    boundAtOpen = { ...(editing.rule_versions || {}) };
     $("#task-editor-title").textContent = editing.id ? "编辑整理任务" : "新建整理任务";
     $("#save-task").textContent = editing.id ? "保存修改" : "保存为暂停观察任务";
     $("#task-name").value = editing.name;
@@ -587,6 +658,22 @@
     renderTaskRuleOptions();
   });
 
+  $("#task-rules").addEventListener("change", renderRuleVersions);
+  $("#task-rule-versions").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-adopt-rule-versions]") || !editing) return;
+    const ids = selectedRuleIDs(), blocker = adoptBlocker(ids, checked());
+    if (blocker) {
+      $("#task-editor-error").textContent = `没有采用当前规则版本：${blocker}。`;
+      renderRuleVersions();
+      return;
+    }
+    // Only the selected rules' versions change, in this draft only.
+    editing.rule_versions = { ...(editing.rule_versions || {}), ...Object.fromEntries(ids.map((id) => [id, rules.find((r) => r.id === id).version])) };
+    touchDraft($("#task-editor"));
+    $("#task-editor-error").textContent = "已在草稿中采用所选规则的当前版本；点击“保存修改”后生效。";
+    renderRuleVersions();
+  });
+
   $("#task-editor").addEventListener("submit", async (e) => {
     e.preventDefault();
     // Set once the request is sent: after that, a failure is reported only to
@@ -671,6 +758,10 @@
           // Keep the dialog and the newer edits; the next save updates the
           // saved task with its new version instead of creating another one.
           Object.assign(target, { id: saved.id, version: saved.version, enabled: saved.enabled });
+          if (target === editing) {
+            boundAtOpen = { ...input.rule_versions };
+            renderRuleVersions();
+          }
           $("#task-editor-title").textContent = "编辑整理任务";
           // A created task is now an existing one: the write note and summary
           // follow the form as it is (including edits made during the save).

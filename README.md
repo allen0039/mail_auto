@@ -23,7 +23,7 @@ Go 编写的个人多邮箱工作台：IMAP 自动同步、原邮箱文件夹分
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.8.12`，可使用固定镜像标签 `allen0039/mail-auto:0.8.12`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥。0.7.0 至当前 0.8.x 都是 schema 13（0.6.x 为 schema 12）：同 schema 的小版本之间可直接换回旧镜像回滚；跨 schema 回退时旧二进制拒绝打开数据库，须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md#升级与回退)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.8.13`，可使用固定镜像标签 `allen0039/mail-auto:0.8.13`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥。0.7.0 至当前 0.8.x 都是 schema 13（0.6.x 为 schema 12）：同 schema 的小版本之间可直接换回旧镜像回滚；跨 schema 回退时旧二进制拒绝打开数据库，须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md#升级与回退)。
 
 在运行 Docker 的主机执行：
 
