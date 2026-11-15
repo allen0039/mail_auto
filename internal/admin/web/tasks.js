@@ -461,9 +461,11 @@
             .join("")
         : '<p class="muted">尚无运行记录。外部模式等待实际 MCP 调用。</p>',
     );
-    if (runs.some((r) => active(r.state) || !r.finalized) && state.view === "automation") {
+    const inAutomation = state.view === "automation" || (typeof paneOf === "function" && paneOf(state.view) === "automation");
+    if (runs.some((r) => active(r.state) || !r.finalized) && inAutomation) {
       timer = setTimeout(() => {
-        if (state.view === "automation" && state.session) loadRuns().catch(() => {});
+        const stillInAutomation = state.view === "automation" || (typeof paneOf === "function" && paneOf(state.view) === "automation");
+        if (stillInAutomation && state.session) loadRuns().catch(() => {});
       }, 3000);
     }
   }

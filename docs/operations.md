@@ -123,11 +123,11 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 
 升级前记录镜像 ID/标签，执行一致性数据库备份并单独备份主密钥及外部 secrets；保留旧镜像。保存升级前 `compose.yaml`、自定义覆盖文件和 YAML 配置。更新 Compose 中的镜像版本后执行 `ma pull`、`ma up -d --no-build`，检查健康状态和版本。
 
-回退前先确认新旧版本的 schema：`/readyz` 返回当前 `schema`，各版本是否迁移见本页各小节和 [CHANGELOG](../CHANGELOG.md)。0.7.0 至当前 0.8.x 均为 schema 13，其间没有迁移。
+回退前先确认新旧版本的 schema：`/readyz` 返回当前 `schema`，各版本是否迁移见本页各小节和 [CHANGELOG](../CHANGELOG.md)。0.7.0 至当前 0.9.x 均为 schema 13，其间没有迁移。
 
 | 情况 | 例子 | 做法 | 会丢失什么 |
 | --- | --- | --- | --- |
-| 同 schema 小版本回滚 | 0.9.0 → 0.8.13（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
+| 同 schema 小版本回滚 | 0.9.1 → 0.9.0（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
 | 跨 schema 恢复 | 0.7.x（schema 13）→ 0.6.x（schema 12） | 旧二进制拒绝打开更新的 schema，只换镜像无法启动。停止服务，按下方「联合恢复」把**升级前快照与配套主密钥**放入新卷，再启动旧镜像；0.5.x 起的快照还须按对应小节执行 `bootstrap recover` | 快照之后的全部本地变化：运行记录、规则与任务修改、新增连接、Agent 与 Telegram 记录 |
 
 两种方式都不会撤销已经写入原邮箱的移动或标记；回退后重新同步并人工核对远端状态，不要重放旧任务。不要手工修改 `PRAGMA user_version`，也不要把升级后的 WAL 混入旧快照。
@@ -142,7 +142,7 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 `scripts/release-verify/release_verify.py` 在本机重新采集一次发布证据（不替代独立审计）：本机读取 git 远端 `main`／版本标签与镜像仓库，服务器部分通过 SSH 把同一脚本交给 `python3 -` 执行，只读取 `docker inspect`、`/healthz`、`/readyz` 和 SQLite（`mode=ro`、`query_only`）。它不拉取或部署镜像、不改配置、不触发任务或模型、不写邮件、不核验或重放待核验操作，也不清理备份和镜像。需要本机有 `git`、`docker buildx`，服务器有 `python3`、`docker`、`curl`，SSH 用户能读取数据卷与密钥卷（一般为 root）。
 
 ```bash
-scripts/release-verify/release_verify.py --version 0.9.0 --commit <发布提交> \
+scripts/release-verify/release_verify.py --version 0.9.1 --commit <发布提交> \
   --ssh <SSH 目标> --compose-dir <服务器上的 Compose 目录> \
   --backup <服务器上的升级前备份目录>
 ```

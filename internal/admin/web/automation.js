@@ -110,7 +110,7 @@
   // (old run links). Returns false when the user keeps unsaved edits.
   window.selectAutomationAccount = async (id) => {
     if (!state.accounts.some((a) => a.id === id)) throw new Error("该运行记录所属的邮箱已不存在");
-    if (state.view !== "automation") {
+    if (paneOf(state.view) !== "automation") {
       const pane = $(`#${paneOf(state.view)}-pane`);
       if (pane && !confirmDiscard(pane)) return false;
       if (!confirmLeave()) return false;
@@ -127,7 +127,7 @@
   // Called after a rule, task, grant or folder setting is saved: the summary
   // and every task's readiness depend on all of them.
   window.automationChanged = async () => {
-    if (state.view !== "automation") return;
+    if (paneOf(state.view) !== "automation") return;
     await Promise.all([refreshSummary(), window.loadTasks()]);
   };
 
