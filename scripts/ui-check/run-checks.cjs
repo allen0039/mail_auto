@@ -12,14 +12,36 @@ const fs = require("fs");
 const widths = [[1280, 900], [375, 812], [390, 844]];
 
 // Returns failure messages for one script result; empty means it passed.
+// Accepted shapes: {pass, results:[{name, ok}]} and {pass, total, failed:[...]}.
+// When both results and failed are present, every piece of evidence is checked:
+// an empty failed list never hides an ok:false entry in results.
 function problems(r) {
   if (!r || typeof r !== "object" || typeof r.pass !== "boolean") return ["invalid result: missing boolean pass"];
-  const list = Array.isArray(r.results) ? r.results : null;
-  const total = list ? list.length : r.total;
+  const hasResults = r.results !== undefined;
+  const hasFailed = r.failed !== undefined;
+  if (hasResults && !Array.isArray(r.results)) return ["invalid result: results is not a list"];
+  if (hasFailed && !Array.isArray(r.failed)) return ["invalid result: failed is not a list"];
+  if (!hasResults && !hasFailed) return ["invalid result: no check list"];
+  const label = (x) => x.name + (x.detail ? `: ${x.detail}` : "");
+  const out = [];
+  let total = r.total;
+  if (hasResults) {
+    r.results.forEach((x, i) => {
+      if (!x || typeof x !== "object" || typeof x.ok !== "boolean") out.push(`invalid check #${i + 1}: ok must be a boolean`);
+      else if (!x.ok) out.push(label(x));
+    });
+    if (total !== undefined && total !== r.results.length) out.push("invalid result: total does not match results");
+    total = r.results.length;
+  }
   if (!Number.isInteger(total) || total <= 0) return ["invalid result: no checks reported"];
-  const failed = Array.isArray(r.failed) ? r.failed : list ? list.filter((x) => !x || !x.ok) : null;
-  if (!failed) return ["invalid result: no failure list"];
-  const out = failed.map((x) => (x && x.name ? x.name + (x.detail ? `: ${x.detail}` : "") : "unnamed check failed"));
+  if (hasFailed) {
+    if (r.failed.length > total) out.push("invalid result: more failures than checks");
+    r.failed.forEach((x, i) => {
+      if (!x || typeof x !== "object" || typeof x.name !== "string" || (x.ok !== undefined && x.ok !== false)) out.push(`invalid failure entry #${i + 1}`);
+      else if (!hasResults) out.push(label(x));
+    });
+    if (hasResults && r.failed.length !== r.results.filter((x) => x && x.ok === false).length) out.push("invalid result: failed list does not match results");
+  }
   if (!r.pass && !out.length) out.push("pass is false");
   if (r.pass && out.length) out.unshift("pass is true but checks failed");
   return out;
@@ -66,10 +88,13 @@ async function main() {
   return pass;
 }
 
-main().then(
-  (pass) => process.exit(pass ? 0 : 1),
-  (e) => {
-    console.error(`UI check aborted: ${e && e.message ? e.message.split("\n")[0] : e}`);
-    process.exit(1);
-  },
-);
+module.exports = { problems };
+if (require.main === module) {
+  main().then(
+    (pass) => process.exit(pass ? 0 : 1),
+    (e) => {
+      console.error(`UI check aborted: ${e && e.message ? e.message.split("\n")[0] : e}`);
+      process.exit(1);
+    },
+  );
+}
