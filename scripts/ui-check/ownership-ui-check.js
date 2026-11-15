@@ -19,7 +19,7 @@
   };
   const realApi = window.api, realConfirm = window.confirm, realNotify = window.notify;
   let answer = false;
-  const asked = [], notes = [], sent = [];
+  const asked = [], notes = [], sent = [], previews = [];
   window.confirm = (m) => (asked.push(m), answer);
   window.notify = (m, bad) => notes.push(String(m));
   const now = Math.floor(Date.now() / 1000);
@@ -43,6 +43,18 @@
   const fails = new Set();
   window.api = async (url, options = {}) => {
     const method = options.method || "GET", body = options.body ? JSON.parse(options.body) : null;
+    if (url === "/api/rules/preview") {
+      // Read-only: recorded apart from writes. Page 1 and later pages can be delayed separately.
+      previews.push(body);
+      const k = body.cursor ? "preview-more" : "preview";
+      if (gates[k]) await gates[k].p;
+      return { items: [{ message: { subject: `预览-${body.rule_id}-${body.cursor || "p1"}`, folder: "INBOX" }, status: "matched", action: "keep", also: [], reasons: [] }], total: 2, next_cursor: body.cursor ? "" : "next-" + body.rule_id };
+    }
+    const hist = /^\/api\/rules\/(r-a[12])\/history$/.exec(url);
+    if (hist) {
+      if (gates.history) await gates.history.p;
+      return [{ ...rule(hist[1].slice(2)), updated_at: now }];
+    }
     if (method !== "GET") {
       sent.push({ url, method, body });
       if (gates.save) await gates.save.p;
@@ -463,6 +475,87 @@
     await until(() => sent.length > n2);
     check("S2-01b A→B→A：B 迟到不覆盖 A；A 加载后运行 t-a1", allA(pageAccount()) && sent[n2]?.url === "/api/tasks/t-a1/run", JSON.stringify(sent[n2]));
     await wait(60);
+
+    // ---- S2-01-R2 (0.8.3): rule 试运行 / 历史 responses after a switch ----
+    const previewOpen = () => $("#rule-preview-dialog").open, historyOpen = () => $("#rule-history-dialog").open;
+    const closeViews = () => { for (const d of ["#rule-preview-dialog", "#rule-history-dialog"]) if ($(d).open) $(d).close(); };
+    for (const [label, gate, cmd, open, items] of [["试运行", "preview", "preview", previewOpen, "#rule-preview-items"], ["历史", "history", "history", historyOpen, "#rule-history-items"]]) {
+      // Late response after switching to B.
+      await reset("a1");
+      release = hold(gate);
+      $(`[data-rule-command="${cmd}"][data-rule-id="r-a1"]`).click();
+      await wait(30);
+      switchTo("a2");
+      await until(() => $("#tasks-list").innerText.includes("任务-a2"));
+      release();
+      await wait(120);
+      check(`S2-01-R2 A 的${label}迟到、页面已切到 B：弹窗不打开，不显示 A 的结果`, !open() && allB(pageAccount()) && !$(items).innerText.includes("r-a1"), `${open()}/${$(items).innerText.slice(0, 60)}`);
+      // A → B → A: the earlier A session is not accepted either.
+      await reset("a1");
+      release = hold(gate);
+      $(`[data-rule-command="${cmd}"][data-rule-id="r-a1"]`).click();
+      await wait(30);
+      switchTo("a2");
+      await until(() => $("#tasks-list").innerText.includes("任务-a2"));
+      switchTo("a1");
+      await until(() => $("#tasks-list").innerText.includes("任务-a1") && !$("#new-rule").disabled);
+      release();
+      await wait(120);
+      check(`S2-01-R2 A→B→A 后 A 的旧${label}迟到：弹窗不打开`, !open() && allA(pageAccount()), `${open()}`);
+      // Normal use on the shown mailbox still works.
+      await reset("a2");
+      $(`[data-rule-command="${cmd}"][data-rule-id="r-a2"]`).click();
+      await until(open);
+      check(`S2-01-R2 当前邮箱 B 的${label}正常打开并显示 r-a2`, open() && $(items).innerText.includes("a2") && !$(items).innerText.includes("r-a1"), $(items).innerText.slice(0, 80));
+      $(cmd === "preview" ? "#close-rule-preview" : "#close-rule-history").click();
+      check(`S2-01-R2 ${label}可正常关闭`, !open());
+    }
+    // Paging keeps the session's own mailbox, rule and cursor.
+    await reset("a2");
+    previews.length = 0;
+    $('[data-rule-command="preview"][data-rule-id="r-a2"]').click();
+    await until(previewOpen);
+    $("#rule-preview-more").click();
+    await until(() => previews.length > 1 && $("#rule-preview-items").innerText.includes("next-r-a2"));
+    check("S2-01-R2 翻页：请求为 a2 / r-a2 / next-r-a2，结果追加在同一弹窗", JSON.stringify(previews[1]) === JSON.stringify({ account_id: "a2", rule_id: "r-a2", cursor: "next-r-a2", limit: 25 }) && $("#rule-preview-items").querySelectorAll(".organizer-item").length === 2, JSON.stringify(previews));
+    // Paging after a switch sends nothing (the old session is over).
+    await reset("a1");
+    $('[data-rule-command="preview"][data-rule-id="r-a1"]').click();
+    await until(previewOpen);
+    switchTo("a2");
+    await until(() => $("#tasks-list").innerText.includes("任务-a2"));
+    previews.length = 0;
+    $("#rule-preview-more").hidden = false;
+    $("#rule-preview-more").click();
+    await wait(60);
+    check("S2-01-R2 切换后对旧试运行翻页：不发送请求，不混用 B 账号与 A 规则", previews.length === 0 && !previewOpen(), JSON.stringify(previews));
+    // Close, reopen: the previous session's late page does not land in the new dialog.
+    await reset("a1");
+    $('[data-rule-command="preview"][data-rule-id="r-a1"]').click();
+    await until(previewOpen);
+    release = hold("preview-more");
+    $("#rule-preview-more").click();
+    await wait(30);
+    $("#close-rule-preview").click();
+    $('[data-rule-command="preview"][data-rule-id="r-a1"]').click();
+    await until(() => previewOpen() && $("#rule-preview-items").querySelectorAll(".organizer-item").length === 1);
+    release();
+    await wait(120);
+    check("S2-01-R2 关闭后重开：上一会话迟到的下一页不追加到新弹窗", previewOpen() && $("#rule-preview-items").querySelectorAll(".organizer-item").length === 1 && $("#rule-preview-summary").textContent.includes("已查看 1 /"), $("#rule-preview-summary").textContent);
+    closeViews();
+    // A second 试运行 started before the first returns replaces it.
+    await reset("a1");
+    previews.length = 0;
+    release = hold("preview");
+    $('[data-rule-command="preview"][data-rule-id="r-a1"]').click();
+    await wait(30);
+    $('[data-rule-command="preview"][data-rule-id="r-a1"]').click();
+    await wait(30);
+    release();
+    await until(previewOpen);
+    await wait(80);
+    check("S2-01-R2 重复发起试运行：只显示最新一次的结果（1 条，无重复追加）", previews.length === 2 && previewOpen() && $("#rule-preview-items").querySelectorAll(".organizer-item").length === 1, `${previews.length}/${$("#rule-preview-items").querySelectorAll(".organizer-item").length}`);
+    closeViews();
 
     // A request sent for A stays A's; its callback does not touch B's page.
     await reset("a1");

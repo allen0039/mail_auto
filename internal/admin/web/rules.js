@@ -149,20 +149,36 @@
       } else notify("规则已保存");
       await reloadRules(t);if(autoSameAccount(t))await window.automationChanged?.();});
   }));
-  async function loadPreview(append=false){
-    const out=await api("/api/rules/preview",{method:"POST",body:JSON.stringify({account_id:accountID(),rule_id:preview.ruleID,cursor:append?preview.cursor:"",limit:25})});preview.cursor=out.next_cursor;preview.count=(append?preview.count:0)+out.items.length;
+  // Rule 试运行 and 历史 are sessions: each records the mailbox, switch epoch
+  // and rule it was asked for. A response is shown (and its dialog opened)
+  // only while that session is still the current one for the shown mailbox;
+  // switching, closing the dialog or starting another query ends it. Paging
+  // reuses the session's own mailbox, rule and cursor.
+  let history=null;
+  const viewLive=(s,current)=>!!s&&s===current&&s.account===autoScope.account&&s.epoch===autoScope.epoch;
+  const viewSession=r=>({account:r.account_id,ruleID:r.id,epoch:autoScope.epoch,cursor:"",count:0});
+  async function loadPreview(s,append=false){
+    if(!viewLive(s,preview)||(append&&!$("#rule-preview-dialog").open))throw new Error("试运行已关闭或邮箱已切换，请重新试运行");
+    const out=await api("/api/rules/preview",{method:"POST",body:JSON.stringify({account_id:s.account,rule_id:s.ruleID,cursor:append?s.cursor:"",limit:25})});
+    if(!viewLive(s,preview))return false;
+    s.cursor=out.next_cursor;s.count=(append?s.count:0)+out.items.length;
     const html=out.items.map(item=>`<div class="organizer-item"><strong>${esc(item.message.subject||"（无主题）")}</strong><span class="badge">${esc(statuses[item.status]||item.status)}</span><p>${esc(folderLabel(item.message.folder))} → ${esc(describeAction(item))}</p><p class="muted">${esc(item.reasons.join("；"))}</p></div>`).join("");
     if(append)$("#rule-preview-items").insertAdjacentHTML("beforeend",html);else $("#rule-preview-items").innerHTML=html||'<p class="muted">当前源目录没有可预览邮件。</p>';
-    $("#rule-preview-summary").textContent=`已查看 ${preview.count} / ${out.total} 封 · 只预览，不移动邮件；未读 / 星标 / 联系人保护仍生效，试运行不受历史起点和稳定等待限制。`;$("#rule-preview-more").hidden=!preview.cursor;
+    $("#rule-preview-summary").textContent=`已查看 ${s.count} / ${out.total} 封 · 只预览，不移动邮件；未读 / 星标 / 联系人保护仍生效，试运行不受历史起点和稳定等待限制。`;$("#rule-preview-more").hidden=!s.cursor;
+    return true;
   }
-  $("#rule-preview-more").addEventListener("click",run(()=>loadPreview(true)));$("#close-rule-preview").addEventListener("click",()=>$("#rule-preview-dialog").close());$("#close-rule-history").addEventListener("click",()=>$("#rule-history-dialog").close());
+  // Closing ends the session at once (not on the queued close event).
+  const endPreview=()=>{preview=null;},endHistory=()=>{history=null;};
+  $("#rule-preview-more").addEventListener("click",run(()=>loadPreview(preview,true)));
+  $("#close-rule-preview").addEventListener("click",()=>{endPreview();$("#rule-preview-dialog").close();});$("#rule-preview-dialog").addEventListener("cancel",endPreview);
+  $("#close-rule-history").addEventListener("click",()=>{endHistory();$("#rule-history-dialog").close();});$("#rule-history-dialog").addEventListener("cancel",endHistory);
   $("#rules-list").addEventListener("click",run(async e=>{
     const button=e.target.closest("[data-rule-command]");if(!button)return;autoRequire(loaded);const r=rules.find(r=>r.id===button.dataset.ruleId);if(!r)return;autoRequire(loaded,r.account_id);
     switch(button.dataset.ruleCommand){
       case "edit":openEditor(r);break;case "clone":openEditor(r,true);break;case "task":await window.createTaskFromRule(r.id);break;
       case "toggle":{const t=autoTicket();await api(`/api/rules/${encodeURIComponent(r.id)}`,{method:"PUT",body:JSON.stringify({...r,enabled:!r.enabled})});await reloadRules(t);}notify(r.enabled?"规则已暂停":"规则已启用，等待任务调用");await window.automationChanged?.();break;
-      case "preview":preview={ruleID:r.id,cursor:"",count:0};await loadPreview();$("#rule-preview-dialog").showModal();break;
-      case "history":{const history=await api(`/api/rules/${encodeURIComponent(r.id)}/history`);$("#rule-history-items").innerHTML=history.map(v=>`<div class="organizer-item"><strong>v${v.version} · ${esc(v.name)}</strong><p>${esc(date(v.updated_at))} · ${v.enabled?"启用":"草稿 / 暂停"} · ${esc(describeAction({...v,destination:""}))}</p><p>${esc(describeGroup(v.match))}</p><p class="muted">${esc(v.source_folders.map(folderLabel).join("、"))}${v.destination?` → ${esc(folderLabel(v.destination))}`:""}</p></div>`).join("");$("#rule-history-dialog").showModal();break;}
+      case "preview":{const s=viewSession(r);preview=s;if(await loadPreview(s)&&viewLive(s,preview)&&!$("#rule-preview-dialog").open)$("#rule-preview-dialog").showModal();break;}
+      case "history":{const s=viewSession(r);history=s;const versions=await api(`/api/rules/${encodeURIComponent(r.id)}/history`);if(!viewLive(s,history))break;$("#rule-history-items").innerHTML=versions.map(v=>`<div class="organizer-item"><strong>v${v.version} · ${esc(v.name)}</strong><p>${esc(date(v.updated_at))} · ${v.enabled?"启用":"草稿 / 暂停"} · ${esc(describeAction({...v,destination:""}))}</p><p>${esc(describeGroup(v.match))}</p><p class="muted">${esc(v.source_folders.map(folderLabel).join("、"))}${v.destination?` → ${esc(folderLabel(v.destination))}`:""}</p></div>`).join("");if(!$("#rule-history-dialog").open)$("#rule-history-dialog").showModal();break;}
     }
   }));
   $("#ai-runs").addEventListener("click",run(async e=>{const button=e.target.closest("[data-cancel-batch]");if(!button)return;autoRequire(runsLoaded);await api(`/api/automation/batches/${encodeURIComponent(button.dataset.cancelBatch)}/cancel`,{method:"POST",body:"{}"});await loadRuns();notify("已停止本批未开始的操作");}));
