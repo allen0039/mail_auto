@@ -140,8 +140,16 @@ def connect(path):
     return conn
 
 
+# Run summary fields a post-deploy run must carry. TaskRun serializes all of
+# them without omitempty; only runs written before 0.4.18 lack queued/running,
+# and those can never be created after a current container started. A missing
+# field is therefore missing evidence, never 0.
+REQUIRED_COUNTS = ("failed", "unknown", "queued", "running")
+
+
 def count(payload, key):
-    v = payload.get(key, 0)
+    """A non-negative integer field of a run summary, or None when absent or malformed."""
+    v = payload.get(key)
     return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
 
 
@@ -155,13 +163,17 @@ def classify_run(state, payload):
         return "missing_evidence"
     if state in ("queued", "running", "awaiting_ai"):
         return "running"
-    counts = {k: count(payload, k) for k in ("failed", "unknown", "queued", "running")}
-    if state in ("failed", "partial", "interrupted") or counts["failed"]:
+    if state in ("failed", "partial", "interrupted"):
         return "failed"
-    if state == "needs_verification" or counts["unknown"]:
+    if state == "needs_verification":
         return "needs_verification"
+    counts = {k: count(payload, k) for k in REQUIRED_COUNTS}
     if None in counts.values() or not isinstance(payload.get("finalized"), bool):
         return "missing_evidence"
+    if counts["failed"]:
+        return "failed"
+    if counts["unknown"]:
+        return "needs_verification"
     if not payload["finalized"] or counts["queued"] or counts["running"]:
         return "not_finalized"
     return FINAL_STATES.get(state, "unknown_state")
@@ -209,6 +221,34 @@ def compare_tasks(cur, old):
     return out
 
 
+def section(out, key, collect):
+    try:
+        out[key] = collect()
+    except Exception as e:
+        out[key + "_error"] = short(e)
+
+
+def sync_stats(cur, since):
+    r = cur.execute("SELECT count(*) AS folders, coalesce(sum(synced_at>=?),0) AS synced, max(synced_at) AS newest FROM mailboxes", (since,)).fetchone()
+    return {"folders": r["folders"], "synced_since_start": r["synced"], "newest_synced_at": iso(r["newest"])}
+
+
+def post_deploy_runs(cur, since):
+    runs = []
+    for r in cur.execute("SELECT id,task_id,source,state,created_at,payload FROM task_runs WHERE created_at>=? ORDER BY created_at,id", (since,)):
+        try:
+            p = json.loads(r["payload"])
+        except ValueError:
+            p = None
+        item = {"run": r["id"][:8], "task": r["task_id"][:8], "source": r["source"], "state": r["state"],
+                "class": classify_run(r["state"], p), "created_at": iso(r["created_at"])}
+        if isinstance(p, dict):
+            item["finalized"] = p.get("finalized")
+            item.update({k: count(p, k) for k in ("scanned", "claimed", "completed", "failed", "unknown", "protected", "queued", "running")})
+        runs.append(item)
+    return runs
+
+
 def collect_remote(params, run=run):
     """Server-side collection. Every section records an error instead of raising."""
     out = {}
@@ -245,27 +285,17 @@ def collect_remote(params, run=run):
     try:
         cur = connect(db_path)
         out["schema"] = cur.execute("PRAGMA user_version").fetchone()[0]
-        r = cur.execute("SELECT count(*) AS folders, coalesce(sum(synced_at>=?),0) AS synced, max(synced_at) AS newest FROM mailboxes", (since,)).fetchone()
-        out["sync"] = {"folders": r["folders"], "synced_since_start": r["synced"], "newest_synced_at": iso(r["newest"])}
-        runs = []
-        for r in cur.execute("SELECT id,task_id,source,state,created_at,payload FROM task_runs WHERE created_at>=? ORDER BY created_at,id", (since,)):
-            try:
-                p = json.loads(r["payload"])
-            except ValueError:
-                p = None
-            item = {"run": r["id"][:8], "task": r["task_id"][:8], "source": r["source"], "state": r["state"],
-                    "class": classify_run(r["state"], p), "created_at": iso(r["created_at"])}
-            if isinstance(p, dict):
-                item["finalized"] = p.get("finalized")
-                item.update({k: count(p, k) for k in ("scanned", "claimed", "completed", "failed", "unknown", "protected", "queued", "running")})
-            runs.append(item)
-        out["runs"] = runs
-        out["open_operations"] = {r[0]: r[1] for r in cur.execute(
-            "SELECT state,count(*) FROM operations WHERE state IN ('queued','running','needs_verification') GROUP BY state")}
-        out["operations_since_start"] = {r[0]: r[1] for r in cur.execute(
-            "SELECT state,count(*) FROM operations WHERE created_at>=? GROUP BY state", (since,))}
     except Exception as e:
         out["database_error"] = short(e)
+    # Each section is collected on its own: a failed query leaves its value
+    # absent and records <section>_error, so it is never read as an empty result.
+    if cur is not None:
+        section(out, "sync", lambda: sync_stats(cur, since))
+        section(out, "runs", lambda: post_deploy_runs(cur, since))
+        section(out, "open_operations", lambda: {r[0]: r[1] for r in cur.execute(
+            "SELECT state,count(*) FROM operations WHERE state IN ('queued','running','needs_verification') GROUP BY state")})
+        section(out, "operations_since_start", lambda: {r[0]: r[1] for r in cur.execute(
+            "SELECT state,count(*) FROM operations WHERE created_at>=? GROUP BY state", (since,))})
     backup = params["backup"]
     out["backup"] = {"name": os.path.basename(backup.rstrip("/")), "present": os.path.isdir(backup)}
     if cur is not None:
@@ -422,24 +452,29 @@ def evaluate(args, g, reg, srv):
     sync, runs = srv.get("sync"), srv.get("runs")
     db_reason = srv.get("database_error") or srv.get("error") or ctr.get("error") or "no data"
     if sync is None:
-        add("sync.folders", UNVERIFIED, db_reason)
+        add("sync.folders", UNVERIFIED, srv.get("sync_error") or db_reason)
     else:
         done = sync["folders"] > 0 and sync["synced_since_start"] == sync["folders"]
         add("sync.folders", MATCH if done else UNVERIFIED,
             "%d/%d folders synced since start, newest %s" % (sync["synced_since_start"], sync["folders"], sync["newest_synced_at"]))
+    ops = {k: srv.get(k) for k in ("open_operations", "operations_since_start")}
     if runs is None:
-        add("tasks.post_deploy_runs", UNVERIFIED, db_reason)
+        add("tasks.post_deploy_runs", UNVERIFIED, "runs not collected: " + (srv.get("runs_error") or db_reason))
     else:
         classes = {}
         for x in runs:
             classes[x["class"]] = classes.get(x["class"], 0) + 1
         summary = ", ".join("%s %d" % kv for kv in sorted(classes.items())) or "no runs since start"
-        in_flight = sum(n for k, n in (srv.get("operations_since_start") or {}).items() if k in ("queued", "running"))
-        if in_flight:
-            summary += "; %d operation(s) since start still queued or running" % in_flight
+        missing = ["%s not collected: %s" % (k, srv.get(k + "_error") or db_reason) for k, v in ops.items() if not isinstance(v, dict)]
+        in_flight = 0 if missing else sum(n for k, n in ops["open_operations"].items() if k in ("queued", "running"))
+        new = 0 if missing else sum(n for k, n in ops["operations_since_start"].items() if k in ("queued", "running"))
+        if missing:
+            summary += "; " + "; ".join(missing)
+        elif in_flight or new:
+            summary += "; %d operation(s) still queued or running" % max(in_flight, new)
         if classes.get("failed"):
             status = MISMATCH
-        elif not runs or in_flight or set(classes) - PASS_CLASSES:
+        elif not runs or missing or in_flight or new or set(classes) - PASS_CLASSES:
             status = UNVERIFIED
         else:
             status = MATCH
@@ -496,6 +531,7 @@ def build_report(args, g, reg, srv, now=None):
                 "healthz": srv.get("healthz"), "readyz": srv.get("readyz"), "schema": srv.get("schema"),
                 "sync": srv.get("sync"), "runs_since_start": srv.get("runs"),
                 "open_operations": srv.get("open_operations"), "operations_since_start": srv.get("operations_since_start"),
+                **{k: srv[k] for k in ("sync_error", "runs_error", "open_operations_error", "operations_since_start_error", "database_error") if k in srv},
                 "backup": srv.get("backup"), "config_tables": srv.get("config"),
                 "task_runtime_fields": [{"task": t["task"], "changed": t["runtime_fields_changed"]} for t in (srv.get("tasks") or {}).get("tasks", [])],
                 **({"error": srv["error"]} if "error" in srv else {}),

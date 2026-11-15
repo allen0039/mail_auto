@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.11 — 2026-11-15
+
+修复 0.8.10 独立复验 RV-04（P2，只读发布核对入口的证据完整性）；只改 `scripts/release-verify/release_verify.py` 及其测试，产品代码、界面、CI 与 UI 检查不变；数据库仍为 schema 13，无迁移；现有任务、每批数量、未读/星标保护、历史范围、通知目的地和模型连接不变，不设置每日处理额度。
+
+- 部署后运行摘要缺少 `finalized` 或 failed、unknown、queued、running 任一字段，或字段不是非负整数时，判为 missing_evidence（未核对），不再按 0 处理。依据：`TaskRun` 无 omitempty 地写出这些字段；生产库中缺 queued/running 的只有 0.4.18 之前（最晚 2026-11-12 12:00Z）的运行，不可能出现在当前容器启动之后，因此不设兼容例外。failed、partial、interrupted、needs_verification、进行中等由状态本身确定的含义不变。
+- 同步、运行记录、操作状态和部署后操作分别采集；任一查询失败只记录脱敏原因（如 `sqlite error (OperationalError)`），结果缺失不再被当作空集合。运行记录或任一操作结果缺失时任务项为未核对，详情写明哪项未采集；正常查询为空仍可通过。失败运行仍为不一致，不一致仍优先于未核对。
+- 夹具测试 28 → 37 项。
+
 ## 0.8.10 — 2026-11-15
 
 修复 0.8.9 独立审计 RV-01、RV-02、RV-03（P2，均在只读发布核对入口 `scripts/release-verify/release_verify.py`）；产品代码、界面、CI 与 UI 检查不变；数据库仍为 schema 13，无迁移；现有任务、每批数量、未读/星标保护、历史范围、通知目的地和模型连接不变，不设置每日处理额度。

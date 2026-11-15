@@ -553,5 +553,142 @@ class ArgumentTest(unittest.TestCase):
                 self.assertTrue("usage:" in r.stderr or "invalid internal collection parameters" in r.stderr, r.stderr)
 
 
+class EvidenceCompletenessTest(unittest.TestCase):
+    """RV-04: absent counts and failed or absent operation queries are missing evidence, never 0 or empty."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.fx = Fixture(self._tmp.name)
+        self.fx.sql("live", "DELETE FROM task_runs")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def task_check(self):
+        code, report = self.fx.execute()
+        return code, next(c for c in report["checks"] if c["id"] == "tasks.post_deploy_runs"), report
+
+    def put(self, state, payload):
+        self.fx.sql("live", "DELETE FROM task_runs")
+        add_run(self.fx, "r1", state, payload)
+
+    def test_each_required_field_missing_or_malformed(self):
+        for state in ("noop", "completed", "observed"):
+            for key in rv.REQUIRED_COUNTS + ("finalized",):
+                bad_values = [None] + ([-1, "0", 0.0, True, None] if key != "finalized" else ["true", 1, None])
+                for bad in bad_values:
+                    with self.subTest(state=state, key=key, value=bad):
+                        payload = final(claimed=1, completed=1) if state == "completed" else final()
+                        if bad is None:
+                            payload.pop(key)
+                        else:
+                            payload[key] = bad
+                        self.put(state, payload)
+                        code, check, report = self.task_check()
+                        self.assertEqual((code, report["result"], check["status"]), (3, "unverified", "unverified"))
+                        self.assertIn("missing_evidence 1", check["detail"])
+
+    def test_audit_repro_only_finalized(self):
+        self.put("noop", {"finalized": True})
+        code, check, _ = self.task_check()
+        self.assertEqual((code, check["status"]), (3, "unverified"))
+        self.assertIn("missing_evidence 1", check["detail"])
+
+    def test_valid_zero_counts_pass(self):
+        for state, payload, text in [("noop", final(), "noop 1"), ("observed", final(claimed=2), "observed 1"),
+                                     ("completed", final(claimed=1, completed=1), "succeeded 1")]:
+            with self.subTest(state=state):
+                self.put(state, payload)
+                code, check, report = self.task_check()
+                self.assertEqual((code, check["status"]), (0, "match"))
+                self.assertIn(text, check["detail"])
+                self.assertEqual(report["evidence"]["server"]["runs_since_start"][0]["queued"], 0)
+
+    def test_definite_states_keep_meaning_without_counts(self):
+        for state, code_want, status, text in [("failed", 1, "mismatch", "failed 1"), ("partial", 1, "mismatch", "failed 1"),
+                                               ("needs_verification", 3, "unverified", "needs_verification 1"),
+                                               ("running", 3, "unverified", "running 1")]:
+            with self.subTest(state=state):
+                self.put(state, {"finalized": False})
+                code, check, _ = self.task_check()
+                self.assertEqual((code, check["status"]), (code_want, status))
+                self.assertIn(text, check["detail"])
+        for key, value, cls in [("failed", 2, "failed 1"), ("unknown", 1, "needs_verification 1")]:
+            with self.subTest(count=key):
+                self.put("completed", final(**{key: value}))
+                self.assertIn(cls, self.task_check()[1]["detail"])
+
+    def test_audit_repro_running_operation_and_since_start_query_failure(self):
+        add_run(self.fx, "r1", "noop", final())
+        self.fx.sql("live", "INSERT INTO operations VALUES('op-new','running',?,?)", STARTED + 20, STARTED + 20)
+        self.fx.sql("live", "ALTER TABLE operations RENAME TO operations_raw")
+        self.fx.sql("live", "CREATE VIEW operations AS SELECT id,state FROM operations_raw")
+        code, check, report = self.task_check()
+        server = report["evidence"]["server"]
+        self.assertEqual(server["open_operations"], {"needs_verification": 1, "running": 1})
+        self.assertIsNone(server["operations_since_start"])
+        self.assertEqual(server["operations_since_start_error"], "sqlite error (OperationalError)")
+        self.assertEqual((code, report["result"], check["status"]), (3, "unverified", "unverified"))
+        self.assertIn("operations_since_start not collected: sqlite error (OperationalError)", check["detail"])
+        self.assertNotIn("created_at", self.fx.last_output.split('"checks"')[1].split('"evidence"')[0])
+
+    def test_both_operation_queries_fail(self):
+        add_run(self.fx, "r1", "noop", final())
+        self.fx.sql("live", "DROP TABLE operations")
+        code, check, report = self.task_check()
+        self.assertEqual((code, check["status"]), (3, "unverified"))
+        self.assertIn("open_operations not collected", check["detail"])
+        self.assertIn("operations_since_start not collected", check["detail"])
+        self.assertNotIn("no such table", self.fx.last_output)
+
+    def test_runs_or_sync_query_failure(self):
+        self.fx.sql("live", "ALTER TABLE task_runs RENAME TO task_runs_raw")
+        self.fx.sql("live", "CREATE VIEW task_runs AS SELECT id,task_id,source,state,created_at FROM task_runs_raw")
+        self.fx.sql("live", "ALTER TABLE mailboxes RENAME TO mailboxes_raw")
+        code, report = self.fx.execute()
+        checks = statuses(report)
+        self.assertEqual((code, checks["tasks.post_deploy_runs"], checks["sync.folders"]), (3, "unverified", "unverified"))
+        detail = {c["id"]: c["detail"] for c in report["checks"]}
+        self.assertEqual(detail["tasks.post_deploy_runs"], "runs not collected: sqlite error (OperationalError)")
+        self.assertEqual(detail["sync.folders"], "sqlite error (OperationalError)")
+
+    def test_absent_operation_results_from_server(self):
+        add_run(self.fx, "r1", "noop", final())
+        code, report = self.fx.execute()
+        self.assertEqual(code, 0)
+        args = rv.parse_args(self.fx.args())
+        srv = rv.collect_server(args, self.fx.run)
+        g, reg = rv.collect_git(args, self.fx.run), rv.collect_registry(args, self.fx.run)
+        for key in ("open_operations", "operations_since_start"):
+            for value in ("drop", None, [], "x"):
+                with self.subTest(key=key, value=value):
+                    bad = copy.deepcopy(srv)
+                    if value == "drop":
+                        bad.pop(key)
+                    else:
+                        bad[key] = value
+                    report = rv.build_report(args, g, reg, bad)
+                    check = next(c for c in report["checks"] if c["id"] == "tasks.post_deploy_runs")
+                    self.assertEqual((report["exit_code"], check["status"]), (3, "unverified"))
+                    self.assertIn(key + " not collected: no data", check["detail"])
+
+    def test_normal_empty_operations_and_mismatch_priority(self):
+        add_run(self.fx, "r1", "noop", final())
+        code, check, report = self.task_check()
+        self.assertEqual((code, check["status"]), (0, "match"))
+        self.assertEqual(report["evidence"]["server"]["operations_since_start"], {})
+        # A failed run stays a mismatch even when operation evidence is missing.
+        self.put("failed", final(failed=1))
+        self.fx.sql("live", "DROP TABLE operations")
+        code, check, report = self.task_check()
+        self.assertEqual((code, report["result"], check["status"]), (1, "mismatch", "mismatch"))
+        # Another check's mismatch wins over this unverified item.
+        self.put("noop", {"finalized": True})
+        self.fx.health_version = "0.8.8"
+        code, check, report = self.task_check()
+        self.assertEqual((code, check["status"]), (1, "unverified"))
+        self.assertIn("server.version", report["mismatched"])
+
+
 if __name__ == "__main__":
     unittest.main()
