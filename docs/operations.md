@@ -123,6 +123,15 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 
 升级前记录镜像 ID/标签，执行一致性数据库备份并单独备份主密钥及外部 secrets；保留旧镜像。保存升级前 `compose.yaml`、自定义覆盖文件和 YAML 配置。更新 Compose 中的镜像版本后执行 `ma pull`、`ma up -d --no-build`，检查健康状态和版本。
 
+回退前先确认新旧版本的 schema：`/readyz` 返回当前 `schema`，各版本是否迁移见本页各小节和 [CHANGELOG](../CHANGELOG.md)。0.7.0 至当前 0.8.x 均为 schema 13，其间没有迁移。
+
+| 情况 | 例子 | 做法 | 会丢失什么 |
+| --- | --- | --- | --- |
+| 同 schema 小版本回滚 | 0.8.4 → 0.8.3（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
+| 跨 schema 恢复 | 0.7.x（schema 13）→ 0.6.x（schema 12） | 旧二进制拒绝打开更新的 schema，只换镜像无法启动。停止服务，按下方「联合恢复」把**升级前快照与配套主密钥**放入新卷，再启动旧镜像；0.5.x 起的快照还须按对应小节执行 `bootstrap recover` | 快照之后的全部本地变化：运行记录、规则与任务修改、新增连接、Agent 与 Telegram 记录 |
+
+两种方式都不会撤销已经写入原邮箱的移动或标记；回退后重新同步并人工核对远端状态，不要重放旧任务。不要手工修改 `PRAGMA user_version`，也不要把升级后的 WAL 混入旧快照。
+
 不能假定更换旧镜像即可回退数据库迁移。若新版本迁移不向后兼容，停止服务，使用升级前数据库快照、匹配密钥和旧镜像在单独项目卷中恢复后验证。全历史同步更新后的 0.1.0 schema 为 2（新增暂存索引和同步任务表）；发现比自己更新的 schema 会拒绝打开。当前迁移不提供 down。
 
 `ma down` 保留命名卷；`ma down -v` 明确删除数据和密钥，仅在决定清空实例时使用。

@@ -109,7 +109,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.8.3</span>
+          <span class="badge badge-subtle app-version-label">v0.8.4</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -121,7 +121,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.8.3</span>
+            <span class="app-version-label">v0.8.4</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -204,7 +204,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.8.3</span>
+            个人邮件工作台 <span class="app-version-label">v0.8.4</span>
           </div>
         </div>
 
@@ -573,7 +573,6 @@
                 <div class="auto-settings-body">
                   <h3 id="auto-folders">原邮箱写入与文件夹映射</h3>
                   <p class="muted small">分类直接移动原邮箱中的邮件，网页邮箱和手机端同步后可见。</p>
-              <p class="muted small">分类直接移动原邮箱中的邮件，网页邮箱和手机端同步后可见。</p>
               <form id="folder-settings-form" class="organizer-inline">
                 <select id="organizer-account" hidden aria-hidden="true" tabindex="-1" data-guard-ignore></select>
                 <button id="probe-folders" type="button" class="secondary">刷新原邮箱文件夹</button>
@@ -683,7 +682,7 @@
                 <div class="panel-heading-clean">
                   <div>
                     <h2>整理任务</h2>
-                    <p class="muted small">每项任务选择一种触发方式（手动、内置定时或外部 MCP）。固定规则任务不需要模型、Telegram 或 MCP。</p>
+                    <p class="muted small">每项任务选择一种触发方式（手动、内置定时或外部 MCP）。固定规则任务不需要模型、Telegram 或 MCP；按语义分类由外部 MCP 客户端执行。</p>
                   </div>
                   <div class="organizer-inline margin-none">
                     <button id="refresh-tasks" class="secondary" type="button">刷新</button>
@@ -883,7 +882,7 @@
           <div class="organizer-stack">
             <article class="panel organizer-card">
               <h2>能力状态</h2>
-              <p class="muted small">内置管理 Agent 通过 Telegram 私聊管理固定规则与任务。持续 AI 语义分类、按正文判断尚未支持。模型或 Telegram 故障不影响邮件同步、Web、MCP 和既有任务。</p>
+              <p class="muted small">内置管理 Agent 通过 Telegram 私聊管理固定规则与任务。持续 AI 语义分类、按正文判断尚未支持，配置模型不会自动分类邮件；按语义分类由外部 MCP 客户端执行。模型或 Telegram 故障不影响邮件同步、Web、MCP 和既有任务。</p>
               <ul id="agent-capabilities" class="agent-status-list margin-t-12"></ul>
             </article>
 
@@ -1141,7 +1140,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.8.3</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.8.4</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
