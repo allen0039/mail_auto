@@ -268,6 +268,7 @@ class ReleaseVerifyTest(unittest.TestCase):
             ([("noop", {}), ("failed", {"failed": 1})], "mismatch", "failed 1"),
             ([("needs_verification", {"unknown": 1})], "unverified", "needs_verification 1"),
             ([("running", {})], "unverified", "running 1"),
+            ([("manual_kept", {"manual_kept": 1})], "unverified", "manual_kept 1"),
         ]
         for runs, status, text in cases:
             with self.subTest(runs=runs):
@@ -812,3 +813,15 @@ class FailurePrecedenceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManualKeepSchemaTest(unittest.TestCase):
+    def test_only_documented_migration_is_accepted(self):
+        for version, before, after, expected in [
+            ("0.9.2", 13, 14, True), ("0.9.2", 14, 14, True),
+            ("0.9.2", 13, 13, False), ("0.9.2", 12, 14, False),
+            ("0.9.2", 14, 15, False), ("0.9.2", None, 14, False),
+            ("0.9.1", 13, 13, True), ("0.9.1", 13, 14, False),
+        ]:
+            with self.subTest(version=version, before=before, after=after):
+                self.assertEqual(rv.schema_matches(version, before, after), expected)

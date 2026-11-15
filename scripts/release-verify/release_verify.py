@@ -54,7 +54,7 @@ DOC_PREFIXES = ("docs/",)
 # Run classes accepted as post-deploy evidence; every other class is unverified,
 # except "failed" which is a mismatch.
 PASS_CLASSES = {"noop", "succeeded", "observed"}
-FINAL_STATES = {"noop": "noop", "completed": "succeeded", "observed": "observed",
+FINAL_STATES = {"manual_kept": "manual_kept", "noop": "noop", "completed": "succeeded", "observed": "observed",
                 "cancelled": "cancelled", "limited": "limited", "requires_ai": "requires_ai"}
 # Marker for the server-side collection piped over SSH; not a public option.
 REMOTE_MODE = "--internal-remote-collect"
@@ -181,6 +181,14 @@ def classify_run(state, payload):
     return FINAL_STATES.get(state, "unknown_state")
 
 
+def schema_matches(version, before, after):
+    # Only the documented 0.9.2 migration is permitted. Arbitrary schema drift
+    # remains a mismatch; a 0.9.2 process must actually be on schema 14.
+    if version == "0.9.2":
+        return before in (13, 14) and after == 14
+    return before == after
+
+
 def compare_config(cur, old):
     out = {}
     for table, order in CONFIG_TABLES:
@@ -246,7 +254,7 @@ def post_deploy_runs(cur, since):
                 "class": classify_run(r["state"], p), "created_at": iso(r["created_at"])}
         if isinstance(p, dict):
             item["finalized"] = p.get("finalized")
-            item.update({k: count(p, k) for k in ("scanned", "claimed", "completed", "failed", "unknown", "protected", "queued", "running")})
+            item.update({k: count(p, k) for k in ("scanned", "claimed", "completed", "manual_kept", "failed", "unknown", "protected", "queued", "running")})
         runs.append(item)
     return runs
 
@@ -493,7 +501,7 @@ def evaluate(args, g, reg, srv):
     else:
         bad = [t for t, x in cfg.items() if "error" in x]
         diff = [t for t, x in cfg.items() if "error" not in x and not x["same"]]
-        schema = srv.get("schema") == bk.get("schema")
+        schema = schema_matches(args.version, bk.get("schema"), srv.get("schema"))
         add("config.tables", MISMATCH if diff or not schema else (UNVERIFIED if bad else MATCH),
             "%d/%d tables same, schema %s -> %s%s%s" % (
                 len(cfg) - len(diff) - len(bad), len(cfg), bk.get("schema"), srv.get("schema"),

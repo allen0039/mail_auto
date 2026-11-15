@@ -156,6 +156,13 @@ func (service *Service) unattemptedCancelledItem(operationID, ref string) (bool,
 }
 
 func (s *Service) claimAvailable(accountID, ref, fingerprint string, now int64) (bool, error) {
+	m, err := s.Message(ref)
+	if err != nil {
+		return false, err
+	}
+	if kept, err := manuallyKept(s.Store.DB, m); err != nil || kept {
+		return false, err
+	}
 	var oldFingerprint, state, plan string
 	var expires int64
 	e := s.Store.DB.QueryRow("SELECT fingerprint,state,expires,plan_id FROM automation_claims WHERE account_id=? AND ref=?", accountID, ref).Scan(&oldFingerprint, &state, &expires, &plan)
@@ -298,6 +305,12 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 		}
 		for _, m := range messages {
 			b.Scanned++
+			if kept, err := manuallyKept(s.Store.DB, m); err != nil {
+				return b, err
+			} else if kept {
+				b.Protected++
+				continue
+			}
 			item := evaluateRules(m, rules, p, now)
 			if item.Status != "matched" {
 				if item.Status == "protected" || item.Status == "unknown" {
@@ -340,6 +353,11 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 	// Claim checks and publication are fenced by an immediate SQLite transaction,
 	// including conflicts originating from a second process sharing this DB.
 	for _, item := range b.Items {
+		if kept, err := manuallyKept(tx, item.Message); err != nil {
+			return b, err
+		} else if kept {
+			return b, ErrBusy
+		}
 		var n int
 		if e = tx.QueryRow("SELECT count(*) FROM automation_claims WHERE account_id=? AND ref=? AND ((state IN ('claimed','planned') AND expires>? AND (plan_id='' OR plan_id NOT IN (SELECT plan_id FROM operations WHERE state IN ('completed','failed','partial','cancelled')))) OR plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))", b.AccountID, item.Message.Ref, now).Scan(&n); e != nil {
 			return b, e

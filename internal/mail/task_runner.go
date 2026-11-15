@@ -442,7 +442,7 @@ func (s *Service) reconcileTaskRun(id string) {
 	var pending, planned int
 	// A write in flight is "running", not unknown: only items whose remote
 	// result could not be decided count as needs_verification.
-	e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(i.state='completed'),0),COALESCE(sum(i.state='failed'),0),COALESCE(sum(i.state='needs_verification'),0),COALESCE(sum(i.state IN ('skipped','cancelled')),0),COALESCE(sum(i.state='queued'),0),COALESCE(sum(i.state='running'),0),COALESCE(max(o.updated_at),0),COALESCE(sum(i.state='completed' AND i.error_code='flags_not_applied'),0) FROM operation_items i JOIN operations o ON o.id=i.operation_id WHERE o.plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)`, b.ID).Scan(&r.Completed, &r.Failed, &r.Unknown, &r.Skipped, &r.Queued, &r.Running, &r.ProgressAt, &r.FlagWarnings)
+	e = s.Store.DB.QueryRow(`SELECT COALESCE(sum(i.state='manual_kept'),0),COALESCE(sum(i.state='completed'),0),COALESCE(sum(i.state='failed'),0),COALESCE(sum(i.state='needs_verification'),0),COALESCE(sum(i.state IN ('skipped','cancelled')),0),COALESCE(sum(i.state='queued'),0),COALESCE(sum(i.state='running'),0),COALESCE(max(o.updated_at),0),COALESCE(sum(i.state='completed' AND i.error_code='flags_not_applied'),0) FROM operation_items i JOIN operations o ON o.id=i.operation_id WHERE o.plan_id IN (SELECT plan_id FROM automation_claims WHERE batch_id=?)`, b.ID).Scan(&r.ManualKept, &r.Completed, &r.Failed, &r.Unknown, &r.Skipped, &r.Queued, &r.Running, &r.ProgressAt, &r.FlagWarnings)
 	if e != nil {
 		return
 	}
@@ -465,6 +465,9 @@ func (s *Service) reconcileTaskRun(id string) {
 			r.ErrorCode = ""
 			if r.Completed == 0 {
 				r.State = "noop"
+			}
+			if r.ManualKept > 0 {
+				r.State = "manual_kept"
 			}
 			if r.NeedsAI > 0 {
 				r.State = "requires_ai"

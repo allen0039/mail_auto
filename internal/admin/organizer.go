@@ -190,6 +190,24 @@ func (s *Server) organizerAPI(w http.ResponseWriter, r *http.Request, session Se
 		}
 		if len(parts) == 2 && r.Method == http.MethodPost {
 			switch parts[1] {
+			case "manual-keep-preview":
+				out, e := s.Mail.PreviewManualKeep(r.Context(), access, id)
+				if e != nil {
+					operationError(w, e)
+				} else {
+					writeJSON(w, 200, out)
+				}
+			case "manual-keep":
+				var in mail.ManualKeepInput
+				if !decode(w, r, &in) {
+					return true
+				}
+				out, e := s.Mail.ResolveManualKeep(r.Context(), access, id, in)
+				if e != nil {
+					operationError(w, e)
+				} else {
+					writeJSON(w, 200, out)
+				}
 			case "cancel":
 				e := s.Mail.CancelOperation(access, id)
 				if e != nil {

@@ -38,6 +38,7 @@ type TaskRun struct {
 	Claimed       int    `json:"claimed"`
 	Kept          int    `json:"kept"`
 	NeedsAI       int    `json:"needs_ai"`
+	ManualKept    int    `json:"manual_kept"`
 	Completed     int    `json:"completed"`
 	Failed        int    `json:"failed"`
 	Unknown       int    `json:"unknown"`
@@ -382,7 +383,10 @@ func (s *Service) previewTaskRules(a Access, t Task, rules []Rule, p AutomationP
 		}
 		out.Total, out.NextCursor, out.Scanned = total, next, len(ms)
 		for _, m := range ms {
-			item := evaluateRules(m, rules, p, now)
+			item, err := s.evaluateIndexedRules(m, rules, p, now)
+			if err != nil {
+				return RulePreview{}, err
+			}
 			out.Counts[item.Status]++
 			out.Items = append(out.Items, item)
 		}
@@ -397,7 +401,10 @@ func (s *Service) previewTaskRules(a Access, t Task, rules []Rule, p AutomationP
 		stopped := false
 		for _, m := range ms {
 			out.Scanned++
-			item := evaluateRules(m, rules, p, now)
+			item, err := s.evaluateIndexedRules(m, rules, p, now)
+			if err != nil {
+				return RulePreview{}, err
+			}
 			out.Counts[item.Status]++
 			if item.Status == "matched" {
 				out.Items = append(out.Items, item)

@@ -120,7 +120,7 @@
             <rect x="34" y="104" width="64" height="8" rx="4" class="story-mail-line"></rect>
           </svg>
         </div>
-        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.9.1</span></p>
+        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.9.2</span></p>
       </section>
 
       <section class="auth-form-area">
@@ -195,7 +195,7 @@
             <span class="wordmark-badge" aria-hidden="true"><svg class="icon-sm"><use href="#icon-accounts"></use></svg></span>
             <span>Mail Auto</span>
           </a>
-          <span class="workspace-label app-version-label">v0.9.1</span>
+          <span class="workspace-label app-version-label">v0.9.2</span>
         </div>
 
         <nav class="sidebar-nav-container" aria-label="主导航">
@@ -1048,7 +1048,7 @@
             </article>
 
             <article class="panel system-card">
-              <h2>Mail Auto <span class="app-version-label">v0.9.1</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.9.2</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1181,6 +1181,15 @@
       <div id="message-content"></div>
     </dialog>
 
+    <!-- Manual verification -->
+    <dialog id="manual-keep-dialog" aria-labelledby="manual-keep-title">
+    <div class="dialog-head"><h2 id="manual-keep-title">人工核验 · 保留两份</h2><button type="button" class="text-button" id="manual-keep-close" aria-label="关闭人工核验">关闭</button></div>
+    <p>只读比较完整原文；确认后保留两份邮件，并阻止自动整理再次领取。原操作单列为人工核验保留。</p>
+    <div id="manual-keep-evidence" class="muted" aria-live="polite"></div>
+    <p>保留保护会覆盖自动分类和到期清理，规则修改或运行记录清理后仍然有效。原邮箱中的手动操作仍由你控制。</p>
+    <p id="manual-keep-error" class="form-error" role="alert"></p>
+    <div class="organizer-inline"><button type="button" class="secondary" id="manual-keep-refresh">重新只读核验</button><button type="button" class="primary" id="manual-keep-confirm" disabled>确认一致，保留两份并结案</button></div>
+  </dialog>
     <!-- Plan Execution Dialog -->
     <dialog id="plan-dialog">
       <div class="dialog-head">

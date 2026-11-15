@@ -27,6 +27,14 @@ ma exec app mail-auto bootstrap show
 
 临时密码过期和会话过期以持久化绝对时间计算，重启不会延长。正常会话绝对有效 12 小时，设置会话 30 分钟。正式登录后，进入「系统设置 → 账号与安全」，验证当前密码后修改用户名或密码。新密码留空则只修改用户名；填写新密码须至少 12 个字符、最多 256 字节，且不能与当前密码相同。保存后立即撤销所有设备会话并重新登录。忘记当前密码时仍使用上述宿主机恢复流程。账号修改接口每 5 分钟最多尝试 5 次，并受同源、CSRF 和密码哈希并发限制保护。
 
+## 0.9.2（schema 14）人工核验结案
+
+schema 13→14 新增 `manual_resolutions` 与 `manual_keep_blocks`，不改现有邮箱、任务、规则与策略。管理员在“核验记录与 MCP”中对单封待核验移动操作选择“人工核验保留两份”，预览源、目标完整原文摘要、位置和标记后确认。预览有效期十分钟，确认重新读取原邮箱；两次均只使用只读目录与 BODY.PEEK。证据不一致、目录 epoch 改变、索引变化、并发操作或连接失败时保持待核验，不移动或删除邮件。
+
+结案状态 `manual_kept` 与自动 `completed` 分开；原始错误、缺失 COPYUID 和原计划保留。两条保护按账号内 ref、原物理位置或非空 Message-ID 匹配，同账号同 Message-ID 的其他副本也跳过。保护无到期时间，独立于操作/运行记录清理，覆盖 Mail Auto 的分类、到期清理和整理写入；用户和服务商仍可在原邮箱中操作。不要通过删操作记录、claims 或改规则来解除保护；目前不提供解除入口。
+
+**回退到 0.9.1 或更早版本需要恢复升级前快照与配套密钥。** 旧二进制拒绝打开 schema 14，不能手工降低 `user_version`。旧版本不支持人工保留，恢复旧快照会丢失新结案及保护；如必须回退，先在隔离实例恢复并关闭所有自动整理写入，完成两份邮件的人工核对与等效保护后再启用。
+
 ## 0.7.0（schema 13）升级与回退
 
 - 升级前做一致性数据库备份，并单独备份配套主密钥与部署配置。schema 12→13 只新增模型连接表和当前模型配置的来源列；邮箱索引、任务、规则、策略、TG、网络设置与待核验记录不变。
@@ -123,7 +131,7 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 
 升级前记录镜像 ID/标签，执行一致性数据库备份并单独备份主密钥及外部 secrets；保留旧镜像。保存升级前 `compose.yaml`、自定义覆盖文件和 YAML 配置。更新 Compose 中的镜像版本后执行 `ma pull`、`ma up -d --no-build`，检查健康状态和版本。
 
-回退前先确认新旧版本的 schema：`/readyz` 返回当前 `schema`，各版本是否迁移见本页各小节和 [CHANGELOG](../CHANGELOG.md)。0.7.0 至当前 0.9.x 均为 schema 13，其间没有迁移。
+回退前先确认新旧版本的 schema：`/readyz` 返回当前 `schema`，各版本是否迁移见本页各小节和 [CHANGELOG](../CHANGELOG.md)。0.7.0–0.9.1 均为 schema 13；0.9.2 升级到 schema 14，回退限制见上文。
 
 | 情况 | 例子 | 做法 | 会丢失什么 |
 | --- | --- | --- | --- |
@@ -142,7 +150,7 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 `scripts/release-verify/release_verify.py` 在本机重新采集一次发布证据（不替代独立审计）：本机读取 git 远端 `main`／版本标签与镜像仓库，服务器部分通过 SSH 把同一脚本交给 `python3 -` 执行，只读取 `docker inspect`、`/healthz`、`/readyz` 和 SQLite（`mode=ro`、`query_only`）。它不拉取或部署镜像、不改配置、不触发任务或模型、不写邮件、不核验或重放待核验操作，也不清理备份和镜像。需要本机有 `git`、`docker buildx`，服务器有 `python3`、`docker`、`curl`，SSH 用户能读取数据卷与密钥卷（一般为 root）。
 
 ```bash
-scripts/release-verify/release_verify.py --version 0.9.1 --commit <发布提交> \
+scripts/release-verify/release_verify.py --version 0.9.2 --commit <发布提交> \
   --ssh <SSH 目标> --compose-dir <服务器上的 Compose 目录> \
   --backup <服务器上的升级前备份目录>
 ```
@@ -158,14 +166,14 @@ scripts/release-verify/release_verify.py --version 0.9.1 --commit <发布提交>
 | `server.image` | 运行容器的 ImageID 等于该版本 index 中服务器平台的 config 摘要（并报告 RepoDigest 是否为该 index） |
 | `server.version` / `server.health` / `server.restarts` | `/healthz`、`/readyz` 版本与就绪；容器运行且 healthy；重启次数为 0 |
 | `sync.folders` | 容器启动后完成同步的文件夹数等于文件夹总数，并给出最近同步时间 |
-| `tasks.post_deploy_runs` | 容器启动后的自然运行按类别计数。只有已收尾（`finalized` 为真且无排队／在途写入）的 `noop`、成功（completed）、观察（observed）算通过；失败（状态为 failed、partial、interrupted，或格式有效的 failed 计数大于 0）为不一致，且优先于同一运行的待核验、证据缺失等未核对情况；failed 值格式不对时既不算失败也不当 0；无运行、进行中、待核验、未收尾（not_finalized）、收尾证据缺失或格式不对（missing_evidence：`finalized` 或 failed、unknown、queued、running 任一缺失或不是非负整数，不按 0 处理）、已取消、limited、requires_ai 及未知状态都为未核对；仍有排队或执行中的写入操作，或运行记录、操作状态、部署后操作任一查询失败或缺失（显示脱敏原因，不当作空结果），也为未核对。没有成功运行时注明不是真实写入证明 |
-| `config.tables` / `tasks.user_fields` / `master_key` | 与升级前备份比较 16 张配置表（逐行）、任务用户字段与 schema；主密钥在服务器内逐字节比较，只输出布尔值 |
+| `tasks.post_deploy_runs` | 容器启动后的自然运行按类别计数。只有已收尾（`finalized` 为真且无排队／在途写入）的 `noop`、成功（completed）、观察（observed）算通过；失败（状态为 failed、partial、interrupted，或格式有效的 failed 计数大于 0）为不一致，且优先于同一运行的待核验、证据缺失等未核对情况；failed 值格式不对时既不算失败也不当 0；无运行、进行中、待核验、未收尾（not_finalized）、收尾证据缺失或格式不对（missing_evidence：`finalized` 或 failed、unknown、queued、running 任一缺失或不是非负整数，不按 0 处理）、人工保留（manual_kept，仅为人工结案证据）、已取消、limited、requires_ai 及未知状态都为未核对；仍有排队或执行中的写入操作，或运行记录、操作状态、部署后操作任一查询失败或缺失（显示脱敏原因，不当作空结果），也为未核对。没有成功运行时注明不是真实写入证明 |
+| `config.tables` / `tasks.user_fields` / `master_key` | 与升级前备份比较 16 张配置表（逐行）、任务用户字段与 schema（0.9.2 仅接受已记录的 13→14 或 14→14，其他 schema 变化仍不通过）；主密钥在服务器内逐字节比较，只输出布尔值 |
 
 任务的 `cursor`、`last_triggered`、`next_run_at`、`next_times`、`last_state` 以及表列 `next_run_at`、`updated_at` 属于运行字段，单列在 `evidence.server.task_runtime_fields`，不算用户配置变化。
 
 参数顺序不影响结果；`--remote` 只表示 Git 远端，服务器端采集使用单独的内部标记。缺少参数值、版本不是 `X.Y.Z`、提交不是 4–40 位十六进制或出现未知参数时，打印用法并以 `2` 退出，不输出 traceback。
 
-退出码：`0` 全部必检项匹配；`1` 至少一项不一致；`3` 没有不一致，但至少一项未核对（缺备份、权限不足、命令失败、数据缺失、尚无部署后运行、文件夹未同步完）；`2` 参数错误。缺证据时一律标为未核对，不会输出通过。脚本不等待下一次调度，没有新运行就立即报告。夹具测试：`python3 -m unittest discover -s scripts/release-verify`（45 项，CI 的 Go 检查 job 中运行）。
+退出码：`0` 全部必检项匹配；`1` 至少一项不一致；`3` 没有不一致，但至少一项未核对（缺备份、权限不足、命令失败、数据缺失、尚无部署后运行、文件夹未同步完）；`2` 参数错误。缺证据时一律标为未核对，不会输出通过。脚本不等待下一次调度，没有新运行就立即报告。夹具测试：`python3 -m unittest discover -s scripts/release-verify`（46 项，CI 的 Go 检查 job 中运行）。
 
 ## 全历史同步升级
 

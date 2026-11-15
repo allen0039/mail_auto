@@ -4,7 +4,7 @@
   const folders = new Map();
   let currentPlan = null, pendingPlans = [], oauthID = "", mcpVersion = 0;
   const actionNames = {read: "读取", folder_manage: "在原邮箱创建文件夹", archive: "归档", move: "分类到文件夹", trash: "移入回收站", restore: "恢复", flag: "修改已读 / 星标", mark_read: "标为已读", mark_unread: "标为未读", unflag: "取消星标", rule_manage: "创建和调整自定义规则", task_manage: "配置和启停整理任务", automation: "定时任务批次（受自动整理授权约束）"};
-  const statusNames = {queued: "排队", running: "执行中", completed: "完成", partial: "部分完成", failed: "失败", needs_verification: "待核验", cancelled: "已停止", skipped: "已跳过"};
+  const statusNames = {queued: "排队", running: "执行中", completed: "完成", partial: "部分完成", failed: "失败", needs_verification: "待核验", manual_kept: "人工核验保留", cancelled: "已停止", skipped: "已跳过"};
   const run = fn => async e => {
     if (shouldPreventDefault(e)) e.preventDefault();
     try { await fn(e); } catch (err) { notify(err.message, true); }
@@ -143,12 +143,53 @@
   }));
   async function loadOperations() {
     const operations = await api("/api/operations");
-    renderDetails($("#operations-list"), operations.length ? operations.map(o => `<details class="organizer-item" data-key="${esc(o.id)}"><summary>${esc(statusNames[o.state] || o.state)} · ${o.items.length} 封 · ${esc(date(o.created_at))}</summary><p class="ref">${esc(o.id)}</p>${o.reconcile_mode ? `<p class="${o.reconcile_mode === "auto" ? "muted" : "task-warning"} small">${o.reconcile_mode === "auto" ? `后台自动核验中（创建后 24 小时内约每 30 秒一次），下次约 ${esc(date(o.next_check_at))}` : o.reconcile_mode === "slow" ? `已超自动核验窗口：后台每 6 小时低频核验一次（至创建后 30 天），下次约 ${esc(date(o.next_check_at))}；也可点“核验未知结果”立即核验` : "已超自动核验窗口（创建超过 30 天）：后台不再核验，请点“核验未知结果”手动核验；缺少目标 UID 或证据不足时需人工核对原邮箱"}</p>` : ""}<div class="organizer-inline"><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="cancel">停止剩余项</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="reconcile">核验未知结果</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="undo">预览可撤销项</button></div>${o.items.map(x => `<div class="operation-item"><p>${esc(x.ref.slice(0, 12))}… · ${esc(statusNames[x.state] || x.state)}${x.error_code ? ` · ${esc(x.error_code)}` : ""}${x.destination.folder ? ` → ${esc(folderLabel(x.destination.folder))}${x.destination.uid ? `（目标 UID ${x.destination.uid}）` : ""}` : ""}</p>${x.detail && x.state !== "completed" ? `<p class="muted small">首次写入：${esc(x.detail)}</p>` : ""}${x.error_code === "flags_not_applied" ? `<p class="task-warning small">附加标记未应用或未确认：${esc(x.recovery_detail || x.detail || "移动已完成，但附加的标记修改未应用或未确认，请在邮箱中核对并按需手动修改。")}</p>` : x.recovery_detail ? `<p class="${x.state === "needs_verification" ? "task-warning" : "muted"} small">最近核验${x.checked_at ? `（${esc(date(x.checked_at))}）` : ""}：${esc(x.recovery_detail)}</p>` : x.state === "needs_verification" && x.checked_at ? `<p class="muted small">最近核验：${esc(date(x.checked_at))}</p>` : ""}</div>`).join("")}</details>`).join("") : '<p class="muted">还没有整理任务。</p>');
+    renderDetails($("#operations-list"), operations.length ? `<p class="muted small">待核验 ${operations.filter(o => o.state === "needs_verification").length} 项 · 人工核验保留 ${operations.filter(o => o.state === "manual_kept").length} 项</p>` + operations.map(o => `<details class="organizer-item" data-key="${esc(o.id)}"><summary>${esc(statusNames[o.state] || o.state)} · ${o.items.length} 封 · ${esc(date(o.created_at))}</summary><p class="ref">${esc(o.id)}</p>${o.reconcile_mode ? `<p class="${o.reconcile_mode === "auto" ? "muted" : "task-warning"} small">${o.reconcile_mode === "auto" ? `后台自动核验中（创建后 24 小时内约每 30 秒一次），下次约 ${esc(date(o.next_check_at))}` : o.reconcile_mode === "slow" ? `已超自动核验窗口：后台每 6 小时低频核验一次（至创建后 30 天），下次约 ${esc(date(o.next_check_at))}；也可点“核验未知结果”立即核验` : "已超自动核验窗口（创建超过 30 天）：后台不再核验，请点“核验未知结果”手动核验；缺少目标 UID 或证据不足时需人工核对原邮箱"}</p>` : ""}${o.manual_resolution ? `<p class="muted small">${esc(date(o.manual_resolution.created_at))} · 管理员确认完整原文一致 · 两份均保留并永久跳过自动整理（含到期清理）</p><p class="ref">SHA-256 ${esc(o.manual_resolution.sha256)}</p><p class="muted small">${esc(folderLabel(o.manual_resolution.source.folder))} ↔ ${esc(folderLabel(o.manual_resolution.target.folder))} · ${o.manual_resolution.bytes} 字节 · 原始错误已保留</p>` : ""}${o.state !== "manual_kept" ? `<div class="organizer-inline"><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="cancel">停止剩余项</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="reconcile">核验未知结果</button><button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="undo">预览可撤销项</button>${o.state === "needs_verification" && o.items.length === 1 ? `<button type="button" class="secondary" data-operation="${esc(o.id)}" data-op-action="manual-keep-preview">人工核验保留两份</button>` : ""}</div>` : ""}${o.items.map(x => `<div class="operation-item"><p>${esc(x.ref.slice(0, 12))}… · ${esc(statusNames[x.state] || x.state)}${x.error_code ? ` · ${esc(x.error_code)}` : ""}${x.destination.folder ? ` → ${esc(folderLabel(x.destination.folder))}${x.destination.uid ? `（目标 UID ${x.destination.uid}）` : ""}` : ""}</p>${x.detail && x.state !== "completed" ? `<p class="muted small">首次写入：${esc(x.detail)}</p>` : ""}${x.error_code === "flags_not_applied" ? `<p class="task-warning small">附加标记未应用或未确认：${esc(x.recovery_detail || x.detail || "移动已完成，但附加的标记修改未应用或未确认，请在邮箱中核对并按需手动修改。")}</p>` : x.recovery_detail ? `<p class="${x.state === "needs_verification" ? "task-warning" : "muted"} small">最近核验${x.checked_at ? `（${esc(date(x.checked_at))}）` : ""}：${esc(x.recovery_detail)}</p>` : x.state === "needs_verification" && x.checked_at ? `<p class="muted small">最近核验：${esc(date(x.checked_at))}</p>` : ""}</div>`).join("")}</details>`).join("") : '<p class="muted">还没有整理任务。</p>');
   }
+  let manualKeepOperation = "", manualKeepEvidence = null, manualKeepGeneration = 0;
+  async function refreshManualKeep() {
+    const gen = ++manualKeepGeneration, id = manualKeepOperation;
+    manualKeepEvidence = null;
+    $("#manual-keep-confirm").disabled = true;
+    $("#manual-keep-error").textContent = "";
+    $("#manual-keep-evidence").textContent = "正在只读比较完整原文…";
+    try {
+      const out = await api(`/api/operations/${encodeURIComponent(id)}/manual-keep-preview`, {method: "POST", body: "{}"});
+      if (gen !== manualKeepGeneration || !$("#manual-keep-dialog").open) return;
+      manualKeepEvidence = out;
+      $("#manual-keep-evidence").innerHTML = `<p>两份完整原文一致 · ${esc(String(out.bytes))} 字节 · ${esc(date(out.checked_at))}</p><p>${esc(folderLabel(out.source.folder))} · UID ${esc(String(out.source.uid))} / UIDVALIDITY ${esc(String(out.source.uidvalidity))}</p><p>${esc(folderLabel(out.target.folder))} · UID ${esc(String(out.target.uid))} / UIDVALIDITY ${esc(String(out.target.uidvalidity))}</p><p>标记一致：${esc(out.source_flags.join(" · ") || "无标记")}</p><p class="ref">SHA-256 ${esc(out.sha256)}</p>`;
+      $("#manual-keep-confirm").disabled = false;
+    } catch (err) {
+      if (gen !== manualKeepGeneration || !$("#manual-keep-dialog").open) return;
+      $("#manual-keep-evidence").textContent = "尚未取得一致证据";
+      $("#manual-keep-error").textContent = `核验未通过：${err.message}。邮件可能已变化、证据不唯一或连接中断；请同步后重新核验。`;
+    }
+  }
+  $("#manual-keep-close").addEventListener("click", () => $("#manual-keep-dialog").close());
+  $("#manual-keep-dialog").addEventListener("close", () => { ++manualKeepGeneration; manualKeepEvidence = null; });
+  $("#manual-keep-refresh").addEventListener("click", run(refreshManualKeep));
+  $("#manual-keep-confirm").addEventListener("click", run(async () => {
+    const id = manualKeepOperation, evidence = manualKeepEvidence;
+    if (!evidence) return;
+    await busy($("#manual-keep-confirm"), "重新核验并结案…", async () => {
+      try {
+        await api(`/api/operations/${encodeURIComponent(id)}/manual-keep`, {method: "POST", body: JSON.stringify({evidence, confirm: true})});
+        $("#manual-keep-dialog").close();
+        await loadOperations();
+        notify("已人工核验结案：两份均保留，自动整理将永久跳过");
+      } catch (err) {
+        manualKeepEvidence = null;
+        $("#manual-keep-error").textContent = `未结案：${err.message}。请重新只读核验后再确认。`;
+      }
+    });
+    $("#manual-keep-confirm").disabled = !manualKeepEvidence;
+  }));
   $("#refresh-operations").addEventListener("click", run(loadOperations));
   $("#operations-list").addEventListener("click", run(async e => {
     const b = e.target.closest("[data-operation]"); if (!b) return;
-    const out = await api(`/api/operations/${encodeURIComponent(b.dataset.operation)}/${b.dataset.opAction}`, {method: "POST", body: "{}"});
+    if (b.dataset.opAction === "manual-keep-preview") {
+ manualKeepOperation = b.dataset.operation; manualKeepEvidence = null; $("#manual-keep-evidence").textContent = "正在只读核验…"; $("#manual-keep-error").textContent = ""; $("#manual-keep-confirm").disabled = true; $("#manual-keep-dialog").showModal(); await refreshManualKeep(); return;
+ }
+ const out = await api(`/api/operations/${encodeURIComponent(b.dataset.operation)}/${b.dataset.opAction}`, {method: "POST", body: "{}"});
     if (b.dataset.opAction === "undo") {
       if (!out.length) throw new Error("当前没有可确认的撤销项，或当前位置已变化");
       pendingPlans = out.slice(1); showPlan(out[0]);

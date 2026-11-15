@@ -23,6 +23,7 @@
     failed: "运行失败",
     interrupted: "运行中断",
     needs_verification: "待核验",
+ manual_kept: "人工核验保留",
     cancelled: "已取消",
     limited: "达到本轮限制",
   };
@@ -131,9 +132,10 @@
     if (run.state === "failed" || run.state === "interrupted" || run.failed > 0)
       return ["执行失败", `${run.failed ? `${run.failed} 封写入失败` : "本轮未完成"}${run.error_code ? ` · ${run.error_code}` : ""}`];
     if (run.unknown > 0 || run.state === "needs_verification") return ["写入待核验", `${run.unknown} 封结果尚未确认，不算成功也不算失败`];
+    if (run.manual_kept > 0) return ["人工核验保留", `${run.manual_kept} 封已人工结案并保留两份，自动整理跳过；实际整理 ${run.completed} 封`];
     if (run.completed > 0) return ["已整理", `${run.completed} 封已核验整理${run.protected ? `，${run.protected} 封保护跳过` : ""}`];
     if (run.mode === "observe" && run.claimed > 0) return ["观察完成", `${run.claimed} 封命中，只记录不移动`];
-    if (run.protected > 0 && run.claimed === 0) return ["保护跳过", `${run.protected} 封因未读、星标或保护联系人跳过`];
+    if (run.protected > 0 && run.claimed === 0) return ["保护跳过", `${run.protected} 封因未读、星标、联系人或人工保留保护跳过`];
     if (run.needs_ai > 0) return ["需外部 AI", `${run.needs_ai} 封需要外部 AI 判断，已保留原位`];
     if (run.kept > 0) return ["保留原位", `${run.kept} 封按规则保留`];
     if (run.state === "noop" && run.claimed === 0) return ["没有可处理的邮件", `扫描 ${run.scanned} 封，没有命中规则的可处理邮件`];
@@ -456,7 +458,7 @@
         ? runs
             .map(
               (r) =>
-                `<details class="organizer-item" data-key="${esc(r.id)}" ${active(r.state) ? "open" : ""}><summary>${esc(date(r.created_at))} · ${labels[r.state] || esc(r.state)} · ${triggers[r.source] || esc(r.source)}</summary><div class="task-counts"><span>扫描 <strong>${r.scanned}</strong></span><span>领取 <strong>${r.claimed}</strong></span><span>已核验整理 <strong>${r.completed}</strong></span><span>保留 / 保护 <strong>${r.kept + r.protected}</strong></span><span>失败 <strong>${r.failed}</strong></span><span>排队 <strong>${r.queued || 0}</strong></span><span>执行中 <strong>${r.running || 0}</strong></span><span>待核验 <strong>${r.unknown}</strong></span></div><p class="muted small">${esc(runPhase(r))}${r.progress_at ? ` · 最近进度 ${esc(date(r.progress_at))}` : ""} · ${active(r.state) || !r.finalized ? "已用" : "耗时"} ${esc(elapsed(r))}</p>${r.mode === "observe" ? '<p class="muted">观察模式，本轮不移动邮件。</p>' : ""}${r.needs_ai ? `<p class="task-warning">${r.needs_ai} 封需要外部 AI 判断，已保留原位。</p>` : ""}${r.flag_warnings ? `<p class="task-warning">${r.flag_warnings} 封已移动完成，但附加的标记修改未应用或未确认（不算失败）。请到“核验记录与 MCP”查看原因，在邮箱中核对并按需手动修改。</p>` : ""}${r.has_more ? `<p class="muted">仍有候选，可继续处理。</p><button type="button" class="secondary" data-task-continue="${esc(r.id)}">继续处理本任务</button>` : ""}${r.error_code ? `<p class="form-error">${esc(r.error_code)}</p>` : ""}<p class="muted small">任务 v${r.task_version} · 授权 v${r.policy_version} · 通知：${deliveries[r.notification_state] || esc(r.notification_state)}${r.notification_error ? ` · ${esc(r.notification_error)}` : ""}</p><p class="muted small">运行标识：${esc(r.id)}${r.batch_id ? ` · 批次：${esc(r.batch_id)}` : ""}</p><p class="muted small">计划、实际写入和未知结果核验请到“核验记录与 MCP”查看；停止不等于撤销。</p>${active(r.state) ? `<button type="button" class="secondary" data-task-cancel="${esc(r.id)}">取消本轮剩余操作</button>` : ""}</details>`,
+                `<details class="organizer-item" data-key="${esc(r.id)}" ${active(r.state) ? "open" : ""}><summary>${esc(date(r.created_at))} · ${labels[r.state] || esc(r.state)} · ${triggers[r.source] || esc(r.source)}</summary><div class="task-counts"><span>扫描 <strong>${r.scanned}</strong></span><span>领取 <strong>${r.claimed}</strong></span><span>已核验整理 <strong>${r.completed}</strong></span><span>保留 / 保护 <strong>${r.kept + r.protected}</strong></span><span>人工核验保留 <strong>${r.manual_kept || 0}</strong></span><span>失败 <strong>${r.failed}</strong></span><span>排队 <strong>${r.queued || 0}</strong></span><span>执行中 <strong>${r.running || 0}</strong></span><span>待核验 <strong>${r.unknown}</strong></span></div><p class="muted small">${esc(runPhase(r))}${r.progress_at ? ` · 最近进度 ${esc(date(r.progress_at))}` : ""} · ${active(r.state) || !r.finalized ? "已用" : "耗时"} ${esc(elapsed(r))}</p>${r.mode === "observe" ? '<p class="muted">观察模式，本轮不移动邮件。</p>' : ""}${r.needs_ai ? `<p class="task-warning">${r.needs_ai} 封需要外部 AI 判断，已保留原位。</p>` : ""}${r.flag_warnings ? `<p class="task-warning">${r.flag_warnings} 封已移动完成，但附加的标记修改未应用或未确认（不算失败）。请到“核验记录与 MCP”查看原因，在邮箱中核对并按需手动修改。</p>` : ""}${r.has_more ? `<p class="muted">仍有候选，可继续处理。</p><button type="button" class="secondary" data-task-continue="${esc(r.id)}">继续处理本任务</button>` : ""}${r.error_code ? `<p class="form-error">${esc(r.error_code)}</p>` : ""}<p class="muted small">任务 v${r.task_version} · 授权 v${r.policy_version} · 通知：${deliveries[r.notification_state] || esc(r.notification_state)}${r.notification_error ? ` · ${esc(r.notification_error)}` : ""}</p><p class="muted small">运行标识：${esc(r.id)}${r.batch_id ? ` · 批次：${esc(r.batch_id)}` : ""}</p><p class="muted small">计划、实际写入和未知结果核验请到“核验记录与 MCP”查看；停止不等于撤销。</p>${active(r.state) ? `<button type="button" class="secondary" data-task-cancel="${esc(r.id)}">取消本轮剩余操作</button>` : ""}</details>`,
             )
             .join("")
         : '<p class="muted">尚无运行记录。外部模式等待实际 MCP 调用。</p>',

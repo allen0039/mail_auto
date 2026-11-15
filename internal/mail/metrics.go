@@ -9,6 +9,7 @@ type AutomationMetrics struct {
 	ActiveRuns           int `json:"active_runs"`
 	QueuedRuns           int `json:"queued_runs"`
 	AwaitingAI           int `json:"awaiting_ai"`
+	ManualKept           int `json:"manual_kept"`
 	NeedsVerification    int `json:"needs_verification"`
 	PendingNotifications int `json:"pending_notifications"`
 }
@@ -22,6 +23,7 @@ func (s *Service) AutomationMetrics(ctx context.Context) (AutomationMetrics, err
 		{&out.ActiveRuns, "SELECT count(*) FROM task_runs WHERE state IN ('running','awaiting_ai')"},
 		{&out.QueuedRuns, "SELECT count(*) FROM task_runs WHERE state='queued'"},
 		{&out.AwaitingAI, "SELECT count(*) FROM task_runs WHERE state='awaiting_ai'"},
+		{&out.ManualKept, "SELECT count(*) FROM manual_resolutions"},
 		{&out.NeedsVerification, "SELECT count(*) FROM operation_items WHERE state='needs_verification'"},
 		{&out.PendingNotifications, "SELECT count(*) FROM notification_outbox WHERE state IN ('pending','retry','sending')"},
 	}

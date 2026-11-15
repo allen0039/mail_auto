@@ -100,13 +100,14 @@ type OperationItem struct {
 	CheckedAt      int64  `json:"checked_at,omitempty"`
 }
 type Operation struct {
-	ID        string          `json:"id"`
-	PlanID    string          `json:"plan_id"`
-	State     string          `json:"state"`
-	Cancelled bool            `json:"cancelled"`
-	CreatedAt int64           `json:"created_at"`
-	UpdatedAt int64           `json:"updated_at"`
-	Items     []OperationItem `json:"items"`
+	ManualResolution *ManualResolution `json:"manual_resolution,omitempty"`
+	ID               string            `json:"id"`
+	PlanID           string            `json:"plan_id"`
+	State            string            `json:"state"`
+	Cancelled        bool              `json:"cancelled"`
+	CreatedAt        int64             `json:"created_at"`
+	UpdatedAt        int64             `json:"updated_at"`
+	Items            []OperationItem   `json:"items"`
 	// For needs_verification only: "auto" (frequent, first 24 hours), "slow"
 	// (every six hours up to 30 days) or "manual"; NextCheckAt is an estimate.
 	ReconcileMode string `json:"reconcile_mode,omitempty"`
@@ -376,6 +377,11 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 		if item.Skip != "" {
 			continue
 		}
+		if kept, err := manuallyKept(tx, item.Message); err != nil {
+			return Operation{}, err
+		} else if kept {
+			return Operation{}, blocked("manual_keep_protected", "邮件已人工核验保留，不能再次整理", ErrDenied)
+		}
 		var n int
 		if e = tx.QueryRow("SELECT count(*) FROM operation_items WHERE ref=? AND state IN ('queued','running','needs_verification')", item.Message.Ref).Scan(&n); e != nil {
 			return Operation{}, e
@@ -450,6 +456,12 @@ func (s *Service) Operation(a Access, id string) (Operation, error) {
 		}
 		o.Items = append(o.Items, x)
 	}
+	if o.State == "manual_kept" {
+		o.ManualResolution, e = s.manualResolution(id)
+		if e != nil {
+			return o, e
+		}
+	}
 	o.ReconcileMode, o.NextCheckAt = reconcileSchedule(o, time.Now())
 	return o, rows.Err()
 }
@@ -465,7 +477,7 @@ func (s *Service) Operations(a Access) ([]Operation, error) {
 	if e != nil {
 		return nil, e
 	}
-	rows, e := s.Store.DB.Query(`SELECT id FROM operations WHERE owner=? OR ?='admin' ORDER BY CASE WHEN state IN ('queued','running','needs_verification') THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 100`, a.Owner, a.Owner)
+	rows, e := s.Store.DB.Query(`SELECT id FROM operations WHERE owner=? OR ?='admin' ORDER BY CASE WHEN state IN ('queued','running','needs_verification') THEN 0 WHEN state='manual_kept' THEN 1 ELSE 2 END,created_at DESC,id DESC LIMIT 100`, a.Owner, a.Owner)
 	if e != nil {
 		return nil, e
 	}
@@ -687,6 +699,11 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 		if !access.Allows(account.ID, target, p.Action) || (len(p.Also) > 0 && !access.Allows(account.ID, m.Folder, "flag")) {
 			return ErrDenied
 		}
+	}
+	if kept, err := manuallyKept(s.Store.DB, m); err != nil {
+		return err
+	} else if kept {
+		return blocked("manual_keep_protected", "邮件已人工核验保留，不能再次整理", ErrDenied)
 	}
 	if _, e = s.Store.DB.Exec("UPDATE operation_items SET state='running' WHERE operation_id=? AND position=?", id, pos); e != nil {
 		return e

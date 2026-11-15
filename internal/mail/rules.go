@@ -549,7 +549,11 @@ func (s *Service) PreviewRules(a Access, in RulePreviewInput) (RulePreview, erro
 	}
 	out := RulePreview{Items: []RuleEvaluation{}, Total: total, NextCursor: next}
 	for _, m := range messages {
-		out.Items = append(out.Items, evaluateRules(m, rules, p, time.Now().Unix()))
+		item, err := s.evaluateIndexedRules(m, rules, p, time.Now().Unix())
+		if err != nil {
+			return RulePreview{}, err
+		}
+		out.Items = append(out.Items, item)
 	}
 	return out, nil
 }

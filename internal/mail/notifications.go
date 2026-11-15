@@ -311,7 +311,7 @@ func (s *Service) enqueueNotification(tx *sql.Tx, t Task, r TaskRun) error {
 			return nil
 		}
 	}
-	labels := map[string]string{"completed": "任务完成", "noop": "本轮无变更", "observed": "观察完成", "partial": "任务部分失败", "failed": "任务失败", "needs_verification": "邮件结果待核验", "interrupted": "任务中断", "cancelled": "本轮已取消", "limited": "本轮达到限制", "requires_ai": "部分邮件需外部 AI"}
+	labels := map[string]string{"completed": "任务完成", "noop": "本轮无变更", "observed": "观察完成", "partial": "任务部分失败", "failed": "任务失败", "needs_verification": "邮件结果待核验", "manual_kept": "人工核验保留", "interrupted": "任务中断", "cancelled": "本轮已取消", "limited": "本轮达到限制", "requires_ai": "部分邮件需外部 AI"}
 	title := labels[r.State]
 	if title == "" {
 		title = r.State
@@ -319,6 +319,9 @@ func (s *Service) enqueueNotification(tx *sql.Tx, t Task, r TaskRun) error {
 	text := fmt.Sprintf("Mail Auto · %s\n任务：%s\n已核验整理 %d，失败 %d，待核验 %d\n保留 %d，保护跳过 %d，需外部 AI %d\n来源：%s\n时间：%s\n事件：%s", title, r.TaskName, r.Completed, r.Failed, r.Unknown, r.Kept, r.Protected, r.NeedsAI, map[string]string{"manual": "手动", "internal": "内置定时", "external": "外部 MCP", "monitor": "外部触发监测"}[r.Source], time.Unix(r.CreatedAt, 0).In(automationLocation).Format("2006-01-02 15:04"), r.ID[:8])
 	if r.ErrorCode != "" {
 		text += "\n错误：" + r.ErrorCode
+	}
+	if r.ManualKept > 0 {
+		text += fmt.Sprintf("\n人工核验保留 %d（保留两份，自动整理跳过）", r.ManualKept)
 	}
 	if r.FlagWarnings > 0 {
 		text += fmt.Sprintf("\n附加标记未应用或未确认 %d 封（移动已完成，请核对并按需手动修改标记）", r.FlagWarnings)

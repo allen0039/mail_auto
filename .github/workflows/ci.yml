@@ -60,7 +60,7 @@ jobs:
           # Ubuntu 24.04 blocks the unprivileged user namespaces Chrome's sandbox
           # needs for a browser outside the system package; allow them on this VM.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: UI checks (settings, model, ownership, task-editor at 1280/375/390)
+      - name: UI checks (settings, model, ownership, task-editor, manual-keep at 1280/375/390)
         run: scripts/ui-check/run.sh
       - name: UI gate regression (27 cases, none skipped)
         env:

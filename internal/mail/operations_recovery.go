@@ -153,6 +153,12 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 			return o, ErrConflict
 		}
 		item := p.Items[x.Position]
+		if kept, err := manuallyKept(s.Store.DB, item.Message); err != nil {
+			return o, err
+		} else if kept {
+			s.recordRecovery(id, x.Position, blocked("manual_keep_protected", "邮件已人工核验保留，不能恢复整理写入", ErrDenied))
+			continue
+		}
 		access, e := s.CheckAccess(a)
 		if e != nil {
 			return o, e
@@ -251,6 +257,11 @@ func (s *Service) finishRecoveredMove(ctx context.Context, access Access, operat
 	// check runs before opening the cleanup session (with the planned snapshot)
 	// and, inside FinishMove, twice with fresh remote state on that session.
 	check := func(m Message) error {
+		if kept, err := manuallyKept(s.Store.DB, m); err != nil {
+			return err
+		} else if kept {
+			return blocked("manual_keep_protected", "邮件已人工核验保留，不能恢复整理写入", ErrDenied)
+		}
 		if blockedByCancel, err := s.recoveryCancelled(operation.ID, plan); err != nil {
 			return err
 		} else if blockedByCancel {
