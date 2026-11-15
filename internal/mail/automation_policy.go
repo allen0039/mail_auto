@@ -250,10 +250,8 @@ func (s *Service) authorizedAutomation(a Access, id string) (Access, AutomationP
 	if e != nil {
 		return a, p, e
 	}
-	for _, f := range p.SourceFolders {
-		if !a.Allows(id, f, "read") || sourceNotSynced(account, f) {
-			return a, p, ErrDenied
-		}
+	if issues := grantSourceIssues(a, account, p); len(issues) > 0 {
+		return a, p, issues[0].err
 	}
 	a.automation = true
 	return a, p, nil

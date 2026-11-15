@@ -84,16 +84,22 @@
   }
   // Lives in 自动整理 → 整理设置. Returns the saved settings; a refresh does
   // not overwrite an unsaved edit of the form.
+  // Returns null when the page has moved to another account (or reloaded)
+  // before the response came back; nothing is rendered then.
   async function loadFolderSettings() {
-    const id = $("#organizer-account").value;
+    const t = autoTicket(), id = t.account;
     if (!id) { renderFolders("", "", ""); return null; }
     const settings = await api(`/api/folder-settings/${encodeURIComponent(id)}`);
-    if (isDirty($("#folder-settings-form"))) {
+    if (!autoCurrent(t)) return null;
+    const form = $("#folder-settings-form");
+    if (isDirty(form) && form.dataset.account === id) {
       $("#capability-result").textContent = "有未保存的修改；刷新没有覆盖你的编辑。";
       return settings;
     }
     renderFolders(id, settings.archive_folder, settings.trash_folder);
     $("#organizer-writes").checked = settings.writes_enabled;
+    form.dataset.account = id;
+    markClean(form);
     $("#capability-result").textContent = "刷新可读取原邮箱最新文件夹并检查整理能力；不会移动邮件。";
     return settings;
   }
@@ -101,11 +107,12 @@
   guardForm($("#folder-settings-form"), "文件夹映射与写入开关");
   $("#organizer-account").addEventListener("change", run(loadFolderSettings));
   $("#probe-folders").addEventListener("click", run(async e => {
-    const id = $("#organizer-account").value;
+    const t = autoTicket(), id = t.account;
     if (!id) throw new Error("请先添加邮箱");
     await busy(e.currentTarget, "读取中…", async () => {
       const out = await api(`/api/folder-settings/${encodeURIComponent(id)}/probe`, {method: "POST", body: "{}"});
       folders.set(id, out.folders);
+      if (!autoSameAccount(t)) return;
       const archive = $("#organizer-archive").value || out.folders.find(f => f.role === "archive")?.name;
       const trash = $("#organizer-trash").value || out.folders.find(f => f.role === "trash")?.name;
       renderFolders(id, archive, trash);
@@ -114,22 +121,22 @@
     });
   }));
   $("#folder-settings-form").addEventListener("submit", run(async e => {
-    const id = $("#organizer-account").value;
-    if (!id) throw new Error("请先选择邮箱");
-    const form = e.currentTarget, gen = draftGen(form);
+    const form = e.currentTarget, id = autoFormAccount(form), t = autoTicket(), gen = draftGen(form);
     await busy($('button[type="submit"], button.primary', form), "保存中…", async () => {
       await api(`/api/folder-settings/${encodeURIComponent(id)}`, {method: "PUT", body: JSON.stringify({archive_folder: $("#organizer-archive").value, trash_folder: $("#organizer-trash").value, writes_enabled: $("#organizer-writes").checked})});
+      if (!autoSameAccount(t)) { notify(`「${accountName(id)}」的原邮箱整理设置已保存；页面已切换到其他邮箱，当前内容未改动`); return; }
       notify(settleDraft(form, gen) ? "原邮箱整理设置已保存" : "已保存；保存期间的新修改尚未保存");
       await window.automationChanged?.();
     });
   }));
   $("#folder-create").addEventListener("submit", run(async e => {
-    const id = $("#organizer-account").value, form = e.currentTarget, name = form.elements.name.value.trim();
+    const t = autoTicket(), id = t.account, form = e.currentTarget, name = form.elements.name.value.trim();
     if (!id) throw new Error("请先选择邮箱");
     await busy($("button", form), "创建中…", async () => {
       const out = await api("/api/remote-folders", {method: "POST", body: JSON.stringify({account_id: id, name})});
       const items = folderNames(id).filter(f => f.name !== out.name);
       folders.set(id, [...items, out]);
+      if (!autoSameAccount(t)) { notify(`已在「${accountName(id)}」创建文件夹`); return; }
       renderFolders(id, $("#organizer-archive").value, $("#organizer-trash").value);
       form.reset(); notify("已在原邮箱创建文件夹，邮箱 App 同步后可见");
     });

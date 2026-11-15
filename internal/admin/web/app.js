@@ -33,15 +33,54 @@ const extraDrafts = [];
 function guardForm(form, label) {
   if (!form || drafts.has(form)) return;
   form.dataset.guard = label;
-  drafts.set(form, { gen: 0, dirty: false });
+  // session counts openings of the dialog holding the form (see showModal below).
+  drafts.set(form, { gen: 0, dirty: false, session: 0 });
   const touch = (e) => {
     if (e.target?.closest?.("[data-guard-ignore]")) return;
-    const d = drafts.get(form);
-    d.gen++;
-    d.dirty = true;
+    touchDraft(form);
   };
   form.addEventListener("input", touch);
   form.addEventListener("change", touch);
+}
+// A real edit that does not come from typing (e.g. a button that adds or
+// removes a rule condition held in memory) counts like input.
+function touchDraft(form) {
+  const d = drafts.get(form);
+  if (!d) return;
+  d.gen++;
+  d.dirty = true;
+}
+// Editor saves: capture a ticket at submit; after the response, editorState
+// says whether the editor still shows exactly what was sent ("same"), was
+// edited during the save ("edited"), or was closed (and maybe reopened for
+// something else) in the meantime ("closed").
+function editorTicket(form) {
+  const d = drafts.get(form);
+  return { form, gen: d.gen, session: d.session };
+}
+function editorState(t) {
+  const d = drafts.get(t.form), dialog = t.form.closest("dialog");
+  // The close event is queued, so an already closed dialog counts too.
+  if (d.session !== t.session || (dialog && !dialog.open)) return "closed";
+  return d.gen === t.gen ? "same" : "edited";
+}
+const STILL_UNSAVED = "已保存提交时的内容；保存期间的新修改尚未保存，请检查后再次保存。";
+
+// 自动整理 page ownership. account is the mailbox the page shows; gen bumps
+// on every (re)load and epoch on every account switch. A loader applies its
+// response only while its ticket's gen is current; a save started for one
+// account touches the page only while the same switch epoch is shown.
+const autoScope = { account: "", gen: 0, epoch: 0 };
+const autoTicket = () => ({ ...autoScope });
+const autoCurrent = (t) => t.gen === autoScope.gen && t.account === autoScope.account;
+const autoSameAccount = (t) => t.epoch === autoScope.epoch && t.account === autoScope.account;
+const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || id;
+// A form rendered for an account carries data-account; a save refuses a form
+// that is not (yet) rendered for the account the page shows.
+function autoFormAccount(form) {
+  const id = form.dataset.account || "";
+  if (!id || id !== autoScope.account) throw new Error("页面正在加载所选邮箱的设置，请等加载完成后再保存");
+  return id;
 }
 const isDirty = (form) => !!drafts.get(form)?.dirty;
 const draftGen = (form) => drafts.get(form)?.gen || 0;
@@ -85,9 +124,25 @@ document.addEventListener("cancel", (e) => {
   if (e.target instanceof HTMLDialogElement && dirtyLabels(e.target).length && !confirmDiscard(e.target)) e.preventDefault();
 }, true);
 document.addEventListener("close", (e) => {
-  // A closed dialog has been saved or discarded.
-  if (e.target instanceof HTMLDialogElement) for (const [f] of drafts) if (e.target.contains(f)) markClean(f);
+  // A closed dialog has been saved or discarded. The event is queued, so it
+  // may arrive after the dialog was opened again: then it is stale.
+  if (e.target instanceof HTMLDialogElement && !e.target.open) {
+    for (const [f, d] of drafts) if (e.target.contains(f)) d.dirty = false;
+  }
 }, true);
+// Each opening of a dialog starts a new, clean editing session, counted at
+// the moment it opens; a save started in an earlier opening sees the change.
+{
+  const showModal = HTMLDialogElement.prototype.showModal;
+  HTMLDialogElement.prototype.showModal = function () {
+    for (const [f, d] of drafts) {
+      if (!this.contains(f)) continue;
+      d.dirty = false;
+      d.session++;
+    }
+    return showModal.call(this);
+  };
+}
 // Delegated handlers must not cancel native interactions such as toggling a
 // <summary>. Only form submits and button clicks keep the old preventDefault.
 const shouldPreventDefault = (e) =>
@@ -1035,12 +1090,30 @@ $("#account-form").addEventListener("submit", async (e) => {
     $("#account-advanced").open = true;
     return;
   }
+  const ticket = editorTicket(form);
   try {
     await busy($("button[type=submit]", form), "正在加密保存…", async () => {
       const saved = await api(editingID ? `/api/accounts/${encodeURIComponent(editingID)}` : "/api/accounts", {
         method: editingID ? "PUT" : "POST",
         body: JSON.stringify(data),
       });
+      const after = editorState(ticket);
+      if (after !== "same") {
+        // Closed meanwhile (maybe reopened for another mailbox): leave the
+        // dialog alone. Edited meanwhile: keep the dialog and the newer
+        // edits; the next save updates the saved mailbox instead of adding
+        // a second one.
+        if (after === "edited" && saved?.id) {
+          state.editingAccount = saved.id;
+          $("#account-dialog-title").textContent = "编辑邮箱配置";
+          $("#account-error").textContent = STILL_UNSAVED;
+        }
+        notify(after === "edited" ? STILL_UNSAVED : "邮箱配置已保存");
+        await refresh();
+        if (state.view === "accounts") await showView("accounts");
+        return;
+      }
+      markClean(form);
       form.reset();
       $("#account-dialog").close();
       await refresh();

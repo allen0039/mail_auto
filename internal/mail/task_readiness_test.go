@@ -236,3 +236,66 @@ func TestTaskPolicyIssuesKeepSaveErrors(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// S2-04: a run checks every source folder of the grant, not only the task's.
+// Narrowing the mailbox's sync range through the real Update path must make
+// readiness name the folder the run is refused for, and restoring the range
+// must clear both. Readiness stays read-only throughout.
+func TestReadinessChecksEveryGrantSourceLikeRun(t *testing.T) {
+	service, _, admin, _, task, message := taskFixture(t, "execute", "manual", "rules")
+	policy, err := service.AutomationPolicy(admin, message.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Store.DB.Exec("INSERT INTO mailboxes(account_id,name,uidvalidity,synced_at) VALUES(?,?,7,1)", message.AccountID, "Other"); err != nil {
+		t.Fatal(err)
+	}
+	policy.SourceFolders = []string{"INBOX", "Other"}
+	if _, err = service.SaveAutomationPolicy(admin, policy); err != nil {
+		t.Fatal(err)
+	}
+	account, err := service.Account(message.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setFolders := func(folders []string) {
+		t.Helper()
+		if _, err := service.Update(account.ID, AccountInput{Name: account.Name, Provider: account.Provider, Username: account.Username, Host: account.Host, Port: account.Port, Folders: folders}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setFolders([]string{"INBOX"})
+	before := tableCounts(t, service)
+	r := readinessFor(t, service, admin, message.AccountID, task.ID)
+	if after := tableCounts(t, service); after != before {
+		t.Fatalf("readiness wrote: %s -> %s", before, after)
+	}
+	_, runErr := service.RunTask(admin, TaskRunInput{TaskID: task.ID, Version: task.Version, RunKey: "s2-04-narrowed"}, "manual")
+	if !errors.Is(runErr, ErrDenied) {
+		t.Fatalf("run with an unsynced grant source = %v, want permission denied", runErr)
+	}
+	var blocker *TaskIssue
+	for i := range r.Issues {
+		if r.Issues[i].Blocking {
+			blocker = &r.Issues[i]
+			break
+		}
+	}
+	if r.Ready || blocker == nil || blocker.Code != "source_not_synced" || blocker.Target != "Other" || blocker.Area != "account" {
+		t.Fatalf("readiness = ready %v issues %+v, want source_not_synced for Other", r.Ready, r.Issues)
+	}
+	// The run's own refusal comes from the same admission function.
+	acc, _ := service.Account(account.ID)
+	p, _ := service.loadAutomationPolicy(account.ID)
+	if issues := grantSourceIssues(admin, acc, p); len(issues) != 1 || !errors.Is(issues[0].err, runErr) {
+		t.Fatalf("shared admission = %+v, run = %v", issues, runErr)
+	}
+
+	setFolders(nil)
+	if r = readinessFor(t, service, admin, message.AccountID, task.ID); !r.Ready {
+		t.Fatalf("after restoring full sync readiness = %v", issueCodes(r))
+	}
+	if _, err := service.RunTask(admin, TaskRunInput{TaskID: task.ID, Version: task.Version, RunKey: "s2-04-restored"}, "manual"); errors.Is(err, ErrDenied) {
+		t.Fatalf("run after restoring full sync still denied: %v", err)
+	}
+}

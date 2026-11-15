@@ -47,7 +47,8 @@
     policy_disabled: () => "整理授权未开启“允许任务领取邮件”",
     policy_expired: () => "整理授权已到期",
     policy_admin_changed: () => "管理员账号变更后，整理授权需要重新保存",
-    source_not_synced: (i) => `源目录「${folderLabel(i.target)}」不在该邮箱的同步文件夹中`,
+    source_not_synced: (i) => `整理授权的源目录「${folderLabel(i.target)}」不在该邮箱的同步文件夹中（运行前会检查授权的全部源目录）：请恢复同步该目录，或从整理授权中移除`,
+    source_not_readable: (i) => `当前身份无权读取整理授权的源目录「${folderLabel(i.target)}」`,
     rules_changed: () => "绑定的规则已修改、停用或有更高优先级规则加入，请编辑任务重新确认规则",
     writes_disabled: () => "未打开“允许整理原邮箱”写入开关",
     action_not_allowed: (i) => `规则「${ruleName(i.target)}」的动作未在整理授权中允许`,
@@ -142,7 +143,7 @@
     const blocking = r.issues.filter((i) => i.blocking), notes = r.issues.filter((i) => !i.blocking);
     if (!blocking.length) return `<p class="task-ready small">✔ 运行条件已满足${notes.length ? `（${esc(notes.map((i) => (issueText[i.code] || (() => i.code))(i)).join("；"))}）` : ""}</p>`;
     return `<div class="task-blockers" role="note"><strong>不能按当前配置运行：</strong><ul>${blocking
-      .map((i) => `<li>${esc((issueText[i.code] || (() => `未知原因`))(i))} <span class="muted small">（${esc(i.code)}）</span> <button type="button" class="text-button" data-task-fix="${esc(i.area)}" data-task-id="${esc(t.id)}">${fixLabels[i.area] || "查看"}</button></li>`)
+      .map((i) => `<li>${esc((issueText[i.code] || (() => `未知原因`))(i))} <span class="muted small">（${esc(i.code)}）</span> <button type="button" class="text-button" data-task-fix="${esc(i.area)}" data-task-id="${esc(t.id)}">${fixLabels[i.area] || "查看"}</button>${i.code === "source_not_synced" ? ` <button type="button" class="text-button" data-task-fix="policy" data-task-id="${esc(t.id)}">${fixLabels.policy}</button>` : ""}</li>`)
       .join("")}</ul></div>`;
   }
 
@@ -178,9 +179,11 @@
       : '<article class="panel organizer-card"><h2>选择适合你的触发方式</h2><p class="muted">先在上方建立规则，并在“整理设置”中配置授权，再创建任务。固定条件可选内置定时，内容理解可交给外部 AI。</p></article>';
   }
 
+  // Responses are applied only while the page still shows the account (and
+  // load) they were requested for; see autoTicket in app.js.
   async function loadAccount() {
     clearTimeout(timer);
-    const key = account();
+    const t = autoTicket(), key = t.account;
     $("#new-task").disabled = !key;
     if (!key) {
       tasks = [];
@@ -189,13 +192,15 @@
       $("#tasks-policy-note").textContent = "请先添加邮箱并配置任务整理授权。";
       return;
     }
-    let ready;
-    [tasks, policy, rules, ready] = await Promise.all([
+    const out = await Promise.all([
       api(`/api/tasks?account_id=${encodeURIComponent(key)}`),
       api(`/api/automation/policy/${encodeURIComponent(key)}`),
       api(`/api/rules?account_id=${encodeURIComponent(key)}`),
       api(`/api/tasks/readiness?account_id=${encodeURIComponent(key)}`).catch(() => []),
     ]);
+    if (!autoCurrent(t)) return;
+    let ready;
+    [tasks, policy, rules, ready] = out;
     readiness = Object.fromEntries(ready.map((r) => [r.task_id, r]));
     $("#tasks-policy-note").textContent = `整理授权${policy.enabled ? "已启用" : "未启用"} · ${policy.mode === "observe" ? "观察上限" : "允许执行"} · 每批最多 ${policy.max_batch} 封 · 内置定时${policy.allow_internal ? "已允许" : "未允许"}`;
     renderTasks();
@@ -203,12 +208,17 @@
     await loadRuns();
   }
 
+  // An old #task-run= link may belong to another mailbox: the whole page
+  // switches through the same path as the account picker (asking before
+  // dropping unsaved edits) and only then shows the run.
   window.openTaskRun = async (runID) => {
     const run = await api(`/api/task-runs/${encodeURIComponent(runID)}`);
-    await showView("tasks");
-    $("#tasks-account").value = run.account_id;
+    if (!(await window.selectAutomationAccount(run.account_id))) {
+      notify("已保留当前邮箱和未保存的修改；没有打开该运行记录");
+      return;
+    }
     selectedTask = run.task_id;
-    await loadAccount();
+    await loadRuns();
     $("#task-runs-title").scrollIntoView({ block: "center" });
   };
 
@@ -223,6 +233,7 @@
 
   async function loadRuns() {
     clearTimeout(timer);
+    const ticket = autoTicket();
     const t = tasks.find((t) => t.id === selectedTask);
     $("#task-runs-title").textContent = t ? `运行记录 · ${t.name}` : "运行记录";
     if (!t) {
@@ -230,6 +241,7 @@
       return;
     }
     const runs = await api(`/api/tasks/${encodeURIComponent(t.id)}/runs`);
+    if (!autoSameAccount(ticket) || t.id !== selectedTask) return;
     t.last_state = runs[0]?.state || "";
     if (readiness[t.id] && runs[0]) readiness[t.id].last_run = runs[0];
     const card = $(`[data-task-card="${t.id}"]`);
@@ -392,10 +404,6 @@
   // higher priority on those sources (the server refuses to skip them).
   window.createTaskFromRule = async (ruleID) => {
     if (!confirmDiscard($("#task-editor-dialog"))) return;
-    if (account() !== $("#rules-account").value) {
-      $("#tasks-account").value = $("#rules-account").value;
-      await loadAccount();
-    }
     const rule = rules.find((r) => r.id === ruleID);
     if (!rule) throw new Error("规则已不存在，请刷新");
     if (!rule.enabled) throw new Error("请先启用这条规则，再从它创建任务");
@@ -483,21 +491,34 @@
         },
       };
 
+      const target = editing, ticket = editorTicket(e.currentTarget), owner = { ...autoTicket(), account: target.account_id };
+      let after = "";
       await busy($("#save-task"), "保存中…", async () => {
         const saved = await request(
-          editing.id ? `/api/tasks/${encodeURIComponent(editing.id)}` : "/api/tasks",
-          editing.id ? "PUT" : "POST",
+          target.id ? `/api/tasks/${encodeURIComponent(target.id)}` : "/api/tasks",
+          target.id ? "PUT" : "POST",
           input,
         );
-        selectedTask = saved.id;
-        $("#task-editor-dialog").close();
+        const updated = !!target.id;
+        after = editorState(ticket);
+        if (after === "same") {
+          markClean(ticket.form);
+          $("#task-editor-dialog").close();
+          notify(updated ? "任务已更新，旧的未执行计划已失效" : "已保存为暂停观察任务，可先预览影响");
+        } else if (after === "edited") {
+          // Keep the dialog and the newer edits; the next save updates the
+          // saved task with its new version instead of creating another one.
+          Object.assign(target, { id: saved.id, version: saved.version, enabled: saved.enabled });
+          $("#task-editor-title").textContent = "编辑整理任务";
+          $("#task-editor-error").textContent = STILL_UNSAVED;
+          notify(STILL_UNSAVED);
+        } else notify("任务已保存");
+        if (!autoSameAccount(owner)) return;
+        if (after !== "closed") selectedTask = saved.id;
         await loadAccount();
-        notify(
-          editing.id
-            ? "任务已更新，旧的未执行计划已失效"
-            : "已保存为暂停观察任务，可先预览影响",
-        );
       });
+      // busy() restores the old label; an editor now holding a saved task updates it.
+      if (after === "edited" && editorState(ticket) !== "closed") $("#save-task").textContent = "保存修改";
     } catch (err) {
       $("#task-editor-error").textContent = err.message;
     }

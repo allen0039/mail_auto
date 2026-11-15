@@ -73,6 +73,24 @@ func sourceNotSynced(account Account, f string) bool {
 	return len(account.Folders) > 0 && !slices.Contains(account.Folders, f)
 }
 
+// grantSourceIssues is the per-folder admission authorizedAutomation applies
+// before any run: every source folder of the grant, not only the task's own,
+// must be readable by the caller and inside the account's sync range. The
+// readiness report uses the same function, so it names the folder a run would
+// be refused for.
+func grantSourceIssues(a Access, account Account, p AutomationPolicy) []TaskIssue {
+	out := []TaskIssue{}
+	for _, f := range p.SourceFolders {
+		switch {
+		case !a.Allows(account.ID, f, "read"):
+			out = append(out, TaskIssue{Code: "source_not_readable", Area: "policy", Target: f, Blocking: true, err: ErrDenied})
+		case sourceNotSynced(account, f):
+			out = append(out, TaskIssue{Code: "source_not_synced", Area: "account", Target: f, Blocking: true, err: ErrDenied})
+		}
+	}
+	return out
+}
+
 // actionsAllowed and destinationAllowed are the execute-mode grant checks
 // for one decision; SubmitAI and the readiness report share them.
 func actionsAllowed(p AutomationPolicy, action string, also []string) bool {
@@ -168,8 +186,11 @@ func (s *Service) TaskReadiness(a Access, account string) ([]TaskReadiness, erro
 				add("policy_admin_changed", "policy", "", true)
 			}
 		}
+		// The folder admission a run applies to the whole grant, then any task
+		// folder outside the grant that is not synced either.
+		r.Issues = append(r.Issues, grantSourceIssues(a, acc, p)...)
 		for _, f := range t.SourceFolders {
-			if sourceNotSynced(acc, f) {
+			if !slices.Contains(p.SourceFolders, f) && sourceNotSynced(acc, f) {
 				add("source_not_synced", "account", f, true)
 			}
 		}

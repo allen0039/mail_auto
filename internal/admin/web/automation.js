@@ -12,7 +12,8 @@
     }
   };
   const picker = () => $("#auto-account");
-  let shown = "";
+  let shown = "", wanted = "";
+  const editors = ["#rule-editor-dialog", "#task-editor-dialog"];
 
   function syncSelects(id) {
     const options = state.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
@@ -52,24 +53,63 @@
   }
 
   async function refreshSummary() {
-    const id = picker().value;
-    const account = state.accounts.find((a) => a.id === id);
+    const t = autoTicket();
+    const account = state.accounts.find((a) => a.id === t.account);
     if (!account) return summary(null);
-    const [p, fs] = await Promise.all([api(`/api/automation/policy/${encodeURIComponent(id)}`), window.loadFolderSettings()]);
-    summary(account, p, fs);
+    const [p, fs] = await Promise.all([api(`/api/automation/policy/${encodeURIComponent(t.account)}`), window.loadFolderSettings()]);
+    if (autoCurrent(t)) summary(account, p, fs);
   }
 
+  // Every load of the page goes through here. A new ticket makes responses
+  // of earlier loads stale; switching accounts also marks the editable forms
+  // as not yet loaded, so they cannot be saved before the new account's
+  // values are in them.
   async function show(id) {
+    const switching = id !== autoScope.account;
+    autoScope.account = id;
+    autoScope.gen++;
+    if (switching) {
+      autoScope.epoch++;
+      for (const f of ["#automation-policy-form", "#folder-settings-form"]) delete $(f).dataset.account;
+      for (const d of editors) if ($(d).open) $(d).close();
+    }
     shown = id;
+    picker().value = id;
     syncSelects(id);
     await Promise.all([window.loadRules(), window.loadTasks(), refreshSummary()]);
   }
 
+  // Unsaved edits on the page or in its editors are dropped only after the
+  // user agrees.
+  function confirmLeave() {
+    const scope = { contains: (el) => $("#automation-pane").contains(el) || editors.some((d) => $(d).contains(el)) };
+    return confirmDiscard(scope);
+  }
+
   window.loadAutomation = async () => {
-    const previous = picker().value || shown;
+    const previous = wanted || picker().value || shown;
+    wanted = "";
     picker().innerHTML = state.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)} · ${esc(a.username)}</option>`).join("");
     if (state.accounts.some((a) => a.id === previous)) picker().value = previous;
     await show(picker().value);
+  };
+
+  // The one way to put the page on another mailbox from outside the picker
+  // (old run links). Returns false when the user keeps unsaved edits.
+  window.selectAutomationAccount = async (id) => {
+    if (!state.accounts.some((a) => a.id === id)) throw new Error("该运行记录所属的邮箱已不存在");
+    if (state.view !== "automation") {
+      const pane = $(`#${paneOf(state.view)}-pane`);
+      if (pane && !confirmDiscard(pane)) return false;
+      if (!confirmLeave()) return false;
+      wanted = id;
+      await showView("automation");
+      return true;
+    }
+    if (id === autoScope.account) return true;
+    if (!confirmLeave()) return false;
+    await show(id);
+    return true;
   };
 
   // Called after a rule, task, grant or folder setting is saved: the summary
@@ -87,7 +127,7 @@
   picker().addEventListener(
     "change",
     run(async () => {
-      if (!confirmDiscard($("#automation-pane"))) {
+      if (!confirmLeave()) {
         picker().value = shown;
         return;
       }
