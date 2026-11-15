@@ -1,6 +1,8 @@
 "use strict";
 (() => {
-  let tasks = [], policy = null, editing = null, selectedTask = "", telegram = null, timer = null, rules = [], readiness = {};
+  // loaded: the switch tasks, grant, rules and readiness were loaded for (see
+  // autoRequire in app.js); nothing here acts on another mailbox's cache.
+  let tasks = [], policy = null, editing = null, selectedTask = "", telegram = null, timer = null, rules = [], readiness = {}, loaded = null;
   let detailMode = null, detailSeq = 0, preview = null, previewSeq = 0, previewAbort = null;
   const active = (s) => ["queued", "running", "awaiting_ai"].includes(s);
   const labels = {
@@ -184,10 +186,11 @@
   async function loadAccount() {
     clearTimeout(timer);
     const t = autoTicket(), key = t.account;
-    $("#new-task").disabled = !key;
+    if (!autoLoaded(loaded)) $("#new-task").disabled = true;
     if (!key) {
       tasks = [];
       policy = null;
+      loaded = null;
       renderTasks();
       $("#tasks-policy-note").textContent = "请先添加邮箱并配置任务整理授权。";
       return;
@@ -197,10 +200,15 @@
       api(`/api/automation/policy/${encodeURIComponent(key)}`),
       api(`/api/rules?account_id=${encodeURIComponent(key)}`),
       api(`/api/tasks/readiness?account_id=${encodeURIComponent(key)}`).catch(() => []),
-    ]);
+    ]).catch((err) => {
+      if (autoCurrent(t) && !autoLoaded(loaded)) $("#tasks-list").innerHTML = AUTO_FAILED;
+      throw err;
+    });
     if (!autoCurrent(t)) return;
     let ready;
     [tasks, policy, rules, ready] = out;
+    loaded = { account: key, epoch: t.epoch };
+    $("#new-task").disabled = false;
     readiness = Object.fromEntries(ready.map((r) => [r.task_id, r]));
     $("#tasks-policy-note").textContent = `整理授权${policy.enabled ? "已启用" : "未启用"} · ${policy.mode === "observe" ? "观察上限" : "允许执行"} · 每批最多 ${policy.max_batch} 封 · 内置定时${policy.allow_internal ? "已允许" : "未允许"}`;
     renderTasks();
@@ -233,6 +241,7 @@
 
   async function loadRuns() {
     clearTimeout(timer);
+    if (!autoLoaded(loaded)) return; // tasks still belong to the previous mailbox
     const ticket = autoTicket();
     const t = tasks.find((t) => t.id === selectedTask);
     $("#task-runs-title").textContent = t ? `运行记录 · ${t.name}` : "运行记录";
@@ -266,12 +275,13 @@
   }
 
   function openEditor(t = null, prefill = null) {
+    autoRequire(loaded, t ? t.account_id : undefined);
     if (!policy?.source_folders?.length) throw new Error("请先在“整理设置 → 整理授权”中选择源目录并保存");
     editing = t
       ? structuredClone(t)
       : {
           id: "",
-          account_id: account(),
+          account_id: autoScope.account,
           version: 0,
           name: "",
           trigger_mode: "manual",
@@ -403,6 +413,7 @@
   // allows, and the rule bound together with every enabled rule of equal or
   // higher priority on those sources (the server refuses to skip them).
   window.createTaskFromRule = async (ruleID) => {
+    autoRequire(loaded);
     if (!confirmDiscard($("#task-editor-dialog"))) return;
     const rule = rules.find((r) => r.id === ruleID);
     if (!rule) throw new Error("规则已不存在，请刷新");
@@ -439,6 +450,7 @@
   $("#task-editor").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
+      autoRequire(loaded, editing?.account_id);
       const sources = checked();
       if (!sources.length) throw new Error("请选择至少一个源目录");
       const ruleIDs = $("#task-rules-all").checked ? [] : selectedRuleIDs();
@@ -527,9 +539,12 @@
   $("#tasks-list").addEventListener(
     "click",
     wrap(async (e) => {
+      if (!e.target.closest("[data-task-fix],[data-task-command]")) return;
+      autoRequire(loaded);
       const fix = e.target.closest("[data-task-fix]");
       if (fix) {
         const area = fix.dataset.taskFix, t = tasks.find((x) => x.id === fix.dataset.taskId);
+        if (t) autoRequire(loaded, t.account_id);
         if (area === "policy" || area === "folders") window.openAutomationSettings?.(area);
         else if (area === "account") openAccount(state.accounts.find((a) => a.id === t?.account_id));
         else if (t) openEditor(t);
@@ -539,6 +554,15 @@
       if (!b) return;
       const t = tasks.find((t) => t.id === b.dataset.taskId);
       if (!t) return;
+      autoRequire(loaded, t.account_id);
+      // A request sent for this mailbox stays its own: if the page switches
+      // meanwhile, its result does not touch the other mailbox's page.
+      const owner = autoTicket();
+      const moved = () => {
+        if (autoSameAccount(owner)) return false;
+        notify(`「${accountName(t.account_id)}」的任务操作已提交；页面已切换到其他邮箱，当前内容未改动`);
+        return true;
+      };
       switch (b.dataset.taskCommand) {
         case "edit":
           openEditor(t);
@@ -548,6 +572,7 @@
             version: t.version,
             enabled: !t.enabled,
           });
+          if (moved()) break;
           await loadAccount();
           notify(t.enabled ? "任务已暂停，剩余动作将停止" : "任务已启用；写入仍受管理员授权限制");
           break;
@@ -559,6 +584,7 @@
               run_key: `manual:${id()}`,
             }),
           );
+          if (moved()) break;
           selectedTask = t.id;
           await loadRuns();
           notify("本轮已提交，实际结果请查看运行记录");
@@ -834,11 +860,15 @@
   $("#task-runs-list").addEventListener(
     "click",
     wrap(async (e) => {
+      if (!e.target.closest("[data-task-cancel],[data-task-continue]")) return;
+      autoRequire(loaded);
+      const owner = autoTicket();
       const cancel = e.target.closest("[data-task-cancel]");
       if (cancel) {
         await busy(cancel, "取消中…", () =>
           request(`/api/task-runs/${encodeURIComponent(cancel.dataset.taskCancel)}/cancel`, "POST", {}),
         );
+        if (!autoSameAccount(owner)) return notify("取消已提交；页面已切换到其他邮箱");
         await loadRuns();
         notify("已取消本轮未开始的操作，已完成变化保留");
         return;
@@ -847,6 +877,7 @@
       if (next) {
         const t = tasks.find((t) => t.id === selectedTask);
         if (!t) return;
+        autoRequire(loaded, t.account_id);
         await busy(next, "提交中…", () =>
           request(`/api/tasks/${encodeURIComponent(t.id)}/run`, "POST", {
             task_id: t.id,
@@ -854,6 +885,7 @@
             run_key: `continue:${id()}`,
           }),
         );
+        if (!autoSameAccount(owner)) return notify("已提交下一批候选；页面已切换到其他邮箱");
         await loadRuns();
         notify("已提交下一批候选");
       }

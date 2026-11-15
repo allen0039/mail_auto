@@ -14,6 +14,8 @@
   const picker = () => $("#auto-account");
   let shown = "", wanted = "";
   const editors = ["#rule-editor-dialog", "#task-editor-dialog"];
+  // Dialogs that show one mailbox's records; closed when the page switches.
+  const recordDialogs = [...editors, "#rule-preview-dialog", "#rule-history-dialog", "#task-detail-dialog"];
 
   function syncSelects(id) {
     const options = state.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join("");
@@ -56,8 +58,14 @@
     const t = autoTicket();
     const account = state.accounts.find((a) => a.id === t.account);
     if (!account) return summary(null);
-    const [p, fs] = await Promise.all([api(`/api/automation/policy/${encodeURIComponent(t.account)}`), window.loadFolderSettings()]);
-    if (autoCurrent(t)) summary(account, p, fs);
+    let p, fs;
+    try {
+      [p, fs] = await Promise.all([api(`/api/automation/policy/${encodeURIComponent(t.account)}`), window.loadFolderSettings()]);
+    } catch (err) {
+      if (autoCurrent(t)) $("#auto-summary").innerHTML = AUTO_FAILED;
+      throw err;
+    }
+    if (autoCurrent(t) && fs) summary(account, p, fs);
   }
 
   // Every load of the page goes through here. A new ticket makes responses
@@ -71,7 +79,11 @@
     if (switching) {
       autoScope.epoch++;
       for (const f of ["#automation-policy-form", "#folder-settings-form"]) delete $(f).dataset.account;
-      for (const d of editors) if ($(d).open) $(d).close();
+      for (const d of recordDialogs) if ($(d).open) $(d).close();
+      // The previous mailbox's records leave the page; each area shows its
+      // own again (and re-enables its 新建 button) once loaded for this one.
+      for (const l of ["#auto-summary", "#rules-list", "#tasks-list", "#task-runs-list", "#ai-runs"]) $(l).innerHTML = AUTO_LOADING;
+      $("#new-rule").disabled = $("#new-task").disabled = true;
     }
     shown = id;
     picker().value = id;

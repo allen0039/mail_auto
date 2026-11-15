@@ -1,5 +1,6 @@
-// Mail Auto 0.8.1 regression check for audit items S2-01, S2-02, S2-03,
-// S2-04 (page text) and S2-05: which mailbox a response or save belongs to,
+// Mail Auto 0.8.x regression check for audit items S2-01, S2-02, S2-03,
+// S2-04 (page text) and S2-05: which mailbox a response or save belongs to
+// (including actions taken while a switch is still loading, 0.8.2),
 // edits made while an editor saves, rule condition buttons as edits, and old
 // run links. It replaces the page's API with an in-memory fake (two mailboxes
 // whose settings share the same version numbers), so it needs no mailbox and
@@ -36,6 +37,10 @@
     return gates[key].release;
   };
   const owner = (url) => (/(\/|=)a2(\b|$)/.test(url) ? "a2" : "a1");
+  // One GET area per endpoint, so areas can be delayed ("get:a2:tasks") or
+  // failed (fails.add("a2:tasks")) separately.
+  const kindOf = (url) => (url.startsWith("/api/tasks/readiness") ? "readiness" : /^\/api\/automation\/(\w+)/.exec(url)?.[1] || /^\/api\/([\w-]+)/.exec(url)?.[1]);
+  const fails = new Set();
   window.api = async (url, options = {}) => {
     const method = options.method || "GET", body = options.body ? JSON.parse(options.body) : null;
     if (method !== "GET") {
@@ -49,16 +54,20 @@
       if (url.startsWith("/api/tasks/")) return { ...body, version: body.version + 1 };
       if (url.startsWith("/api/automation/policy/")) return { ...body, version: body.version + 1 };
       if (url.startsWith("/api/folder-settings/")) return { ok: true };
+      if (url.startsWith("/api/automation/batches/")) return {};
+      if (url.startsWith("/api/task-runs/")) return {};
       throw new Error("unhandled " + method + " " + url);
     }
     const id = owner(url);
-    if (gates["get:" + id] && !url.startsWith("/api/task-runs/")) await gates["get:" + id].p;
+    const kind = kindOf(url);
+    if (!url.startsWith("/api/task-runs/")) for (const k of ["get:" + id, `get:${id}:${kind}`]) if (gates[k]) await gates[k].p;
+    if (fails.has(`${id}:${kind}`)) throw new Error("模拟加载失败");
     if (url === "/api/accounts") return accounts;
     if (url === "/api/status") return { version: "0.8.1", accounts: 2, messages: 0, unread: 0, folders: 0 };
     if (url === "/api/network") return { version: 1, global: { mode: "direct" }, agent: { mode: "inherit" }, telegram: { mode: "inherit" }, profiles: [] };
     if (url.startsWith("/api/automation/policy/")) return policy(id);
     if (url.startsWith("/api/automation/capabilities/")) return { folders: [{ name: "INBOX" }, { name: "Archive" }] };
-    if (url.startsWith("/api/automation/batches")) return [];
+    if (url.startsWith("/api/automation/batches")) return [{ id: "b-" + id, created_at: now - 60, state: "claimed", mode: "observe", run_key: "k-" + id, scanned: 0, policy_version: 4, items: [], decisions: [], operations: [], plan_ids: [] }];
     if (url.startsWith("/api/folder-settings/")) return { account_id: id, archive_folder: "Archive", trash_folder: "", writes_enabled: id === "a1", version: 2 };
     if (url.startsWith("/api/rules?")) return [rule(id)];
     if (url.startsWith("/api/tasks/readiness")) return [{ task_id: "t-" + id, ready: !issues[id].length, issues: issues[id] }];
@@ -317,6 +326,156 @@
     await reset("a1");
     await window.openTaskRun("run-a");
     check("S2-05 同邮箱链接不询问、不重载其他区域", asked.length === 0 && allA(pageAccount()) && $("#task-runs-title").textContent.includes("任务-a1"));
+
+    // ---- S2-01 (0.8.2): actions while a switch is still loading ----
+    // Stale A controls are put back by hand, so the handlers' own checks are
+    // tested, not only the page hiding them.
+    const stale = {
+      ruleToggle: () => { $("#rules-list").insertAdjacentHTML("beforeend", '<button type="button" data-rule-command="toggle" data-rule-id="r-a1">x</button>'); $('#rules-list [data-rule-id="r-a1"]').click(); },
+      ruleEdit: () => { $("#rules-list").insertAdjacentHTML("beforeend", '<button type="button" data-rule-command="edit" data-rule-id="r-a1">x</button>'); $('#rules-list [data-rule-command="edit"][data-rule-id="r-a1"]').click(); },
+      ruleTask: () => { $("#rules-list").insertAdjacentHTML("beforeend", '<button type="button" data-rule-command="task" data-rule-id="r-a1">x</button>'); $('#rules-list [data-rule-command="task"][data-rule-id="r-a1"]').click(); },
+      taskToggle: () => { $("#tasks-list").insertAdjacentHTML("beforeend", '<button type="button" data-task-command="toggle" data-task-id="t-a1">x</button>'); $('#tasks-list [data-task-command="toggle"][data-task-id="t-a1"]').click(); },
+      taskRun: () => { $("#tasks-list").insertAdjacentHTML("beforeend", '<button type="button" data-task-command="run" data-task-id="t-a1">x</button>'); $('#tasks-list [data-task-command="run"][data-task-id="t-a1"]').click(); },
+      taskEdit: () => { $("#tasks-list").insertAdjacentHTML("beforeend", '<button type="button" data-task-command="edit" data-task-id="t-a1">x</button>'); $('#tasks-list [data-task-command="edit"][data-task-id="t-a1"]').click(); },
+      runContinue: () => { $("#task-runs-list").insertAdjacentHTML("beforeend", '<button type="button" data-task-continue="run-x">x</button>'); $('#task-runs-list [data-task-continue]').click(); },
+      batchCancel: () => { $("#ai-runs").insertAdjacentHTML("beforeend", '<button type="button" data-cancel-batch="b-a1">x</button>'); $('#ai-runs [data-cancel-batch="b-a1"]').click(); },
+      newRule: () => { const b = $("#new-rule"), was = b.disabled; b.disabled = false; b.click(); b.disabled = was; },
+      newTask: () => { const b = $("#new-task"), was = b.disabled; b.disabled = false; b.click(); b.disabled = was; },
+    };
+    const noEditorOpen = () => !$("#rule-editor-dialog").open && !$("#task-editor-dialog").open;
+    const tryAll = async (names) => {
+      const before = sent.length;
+      notes.length = 0;
+      for (const n of names) stale[n]();
+      await wait(80);
+      return { sent: sent.slice(before), editors: noEditorOpen(), told: notes.some((m) => m.includes("正在加载所选邮箱")) };
+    };
+
+    // Everything for B delayed.
+    await reset("a1");
+    release = hold("get:a2");
+    switchTo("a2");
+    await wait(40);
+    p = pageAccount();
+    check("S2-01b B 加载中：旧规则与任务列表已移出页面，显示加载提示", !$('#rules-list [data-rule-id="r-a1"]') && !$('#tasks-list [data-task-id="t-a1"]') && $("#rules-list").innerText.includes("正在加载") && $("#tasks-list").innerText.includes("正在加载"), `${p.rulesList.slice(0, 40)} | ${p.tasksList.slice(0, 40)}`);
+    check("S2-01b B 加载中：新建规则 / 新建任务按钮不可用，摘要不再显示 A", $("#new-rule").disabled && $("#new-task").disabled && !$("#auto-summary").innerText.includes("A邮箱"), $("#auto-summary").innerText.slice(0, 60));
+    let r = await tryAll(["ruleToggle", "taskToggle", "taskRun", "runContinue", "batchCancel"]);
+    check("S2-01b B 加载中：旧规则暂停、任务启用、手动运行、继续处理、取消外部批次都不发送请求", r.sent.length === 0 && r.told, JSON.stringify(r.sent).slice(0, 300));
+    r = await tryAll(["newRule", "newTask", "ruleEdit", "taskEdit", "ruleTask"]);
+    check("S2-01b B 加载中：新建 / 编辑规则与任务、规则创建任务都不打开编辑器、不发送请求", r.sent.length === 0 && r.editors && r.told, JSON.stringify(r).slice(0, 300));
+    release();
+    await until(() => !$("#new-task").disabled && !$("#new-rule").disabled && $("#auto-summary").innerText.includes("B邮箱"));
+    p = pageAccount();
+    check("S2-01b B 加载完成：列表为 B，新建按钮恢复可用", allB(p) && !$("#new-rule").disabled && !$("#new-task").disabled, JSON.stringify(p).slice(0, 200));
+
+    // After loading, normal actions use B's ids, account and limits.
+    let n2 = sent.length;
+    $('[data-rule-command="toggle"][data-rule-id="r-a2"]').click();
+    await until(() => sent.length > n2);
+    check("S2-01b 加载后暂停规则：PUT /api/rules/r-a2，账号 a2", sent[n2]?.url === "/api/rules/r-a2" && sent[n2]?.body.account_id === "a2", JSON.stringify(sent[n2]));
+    await wait(60);
+    n2 = sent.length;
+    $('[data-task-command="run"][data-task-id="t-a2"]').click();
+    await until(() => sent.length > n2);
+    check("S2-01b 加载后手动运行：POST /api/tasks/t-a2/run", sent[n2]?.url === "/api/tasks/t-a2/run" && sent[n2]?.body.task_id === "t-a2", JSON.stringify(sent[n2]));
+    await wait(60);
+    $("#new-task").click();
+    await until(() => $("#task-editor-dialog").open);
+    check("S2-01b 加载后新建任务：预填 B 的每批上限 8", $("#task-limit").value === "8" && $("#task-limit").max === "8", `${$("#task-limit").value}/${$("#task-limit").max}`);
+    edit("#task-name", "B 的任务");
+    n2 = sent.length;
+    $("#task-editor").requestSubmit();
+    await until(() => sent.length > n2);
+    check("S2-01b 加载后保存新任务：POST /api/tasks，账号 a2、每批 8", sent[n2]?.url === "/api/tasks" && sent[n2]?.body.account_id === "a2" && sent[n2]?.body.max_batch === 8, JSON.stringify(sent[n2]).slice(0, 200));
+    await until(() => !$("#task-editor-dialog").open);
+    $("#new-rule").click();
+    await until(() => $("#rule-editor-dialog").open);
+    edit("#rule-name", "B 的规则");
+    $('#rule-sources input[value="INBOX"]').checked = true;
+    edit("#rule-action", "keep");
+    n2 = sent.length;
+    $("#rule-editor").requestSubmit();
+    await until(() => sent.length > n2);
+    check("S2-01b 加载后新建规则：POST /api/rules，账号 a2", sent[n2]?.url === "/api/rules" && sent[n2]?.body.account_id === "a2", JSON.stringify(sent[n2]).slice(0, 200));
+    await until(() => !$("#rule-editor-dialog").open);
+    await window.createTaskFromRule("r-a2");
+    check("S2-01b 加载后规则创建任务：编辑器属于 B（规则 r-a2，每批上限 8）", $("#task-editor-dialog").open && $("#task-limit").max === "8" && $('#task-rules input[value="r-a2"]')?.checked !== false, `${$("#task-editor-dialog").open}/${$("#task-limit").max}`);
+    answer = true;
+    closeGuarded($("#task-editor-dialog"));
+    answer = false;
+
+    // Areas finish at different times: rules first, tasks later (and the reverse).
+    await reset("a1");
+    release = hold("get:a2:tasks");
+    switchTo("a2");
+    await until(() => $("#rules-list").innerText.includes("规则-a2"));
+    check("S2-01b 规则先加载完成：规则区为 B 且可新建规则，任务区仍在加载", !$("#new-rule").disabled && $("#new-task").disabled && $("#tasks-list").innerText.includes("正在加载"));
+    r = await tryAll(["taskRun", "taskToggle", "newTask"]);
+    check("S2-01b 任务未加载：旧任务运行 / 启用 / 新建都不发送、不打开", r.sent.length === 0 && r.editors, JSON.stringify(r.sent).slice(0, 200));
+    $('[data-rule-command="task"][data-rule-id="r-a2"]').click();
+    await wait(80);
+    check("S2-01b 任务未加载：B 的规则“创建任务”不使用 A 的任务授权缓存", !$("#task-editor-dialog").open && notes.some((m) => m.includes("正在加载所选邮箱")));
+    release();
+    await until(() => !$("#new-task").disabled);
+    check("S2-01b 任务随后加载完成：任务区为 B 且恢复可用", $("#tasks-list").innerText.includes("任务-a2") && !$("#new-task").disabled);
+    await reset("a1");
+    release = hold("get:a2:capabilities");
+    switchTo("a2");
+    await until(() => $("#tasks-list").innerText.includes("任务-a2"));
+    r = await tryAll(["ruleToggle", "newRule", "ruleEdit"]);
+    check("S2-01b 能力（规则区）迟到、任务已加载：规则操作仍不发送、不打开", $("#new-rule").disabled && r.sent.length === 0 && r.editors, JSON.stringify(r.sent).slice(0, 200));
+    release();
+    await until(() => !$("#new-rule").disabled);
+    check("S2-01b 能力随后加载完成：规则区恢复可用", $("#rules-list").innerText.includes("规则-a2"));
+
+    // A failed load keeps blocking until a retry succeeds.
+    await reset("a1");
+    fails.add("a2:tasks");
+    switchTo("a2");
+    await until(() => $("#tasks-list").innerText.includes("加载失败"));
+    r = await tryAll(["taskRun", "taskToggle", "newTask"]);
+    check("S2-01b 任务加载失败：提示重试；旧任务运行 / 启用 / 新建仍被阻止", $("#tasks-list").innerText.includes("重试") && $("#new-task").disabled && r.sent.length === 0 && r.editors, JSON.stringify(r.sent).slice(0, 200));
+    fails.delete("a2:tasks");
+    $("#refresh-automation").click();
+    await until(() => !$("#new-task").disabled);
+    n2 = sent.length;
+    $('[data-task-command="run"][data-task-id="t-a2"]').click();
+    await until(() => sent.length > n2);
+    check("S2-01b 重试成功后恢复：运行 B 的任务 POST /api/tasks/t-a2/run", sent[n2]?.url === "/api/tasks/t-a2/run", JSON.stringify(sent[n2]));
+    await wait(60);
+
+    // A → B → A while both loads are delayed: A's earlier load does not count.
+    await reset("a1");
+    release = hold("get:a2");
+    switchTo("a2");
+    await wait(40);
+    const releaseA = hold("get:a1");
+    switchTo("a1");
+    await wait(40);
+    r = await tryAll(["taskRun", "ruleToggle", "newTask"]);
+    check("S2-01b A→B→A 且 A 重新加载中：A 先前的加载不算数，仍不发送", r.sent.length === 0 && r.editors, JSON.stringify(r.sent).slice(0, 200));
+    releaseA();
+    await until(() => !$("#new-task").disabled && $("#tasks-list").innerText.includes("任务-a1"));
+    release();
+    await wait(120);
+    n2 = sent.length;
+    $('[data-task-command="run"][data-task-id="t-a1"]').click();
+    await until(() => sent.length > n2);
+    check("S2-01b A→B→A：B 迟到不覆盖 A；A 加载后运行 t-a1", allA(pageAccount()) && sent[n2]?.url === "/api/tasks/t-a1/run", JSON.stringify(sent[n2]));
+    await wait(60);
+
+    // A request sent for A stays A's; its callback does not touch B's page.
+    await reset("a1");
+    release = hold("save");
+    n2 = sent.length;
+    $('[data-task-command="run"][data-task-id="t-a1"]').click();
+    await until(() => sent.length > n2);
+    switchTo("a2");
+    await until(() => $("#tasks-list").innerText.includes("任务-a2"));
+    notes.length = 0;
+    release();
+    await wait(150);
+    check("S2-01b 已提交 A 的运行后切到 B：请求仍为 t-a1，回调不改动 B 的页面并说明属于 A", sent[n2].url === "/api/tasks/t-a1/run" && allB(pageAccount()) && !$("#task-runs-title").textContent.includes("任务-a1") && notes.some((m) => m.includes("A邮箱")), notes.join("|"));
   } catch (e) {
     check("脚本异常", false, e.stack || e);
   } finally {

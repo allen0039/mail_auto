@@ -75,6 +75,19 @@ const autoTicket = () => ({ ...autoScope });
 const autoCurrent = (t) => t.gen === autoScope.gen && t.account === autoScope.account;
 const autoSameAccount = (t) => t.epoch === autoScope.epoch && t.account === autoScope.account;
 const accountName = (id) => state.accounts.find((a) => a.id === id)?.name || id;
+// Each area (rules, tasks, external batches) records the switch its data was
+// loaded for. Before an action sends a request about the area's records, or
+// opens one of its editors, the area must be loaded for the mailbox shown now;
+// a refresh of the same mailbox keeps its data usable. Checked before sending,
+// not only when a response comes back.
+const autoLoaded = (mark) => !!mark && mark.account === autoScope.account && mark.epoch === autoScope.epoch;
+function autoRequire(mark, account) {
+  if (!autoLoaded(mark) || (account !== undefined && account !== autoScope.account)) {
+    throw new Error("正在加载所选邮箱的数据，请等加载完成后再操作");
+  }
+}
+const AUTO_LOADING = '<p class="muted">正在加载所选邮箱…</p>';
+const AUTO_FAILED = '<p class="form-error">所选邮箱的数据加载失败，请点“刷新”重试。</p>';
 // A form rendered for an account carries data-account; a save refuses a form
 // that is not (yet) rendered for the account the page shows.
 function autoFormAccount(form) {
