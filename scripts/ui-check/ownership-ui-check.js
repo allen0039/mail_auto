@@ -2,7 +2,8 @@
 // S2-04 (page text) and S2-05: which mailbox a response or save belongs to
 // (including actions taken while a switch is still loading, 0.8.2),
 // edits made while an editor saves, rule condition buttons as edits, and old
-// run links. It replaces the page's API with an in-memory fake (two mailboxes
+// run links; DP-01 (0.8.8): the mailbox dialog closed and reopened at once.
+// It replaces the page's API with an in-memory fake (two mailboxes
 // whose settings share the same version numbers), so it needs no mailbox and
 // sends nothing anywhere. Usage: open a throwaway instance, log in, evaluate
 // this file. Resolves to {pass, results}.
@@ -41,6 +42,7 @@
   // failed (fails.add("a2:tasks")) separately.
   const kindOf = (url) => (url.startsWith("/api/tasks/readiness") ? "readiness" : /^\/api\/automation\/(\w+)/.exec(url)?.[1] || /^\/api\/([\w-]+)/.exec(url)?.[1]);
   const fails = new Set();
+  let failNext = null; // the next write answers with this error (DP-01)
   window.api = async (url, options = {}) => {
     const method = options.method || "GET", body = options.body ? JSON.parse(options.body) : null;
     if (url === "/api/rules/preview") {
@@ -58,6 +60,11 @@
     if (method !== "GET") {
       sent.push({ url, method, body });
       if (gates.save) await gates.save.p;
+      if (failNext) {
+        const f = failNext;
+        failNext = null;
+        throw f;
+      }
       if (url === "/api/accounts") return { ...body, id: "a9" };
       if (url.startsWith("/api/accounts/")) return { ...body, id: url.split("/").pop() };
       if (url === "/api/rules") return { ...body, id: "r-new", version: 1 };
@@ -569,6 +576,66 @@
     release();
     await wait(150);
     check("S2-01b 已提交 A 的运行后切到 B：请求仍为 t-a1，回调不改动 B 的页面并说明属于 A", sent[n2].url === "/api/tasks/t-a1/run" && allB(pageAccount()) && !$("#task-runs-title").textContent.includes("任务-a1") && notes.some((m) => m.includes("A邮箱")), notes.join("|"));
+
+    // ---- DP-01: the mailbox dialog closed and reopened before its close event runs ----
+    const acct = $("#account-form"), acctDialog = $("#account-dialog");
+    const field = (name) => acct.elements[name];
+    const acctState = () => JSON.stringify({ open: acctDialog.open, dirty: isDirty(acct), name: field("name").value, id: state.editingAccount, title: $("#account-dialog-title").textContent, error: $("#account-error").textContent });
+    for (const [kind, next, id, title] of [["已有邮箱→另一已有邮箱", accounts[1], "a2", "编辑邮箱配置"], ["已有邮箱→新建邮箱", null, null, "添加邮箱"]]) {
+      await reset("a1");
+      openAccount(accounts[0]);
+      edit('#account-form [name="name"]', "旧窗口修改");
+      answer = true;
+      closeGuarded(acctDialog);
+      answer = false;
+      openAccount(next); // same task: the old close event has not run yet
+      edit('#account-form [name="name"]', "新窗口较新名称");
+      await wait(120);
+      check(`DP-01 ${kind}：迟到的关闭事件不清空字段与未保存标记`, acctDialog.open && isDirty(acct) && field("name").value === "新窗口较新名称", acctState());
+      check(`DP-01 ${kind}：编辑身份保持为新窗口（${id || "新建"}）`, state.editingAccount === id && $("#account-dialog-title").textContent === title, acctState());
+    }
+    // A normal close still clears the form, including the secret field.
+    await reset("a1");
+    openAccount(accounts[0]);
+    edit('#account-form [name="name"]', "将被放弃");
+    field("password").value = "test-only-secret";
+    answer = true;
+    closeGuarded(acctDialog);
+    answer = false;
+    await wait(120);
+    check("DP-01 正常关闭：清空授权码等输入并清除编辑身份", !acctDialog.open && field("password").value === "" && field("name").value === "" && state.editingAccount === null, acctState());
+    // A normal save still closes and clears.
+    await reset("a1");
+    openAccount(null);
+    edit('#account-form [name="username"]', "plain@163.com");
+    field("password").value = "test-only";
+    edit('#account-form [name="name"]', "正常保存");
+    n = sent.length;
+    acct.requestSubmit();
+    await until(() => !acctDialog.open);
+    await wait(120);
+    check("DP-01 正常保存：POST 一次，关闭并清空", sent.length === n + 1 && sent[n].url === "/api/accounts" && sent[n].body.name === "正常保存" && !acctDialog.open && field("password").value === "" && state.editingAccount === null && !isDirty(acct), acctState());
+    // An old save answering after an immediate reopen touches nothing in the new opening.
+    for (const outcome of ["成功", "失败"]) {
+      await reset("a1");
+      openAccount(accounts[0]);
+      edit('#account-form [name="name"]', "旧窗口提交");
+      release = hold("save");
+      n = sent.length;
+      acct.requestSubmit();
+      await until(() => sent.length > n);
+      answer = true;
+      closeGuarded(acctDialog);
+      answer = false;
+      openAccount(accounts[1]);
+      edit('#account-form [name="name"]', "重开后的编辑");
+      notes.length = 0;
+      if (outcome === "失败") failNext = new Error("模拟旧请求失败");
+      release();
+      await wait(200);
+      check(`DP-01 旧保存${outcome}在立即重开后返回：新窗口字段、提示与编辑身份不变`, acctDialog.open && isDirty(acct) && field("name").value === "重开后的编辑" && state.editingAccount === "a2" && $("#account-error").textContent === "" && $("#account-dialog-title").textContent === "编辑邮箱配置", acctState());
+      check(`DP-01 旧保存${outcome}：请求仍是原邮箱 a1，结果以提示告知`, sent[n].url === "/api/accounts/a1" && sent[n].body.name === "旧窗口提交" && notes.length > 0, notes.join("|"));
+    }
   } catch (e) {
     check("脚本异常", false, e.stack || e);
   } finally {

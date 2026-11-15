@@ -936,7 +936,11 @@ $("#credential-mode").addEventListener("change", () => {
   }
 });
 
-$("#account-dialog").addEventListener("close", () => {
+$("#account-dialog").addEventListener("close", (e) => {
+  // The close event is queued: if the dialog was opened again before it ran,
+  // it belongs to the earlier opening and must not touch the new one (same
+  // rule as the document-level close handler above).
+  if (e.currentTarget.open) return;
   $("#account-form").reset();
   state.editingAccount = null;
 });
@@ -1149,6 +1153,12 @@ $("#account-form").addEventListener("submit", async (e) => {
       notify(editingID ? "邮箱配置已更新；连接与同步状态见该邮箱卡片" : "邮箱已保存；后台自动同步会开始读取，状态见该邮箱卡片，可点“连接诊断”检查");
     });
   } catch (err) {
+    // Closed (maybe reopened for another mailbox) meanwhile: the error belongs
+    // to the earlier opening, so it is a notice, not the new dialog's error.
+    if (editorState(ticket) === "closed") {
+      notify(`邮箱配置未保存：${err.message}`, true);
+      return;
+    }
     // The draft stays in the dialog; the error says what to do next.
     $("#account-error").textContent = err.message;
   }
