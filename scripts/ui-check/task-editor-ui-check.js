@@ -1,8 +1,10 @@
-// Mail Auto 0.8.6 task editor and task error regression check (lightweight
+// Mail Auto 0.8.6–0.8.7 task editor and task error regression check (lightweight
 // plan, suggestions 2 and 3): default fields, the “更多设置” fold and its
 // summary, open-and-save of existing tasks without losing fields, checks on
 // folded fields, save / enable / run failure messages, and stale responses
-// after edits, reopening or a mailbox switch. It replaces the page's API with
+// after edits, reopening or a mailbox switch. 0.8.7: the summary states what
+// the grant still enforces (LE-01) and the write note follows a task created
+// while edits continued (LE-02). It replaces the page's API with
 // an in-memory fake, so it needs no mailbox and sends nothing anywhere.
 // Usage: run through scripts/ui-check/run.sh, or open a throwaway instance,
 // log in and evaluate this file. Resolves to {pass, results}.
@@ -27,7 +29,9 @@
   // Midnight Asia/Shanghai of a past day, as the editor stores a 历史起点.
   const sinceDay = "2026-10-01", since = Math.floor(new Date(`${sinceDay}T00:00:00+08:00`).getTime() / 1000);
   const accounts = ["a1", "a2"].map((id, i) => ({ id, name: i ? "B邮箱" : "A邮箱", username: `tester${i}@163.com`, provider: "netease", host: "imap.163.com", port: 993, folders: [], synced_folders: ["INBOX", "Archive"] }));
-  const policy = (id) => ({ account_id: id, version: 4, enabled: true, mode: "execute", source_folders: ["INBOX", "Archive"], destinations: ["Archive"], actions: ["move"], allow_internal: true, protect_unread: true, protect_flagged: true, protected_senders: [], max_batch: 20, stable_seconds: 180, include_history: true, since: 0, expires: now + 86400 * 20 });
+  let grantOver = {}; // per-case grant changes (LE-01)
+  const policy = (id) => ({ ...grantBase(id), ...grantOver });
+  const grantBase = (id) => ({ account_id: id, version: 4, enabled: true, mode: "execute", source_folders: ["INBOX", "Archive"], destinations: ["Archive"], actions: ["move"], allow_internal: true, protect_unread: true, protect_flagged: true, protected_senders: [], max_batch: 20, stable_seconds: 180, include_history: true, since: 0, expires: now + 86400 * 20 });
   const rules = (id) => [
     { id: "r1-" + id, account_id: id, name: "账单归档", version: 3, priority: 10, enabled: true, source_folders: ["INBOX"], match: { mode: "all", conditions: [], groups: [] }, action: "move", also: [], destination: "Archive" },
     { id: "r2-" + id, account_id: id, name: "通知归档", version: 5, priority: 20, enabled: true, source_folders: ["INBOX"], match: { mode: "all", conditions: [], groups: [] }, action: "move", also: [], destination: "Archive" },
@@ -38,6 +42,8 @@
   const ai = { ...base, id: "t-ai", name: "外部 AI 分类", version: 3, enabled: true, trigger_mode: "external", engine: "ai", expected_seconds: 7200 };
   const plain = { ...base, id: "t-plain", name: "普通定时", version: 2, enabled: true, trigger_mode: "internal", mode: "execute", schedule: { ...base.schedule, hour: 8, minute: 10 } };
   const obs = { ...base, id: "t-obs", name: "观察任务", version: 1 };
+  // Looser than a stricter grant: no own protection, an earlier history start, 12 per run.
+  const loose = { ...base, id: "t-loose", name: "宽松任务", version: 4, max_batch: 12, since, protect_unread: false, protect_flagged: false, notify: "failures" };
   const taskB = { ...base, id: "t-b", account_id: "a2", name: "任务-B", version: 1 };
   const runOf = (task_id, x) => ({ id: "run-" + task_id, task_id, created_at: now - 300, updated_at: now - 200, finalized: true, scanned: 40, claimed: 0, completed: 0, kept: 0, protected: 0, failed: 0, unknown: 0, needs_ai: 0, queued: 0, running: 0, mode: "execute", ...x });
   const lastRuns = {
@@ -46,7 +52,7 @@
     "t-plain": runOf("t-plain", { state: "noop" }),
     "t-obs": runOf("t-obs", { state: "observed", mode: "observe", claimed: 3 }),
   };
-  const tasksOf = (id) => structuredClone(id === "a1" ? [custom, ai, plain, obs] : [taskB]);
+  const tasksOf = (id) => structuredClone(id === "a1" ? [custom, ai, plain, obs, loose] : [taskB]);
   const owner = (url) => (/(\/|=)a2(\b|$)|t-b\b/.test(url) ? "a2" : "a1");
   // Writes answer from this queue (default: success); a gate holds one.
   const answers = [];
@@ -169,7 +175,7 @@
     await reset("a1");
     await openTask("t-custom");
     check("自定义任务：更多设置默认展开并标明 4 项自定义", fold() && $("#task-more-note").textContent.includes("4 项自定义"), $("#task-more-note").textContent);
-    check("自定义任务摘要：每批 7、不保护未读、历史起点、通知仅失败均标为自定义", ["每轮最多 7 封（自定义）", "保护星标，不保护未读（自定义）", `只处理 ${sinceDay} 起收到的邮件（自定义）`, "通知：仅失败（自定义）"].every((x) => summary().includes(x)), summary());
+    check("自定义任务摘要：每批 7、历史起点、通知仅失败标为自定义；未读仍由整理授权保护", ["每轮最多 7 封（自定义）", "保护未读和星标（自定义；任务未额外保护，整理授权仍要求保护）", `只处理 ${sinceDay} 起收到的邮件（自定义）`, "通知：仅失败（自定义）"].every((x) => summary().includes(x)) && !summary().includes("不保护未读"), summary());
     check("自定义任务：真实执行说明会写入原邮箱", $("#task-mode-note").textContent.includes("会移动或修改原邮箱") && $("#task-mode-note").classList.contains("task-mode-write"));
     check("自定义任务：Cron 与非默认时区显示", !$("#task-schedule-fields").hidden && $("#task-frequency-select").value === "cron" && $("#task-cron").value === "15 */3 * * 1-5" && $("#task-timezone").value === "America/New_York");
     $("#task-more").open = false; // folded fields are still submitted as shown
@@ -370,7 +376,55 @@
     await wait(20);
     check("折叠区内的修改受未保存保护：关闭时询问并保留", asked.length === 1 && $("#task-editor-dialog").open && $("#task-notify").value === "all");
 
-    // ---- 7. Layout at this width ----
+    // ---- 7. LE-01: the summary shows what the grant still enforces ----
+    const grantDay = "2026-11-01", grantSince = Math.floor(new Date(`${grantDay}T00:00:00+08:00`).getTime() / 1000);
+    grantOver = { since: grantSince, protect_unread: true, protect_flagged: true };
+    await reset("a1");
+    await openTask("t-loose");
+    check("LE-01 授权强制保护、任务未额外保护：摘要显示仍保护未读和星标", summary().includes("保护未读和星标（自定义；任务未额外保护，整理授权仍要求保护）") && !summary().includes("不保护"), summary());
+    check("LE-01 授权历史起点更晚：摘要显示授权起点并注明任务设置", summary().includes(`只处理 ${grantDay} 起收到的邮件（自定义；任务设为 ${sinceDay}，整理授权起点更晚）`), summary());
+    check("LE-01 未收紧的每批数量照常显示", summary().includes("每轮最多 12 封（自定义）"), summary());
+    req = await submit();
+    check("LE-01 摘要不改字段：原样保存保护、历史起点、每批、通知", req?.method === "PUT" && diff(req.body, loose).length === 0, diff(req?.body || {}, loose).join(","));
+    grantOver = { max_batch: 10 };
+    await reset("a1");
+    await openTask("t-loose");
+    check("LE-01 授权数量上限收紧：摘要显示有效上限并注明任务设置", summary().includes("每轮最多 10 封（自定义；任务设为 12，受整理授权上限 10 限制）"), summary());
+    check("LE-01 收紧上限时任务字段不被改写", $("#task-limit").value === "12");
+    grantOver = { protect_unread: false, protect_flagged: false, since: grantSince };
+    await reset("a1");
+    await openTask("t-loose");
+    check("LE-01 授权也不保护时：如实显示不保护（无授权说明）", summary().includes("不保护未读和星标（自定义）") && !summary().includes("仍要求保护"), summary());
+    await reset("a1");
+    await openTask("t-plain");
+    check("LE-01 任务未设历史起点：显示授权起点", summary().includes(`历史范围跟随整理授权（${grantDay} 起）`) && !summary().includes("自定义"), summary());
+    grantOver = {};
+
+    // ---- 8. LE-02: a task created while edits continue is then edited as an existing task ----
+    for (const mode of ["execute", "observe"]) {
+      await reset("a1");
+      await openNew();
+      edit("#task-name", "创建中-" + mode);
+      edit("#task-mode", mode);
+      release = hold("save");
+      $("#task-editor").requestSubmit();
+      await until(() => sent.length === 1);
+      edit("#task-name", "创建后较新名称-" + mode);
+      if (mode === "observe") edit("#task-notify", "all");
+      release();
+      await until(() => $("#save-task").textContent === "保存修改");
+      await wait(60);
+      const note = $("#task-mode-note");
+      check(`LE-02 创建成功后保留较新草稿（${mode}）：编辑器、名称、模式、未保存标记`, $("#task-editor-dialog").open && $("#task-editor-title").textContent === "编辑整理任务" && $("#task-name").value === "创建后较新名称-" + mode && $("#task-mode").value === mode && isDirty($("#task-editor")));
+      check(`LE-02 写入说明跟随当前模式（${mode}）`, !note.textContent.includes("新任务保存为") && (mode === "execute" ? note.textContent.includes("真实执行：运行时会移动或修改原邮箱") && note.classList.contains("task-mode-write") : note.textContent.includes("只观察：运行时只记录建议") && !note.classList.contains("task-mode-write")), note.textContent);
+      if (mode === "observe") check("LE-02 摘要包含保存期间修改的通知", summary().includes("通知：每次结束（自定义）"), summary());
+      req = await submit();
+      check(`LE-02 下次保存（${mode}）：PUT 已创建任务与新版本，不重复创建，带较新字段`, req?.method === "PUT" && req.url === "/api/tasks/t-new" && req.body.version === 1 && req.body.mode === mode && req.body.name === "创建后较新名称-" + mode && sent.filter((x) => x.method === "POST" && x.url === "/api/tasks").length === 1, JSON.stringify(req && { url: req.url, method: req.method, version: req.body.version, mode: req.body.mode }));
+    }
+
+    // ---- 9. Layout at this width (custom task, fold open) ----
+    await reset("a1");
+    await openTask("t-custom");
     const dialog = $("#task-editor-dialog");
     check(`编辑器在 ${innerWidth}px 下无横向溢出`, dialog.scrollWidth <= dialog.clientWidth + 1 && $("#task-summary").offsetParent !== null, [dialog.scrollWidth, dialog.clientWidth]);
   } catch (e) {

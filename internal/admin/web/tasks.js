@@ -213,15 +213,29 @@
   function renderEditorSummary() {
     if (!editing) return;
     const custom = editorCustom();
-    const part = (text, changed) => (changed ? `<span class="is-custom">${esc(text)}（自定义）</span>` : esc(text));
+    const part = (text, changed, note = "") =>
+      changed ? `<span class="is-custom">${esc(text)}（自定义${note ? `；${esc(note)}` : ""}）</span>` : `${esc(text)}${note ? `（${esc(note)}）` : ""}`;
+    // What a run actually applies: the task can only narrow the grant
+    // (taskRunPolicy: batch = min, history start = max, protection = OR).
+    // The task's own values are shown as set; the grant's stricter limit is
+    // named next to them. Nothing here changes a field.
+    const g = policy || {};
     const unread = $("#task-protect-unread").checked, flagged = $("#task-protect-flagged").checked;
-    const protect = unread && flagged ? "保护未读和星标" : unread ? "保护未读，不保护星标" : flagged ? "保护星标，不保护未读" : "不保护未读和星标";
-    const since = $("#task-since").value;
+    const effUnread = unread || !!g.protect_unread, effFlagged = flagged || !!g.protect_flagged;
+    const protectText = (u, f) => (u && f ? "保护未读和星标" : u ? "保护未读，不保护星标" : f ? "保护星标，不保护未读" : "不保护未读和星标");
+    const byGrant = (effUnread && !unread) || (effFlagged && !flagged);
+    const limit = Number($("#task-limit").value), cap = Number(g.max_batch) || 0;
+    const capped = cap > 0 && limit > cap;
+    const since = $("#task-since").value, taskSince = since ? Math.floor(new Date(`${since}T00:00:00+08:00`).getTime() / 1000) : 0;
+    const grantSince = Number(g.since) || 0, laterGrant = grantSince > taskSince;
+    const history = !since
+      ? part(grantSince ? `历史范围跟随整理授权（${localDate(grantSince)} 起）` : "历史范围跟随整理授权", custom.since)
+      : part(`只处理 ${laterGrant ? localDate(grantSince) : since} 起收到的邮件`, custom.since, laterGrant ? `任务设为 ${since}，整理授权起点更晚` : "");
     $("#task-summary").innerHTML = `当前设置：${[
       part($("#task-engine").value === "ai" ? "外部 AI 判断" : "固定规则", custom.engine),
-      part(`每轮最多 ${$("#task-limit").value || "?"} 封`, custom.max_batch),
-      part(protect, custom.protect),
-      part(since ? `只处理 ${since} 起收到的邮件` : "历史范围跟随整理授权", custom.since),
+      part(`每轮最多 ${capped ? cap : $("#task-limit").value || "?"} 封`, custom.max_batch, capped ? `任务设为 ${limit}，受整理授权上限 ${cap} 限制` : ""),
+      part(protectText(effUnread, effFlagged), custom.protect, byGrant ? "任务未额外保护，整理授权仍要求保护" : ""),
+      history,
       part(`通知：${policies[$("#task-notify").value] || $("#task-notify").value}`, custom.notify),
     ].join(" · ")}`;
     const n = Object.values(custom).filter(Boolean).length;
@@ -658,6 +672,9 @@
           // saved task with its new version instead of creating another one.
           Object.assign(target, { id: saved.id, version: saved.version, enabled: saved.enabled });
           $("#task-editor-title").textContent = "编辑整理任务";
+          // A created task is now an existing one: the write note and summary
+          // follow the form as it is (including edits made during the save).
+          renderEditorSummary();
           $("#task-editor-error").textContent = STILL_UNSAVED;
           notify(STILL_UNSAVED);
         } else notify("任务已保存");
