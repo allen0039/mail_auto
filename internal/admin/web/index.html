@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="light" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 40 40%27%3E%3Crect width=%2740%27 height=%2740%27 rx=%2710%27 fill=%27%232563eb%27/%3E%3Cpath d=%27M9 12h22v17H9z M9 12l11 10 11-10%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272.2%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 40 40%27%3E%3Crect width=%2740%27 height=%2740%27 rx=%2710%27 fill=%27%234f6ef7%27/%3E%3Cpath d=%27M9 12h22v17H9z M9 12l11 10 11-10%27 fill=%27none%27 stroke=%27white%27 stroke-width=%272.2%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E"
     />
     <title>Mail Auto · 邮箱工作台</title>
     <link rel="stylesheet" href="/style.css" />
@@ -107,24 +107,20 @@
     <main id="auth-view" class="auth-shell">
       <section class="auth-story">
         <a class="wordmark" href="/">
-          <span class="wordmark-badge" aria-hidden="true">✉</span>
-          <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.8.13</span>
+          <span class="wordmark-badge" aria-hidden="true"><svg class="icon-sm"><use href="#icon-accounts"></use></svg></span>
+          <span>Mail Auto</span>
         </a>
         <div class="story-content">
-          <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
           <h1>让邮件有序，<br />让控制权在你。</h1>
-          <p>
-            将不同邮箱收进一个私密、安静的工作台。<br />
-            直接在原邮箱中分类、归档和自动化整理，不改变未读状态。
-          </p>
-          <div class="postmark" aria-hidden="true">
-            <span>PRIVATE &amp; SELF-HOSTED</span>
-            <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.8.13</span>
-          </div>
+          <p>把不同邮箱收进一个私密、安静的工作台，直接在原邮箱中分类和归档，不改变未读状态。</p>
+          <svg class="story-mail" viewBox="0 0 220 132" aria-hidden="true" focusable="false">
+            <rect x="34" y="8" width="170" height="110" rx="14" class="story-mail-back"></rect>
+            <rect x="12" y="22" width="170" height="110" rx="14" class="story-mail-front"></rect>
+            <path d="M24 36l73 50 73-50" class="story-mail-flap"></path>
+            <rect x="34" y="104" width="64" height="8" rx="4" class="story-mail-line"></rect>
+          </svg>
         </div>
-        <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
+        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.9.0</span></p>
       </section>
 
       <section class="auth-form-area">
@@ -132,9 +128,8 @@
 
         <!-- Login Form -->
         <form id="login-form" class="auth-form" hidden>
-          <span class="eyebrow">ADMINISTRATOR ACCESS</span>
           <h2>管理员登录</h2>
-          <p class="muted">使用本实例的管理员账号继续进入工作台。</p>
+          <p class="muted">使用本实例的管理员账号进入工作台。</p>
 
           <label>
             用户名
@@ -147,23 +142,20 @@
           </label>
 
           <p id="login-error" class="form-error" role="alert"></p>
-          <button class="primary" type="submit">
-            登录工作台 →
-          </button>
+          <button class="primary" type="submit">登录</button>
 
-          <aside class="hint">
-            <strong>第一次使用？</strong>
+          <details class="hint">
+            <summary>第一次使用或忘记密码？</summary>
             <p>在项目运行目录执行以下命令，查看随机初始账号和临时密码：</p>
             <code>docker compose exec app mail-auto bootstrap show</code>
-            <p>临时凭据有效 24 小时，首次登录后需更换用户名和密码。</p>
-          </aside>
+            <p>临时凭据有效 24 小时，首次登录后需更换用户名和密码。忘记密码时执行 <code>mail-auto bootstrap recover</code> 撤销全部会话并重新获取临时凭据。</p>
+          </details>
         </form>
 
         <!-- Initial Setup Form -->
         <form id="setup-form" class="auth-form" hidden>
-          <span class="eyebrow">SECURE YOUR WORKSPACE</span>
           <h2>设置正式账号</h2>
-          <p class="muted">临时凭据已使用。请同时设置新的正式用户名和密码，完成后重新登录。</p>
+          <p class="muted">临时凭据已使用。请设置新的正式用户名和密码，完成后重新登录。</p>
 
           <label>
             新用户名
@@ -183,13 +175,13 @@
           </label>
 
           <p id="setup-error" class="form-error" role="alert"></p>
-          <button class="primary" type="submit">保存并重新登录 →</button>
+          <button class="primary" type="submit">保存并重新登录</button>
           <button type="button" class="text-button text-button-full" id="setup-logout">退出设置</button>
 
-          <aside class="hint">
+          <p class="hint hint-static">
             设置完成前，邮件、邮箱配置和其他业务接口均不可访问。若丢失当前会话，请在宿主机执行
             <code>mail-auto bootstrap recover</code> 重新获取临时凭据。
-          </aside>
+          </p>
         </form>
       </section>
     </main>
@@ -200,29 +192,24 @@
       <aside class="sidebar">
         <div class="sidebar-header">
           <a class="wordmark" href="/">
-            <span class="wordmark-badge" aria-hidden="true">✉</span>
-            <span>MAIL AUTO</span>
+            <span class="wordmark-badge" aria-hidden="true"><svg class="icon-sm"><use href="#icon-accounts"></use></svg></span>
+            <span>Mail Auto</span>
           </a>
-          <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.8.13</span>
-          </div>
+          <span class="workspace-label app-version-label">v0.9.0</span>
         </div>
 
-        <div class="sidebar-nav-container">
-          <!-- Group 1: Overview -->
+        <nav class="sidebar-nav-container" aria-label="主导航">
           <div class="nav-group">
-            <div class="nav-group-title">概览</div>
             <div class="nav-group-items">
               <button data-view="dashboard" class="nav-button active">
                 <svg class="icon" aria-hidden="true"><use href="#icon-dashboard"></use></svg>
-                <span>系统仪表盘</span>
+                <span>总览</span>
               </button>
             </div>
           </div>
 
-          <!-- Group 2: Mail -->
           <div class="nav-group">
-            <div class="nav-group-title">邮件管理</div>
+            <div class="nav-group-title">邮箱</div>
             <div class="nav-group-items">
               <button data-view="inbox" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-inbox"></use></svg>
@@ -236,25 +223,27 @@
             </div>
           </div>
 
-          <!-- Group 3: Automation -->
           <div class="nav-group">
-            <div class="nav-group-title">自动化与整理</div>
+            <div class="nav-group-title">自动化</div>
             <div class="nav-group-items">
               <button data-view="automation" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-rules"></use></svg>
                 <span>自动整理</span>
               </button>
               <button data-view="organizer" class="nav-button">
-                <svg class="icon" aria-hidden="true"><use href="#icon-mcp"></use></svg>
+                <svg class="icon" aria-hidden="true"><use href="#icon-tasks"></use></svg>
                 <span>核验记录与 MCP</span>
               </button>
             </div>
           </div>
 
-          <!-- Group 4: System -->
           <div class="nav-group">
-            <div class="nav-group-title">系统与安全</div>
+            <div class="nav-group-title">系统设置</div>
             <div class="nav-group-items">
+              <button data-view="system" class="nav-button">
+                <svg class="icon" aria-hidden="true"><use href="#icon-system"></use></svg>
+                <span>账号与安全</span>
+              </button>
               <button data-view="agent" class="nav-button">
                 <svg class="icon" aria-hidden="true"><use href="#icon-mcp"></use></svg>
                 <span>Agent 与模型</span>
@@ -263,34 +252,29 @@
                 <svg class="icon" aria-hidden="true"><use href="#icon-bell"></use></svg>
                 <span>Telegram</span>
               </button>
-              <button data-view="audit" class="nav-button">
-                <svg class="icon" aria-hidden="true"><use href="#icon-audit"></use></svg>
-                <span>操作记录</span>
-              </button>
-              <button data-view="network" class="nav-button">
-                <svg class="icon" aria-hidden="true"><use href="#icon-sync"></use></svg>
-                <span>网络与代理</span>
-              </button>
-              <button data-view="system" class="nav-button">
-                <svg class="icon" aria-hidden="true"><use href="#icon-system"></use></svg>
-                <span>系统设置</span>
-              </button>
+              <div class="nav-sub">
+                <button type="button" id="nav-more-toggle" class="nav-sub-toggle" aria-expanded="false" aria-controls="nav-more">
+                  <span>网络与记录</span>
+                  <svg class="icon-sm nav-sub-chevron" aria-hidden="true" viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"></polyline></svg>
+                </button>
+                <div id="nav-more" class="nav-sub-items">
+                <button data-view="network" class="nav-button">
+                  <svg class="icon" aria-hidden="true"><use href="#icon-sync"></use></svg>
+                  <span>网络与代理</span>
+                </button>
+                <button data-view="audit" class="nav-button">
+                  <svg class="icon" aria-hidden="true"><use href="#icon-audit"></use></svg>
+                  <span>操作记录</span>
+                </button>
+                </div>
+              </div>
             </div>
           </div>
-
-          <!-- Connected Accounts widget in sidebar -->
-          <div class="sidebar-accounts">
-            <div class="side-label">
-              <span>已接入邮箱</span>
-              <button id="side-add" class="text-button" type="button">＋ 添加</button>
-            </div>
-            <div id="side-accounts"></div>
-          </div>
-        </div>
+        </nav>
 
         <div class="sidebar-footer">
           <div class="user-row">
-            <span class="avatar">A</span>
+            <span class="avatar" aria-hidden="true">A</span>
             <span id="current-user">admin</span>
           </div>
           <button id="logout" class="icon-button" title="退出登录" aria-label="退出登录">
@@ -301,21 +285,10 @@
 
       <!-- Main Workspace Content Area -->
       <main class="main-area">
-        <!-- Top Status Bar -->
-        <header class="topbar">
-          <span id="breadcrumb">工作台 / 仪表盘</span>
-          <span class="top-status">
-            <span class="status-pulse-dot" aria-hidden="true"></span>
-            <span>本地服务在线</span>
-          </span>
-        </header>
-
-        <!-- Page Heading with Contextual Actions -->
         <section class="page-head">
           <div>
-            <span class="eyebrow" id="page-eyebrow">SYSTEM DASHBOARD</span>
-            <h1 id="page-title">系统仪表盘</h1>
-            <p id="page-description">全景掌控所有邮箱的运行状态、实时同步进度与自动化任务。</p>
+            <h1 id="page-title">总览</h1>
+            <p id="page-description">邮箱连接、同步、处理任务和需要关注的异常。</p>
           </div>
           <div class="head-actions">
             <button id="sync-all" class="secondary">
@@ -337,92 +310,48 @@
         <!-- VIEW 1: Dashboard Pane (F06: Realistic health indicators)         -->
         <!-- ================================================================= -->
         <section id="dashboard-pane">
-          <!-- 4 Core Metric Cards -->
           <div class="dashboard-stats-grid">
             <div class="stat-card">
-              <div class="stat-card-title">
-                <span>已接入邮箱</span>
-                <svg class="icon-sm text-muted" aria-hidden="true"><use href="#icon-accounts"></use></svg>
-              </div>
-              <div class="stat-card-value">
-                <strong id="stat-accounts">0 <small>个</small></strong>
-              </div>
-              <div class="stat-card-foot muted">支持 QQ、网易、iCloud</div>
+              <div class="stat-card-title">已接入邮箱</div>
+              <div class="stat-card-value"><strong id="stat-accounts">0 <small>个</small></strong></div>
+              <div class="stat-card-foot muted" id="stat-accounts-note">连接状态见下方</div>
             </div>
-
             <div class="stat-card">
-              <div class="stat-card-title">
-                <span>索引中的邮件</span>
-                <svg class="icon-sm text-muted" aria-hidden="true"><use href="#icon-inbox"></use></svg>
-              </div>
-              <div class="stat-card-value">
-                <strong id="stat-messages">0 <small>封</small></strong>
-              </div>
-              <div class="stat-card-foot muted">元数据全量本地索引</div>
+              <div class="stat-card-title">索引中的邮件</div>
+              <div class="stat-card-value"><strong id="stat-messages">0 <small>封</small></strong></div>
+              <div class="stat-card-foot muted">本地索引的全部邮件元数据</div>
             </div>
-
             <div class="stat-card">
-              <div class="stat-card-title">
-                <span>其中未读</span>
-                <svg class="icon-sm text-muted" aria-hidden="true"><use href="#icon-bell"></use></svg>
-              </div>
-              <div class="stat-card-value">
-                <strong id="stat-unread">0 <small>封</small></strong>
-              </div>
-              <div class="stat-card-foot muted">保留原邮箱未读标记</div>
+              <div class="stat-card-title">其中未读</div>
+              <div class="stat-card-value"><strong id="stat-unread">0 <small>封</small></strong></div>
+              <div class="stat-card-foot muted">以原邮箱未读标记为准</div>
             </div>
-
             <div class="stat-card">
-              <div class="stat-card-title">
-                <span>同步心跳</span>
-                <svg class="icon-sm text-muted" aria-hidden="true"><use href="#icon-sync"></use></svg>
-              </div>
-              <div class="stat-card-foot stat-card-foot-bottom">
-                <p id="sync-time" class="stat-sync-time">还没有同步记录</p>
-                <span class="muted small" id="dashboard-sync-mode-note">后台增量校对</span>
-              </div>
+              <div class="stat-card-title">最近同步</div>
+              <p id="sync-time" class="stat-sync-time">还没有同步记录</p>
+              <div class="stat-card-foot muted" id="dashboard-sync-mode-note">后台增量校对</div>
             </div>
           </div>
 
-          <!-- Section Grid: Sync Engine & Quick Actions -->
           <div class="dashboard-section-grid">
             <div class="panel dashboard-card">
               <div class="panel-heading-clean">
-                <h3>实时同步与连接状态</h3>
+                <h2>邮箱连接与同步</h2>
                 <span id="dashboard-engine-badge" class="badge">正在读取状态</span>
               </div>
-              <div class="dashboard-desc-wrap">
-                <p class="muted dashboard-desc" id="dashboard-engine-summary">
-                  服务随后台启动，收件箱优先推送，全部文件夹周期增量校对。读取与同步不会改变邮箱真实已读状态。
-                </p>
-                <div id="dashboard-account-status" class="dash-account-list">
-                  <!-- Dynamically populated via renderDashboard() -->
-                </div>
-              </div>
+              <p class="muted small dashboard-desc" id="dashboard-engine-summary"></p>
+              <div id="dashboard-account-status" class="dash-account-list"></div>
             </div>
 
             <div class="panel dashboard-card">
               <div class="panel-heading-clean">
-                <h3>快捷导航</h3>
+                <h2>处理任务</h2>
+                <button type="button" class="text-button" data-quick-nav="automation">管理任务</button>
               </div>
-              <div class="dash-quick-list">
-                <button class="secondary dash-quick-btn" data-quick-nav="inbox">
-                  <svg class="icon-sm" aria-hidden="true"><use href="#icon-inbox"></use></svg>
-                  <span>浏览全部邮件索引</span>
-                </button>
-                <button class="secondary dash-quick-btn" data-quick-nav="rules">
-                  <svg class="icon-sm" aria-hidden="true"><use href="#icon-rules"></use></svg>
-                  <span>管理自定义整理规则</span>
-                </button>
-                <button class="secondary dash-quick-btn" data-quick-nav="tasks">
-                  <svg class="icon-sm" aria-hidden="true"><use href="#icon-tasks"></use></svg>
-                  <span>查看定时任务与运行记录</span>
-                </button>
-                <button class="secondary dash-quick-btn" data-quick-nav="organizer">
-                  <svg class="icon-sm" aria-hidden="true"><use href="#icon-mcp"></use></svg>
-                  <span>配置 MCP / ChatGPT / Codex 接入</span>
-                </button>
+              <div id="dashboard-tasks" class="dash-task-summary" aria-live="polite">
+                <p class="muted small">正在读取任务…</p>
               </div>
+              <p class="muted small dash-scope">统计口径：全部邮箱已保存的整理任务，按每项任务最近一次运行状态计；核验数取最近 100 项原邮箱写入记录。</p>
             </div>
           </div>
         </section>
@@ -431,25 +360,6 @@
         <!-- VIEW 2: Mail Inbox Pane                                          -->
         <!-- ================================================================= -->
         <section id="inbox-pane" hidden>
-          <div class="overview">
-            <div>
-              <span>已接入邮箱</span>
-              <strong id="stat-inbox-accounts">0 <small>个</small></strong>
-            </div>
-            <div>
-              <span>索引中的邮件</span>
-              <strong id="stat-inbox-messages">0 <small>封</small></strong>
-            </div>
-            <div>
-              <span>其中未读</span>
-              <strong id="stat-inbox-unread">0 <small>封</small></strong>
-            </div>
-            <div class="overview-note">
-              <span class="status-pulse-dot" aria-hidden="true"></span>
-              <p>自动同步，保留原始状态<br /><small id="sync-inbox-time">还没有同步记录</small></p>
-            </div>
-          </div>
-
           <!-- Search & Filter Composite Bar -->
           <form id="search-form" class="search-panel">
             <div class="search-main">
@@ -467,7 +377,7 @@
             </div>
 
             <details class="search-details">
-              <summary>展开高级筛选选项</summary>
+              <summary>更多筛选</summary>
               <div class="filter-row">
                 <label>
                   发件人地址
@@ -522,7 +432,7 @@
           <div class="mail-panel">
             <div class="panel-heading">
               <h2>邮件列表 <span id="result-count" class="badge">0 封</span></h2>
-              <span class="muted small">按接收时间倒序 · 正文按需以只读方式安全读取</span>
+              <span class="muted small">按接收时间倒序 · <span id="sync-inbox-time">还没有同步记录</span></span>
             </div>
             <div id="message-list"></div>
 
@@ -1031,7 +941,7 @@
           <div class="organizer-stack">
             <article class="panel organizer-card">
               <div class="panel-heading-clean">
-                <div><span class="eyebrow">OUTBOUND CONNECTIONS</span><h2>连接策略</h2></div>
+                <h2>连接策略</h2>
                 <button id="network-refresh" type="button" class="secondary">重新读取</button>
               </div>
               <p class="muted small">局部设置优先；“跟随全局”使用全局默认。代理失败只报错和重试，不自动直连。不读取 HTTP_PROXY、HTTPS_PROXY 或 ALL_PROXY。</p>
@@ -1103,7 +1013,6 @@
           <div class="system-grid">
             <article class="panel system-card credentials-card">
               <div class="credentials-intro">
-                <span class="eyebrow">ACCOUNT &amp; CREDENTIALS</span>
                 <h2>登录账号与密码</h2>
                 <p class="muted small">管理本工作台的主管理员凭据。修改前必须验证当前密码。</p>
                 <dl>
@@ -1139,8 +1048,7 @@
             </article>
 
             <article class="panel system-card">
-              <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.8.13</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.9.0</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1159,11 +1067,6 @@
           </div>
         </section>
 
-        <!-- Footer -->
-        <footer class="app-footer">
-          <span>MAIL AUTO · 私有多邮箱工作台</span>
-          <span>纯原生极简架构 · 本地加密索引 · 受控原邮箱整理</span>
-        </footer>
       </main>
     </div>
 
@@ -1176,7 +1079,6 @@
       <form id="account-form">
         <header class="dialog-head">
           <div>
-            <span class="eyebrow" id="account-dialog-eyebrow">CONNECT A MAILBOX</span>
             <h2 id="account-dialog-title">添加邮箱</h2>
           </div>
           <button type="button" class="icon-button" data-close="account-dialog" aria-label="关闭邮箱设置对话框">
@@ -1271,7 +1173,7 @@
     <!-- Message Reading Dialog (Slide-over style) -->
     <dialog id="message-dialog" class="message-dialog">
       <header class="dialog-head">
-        <span class="eyebrow">READ ONLY / 邮件安全只读原文</span>
+        <span class="eyebrow">只读查看原文</span>
         <button type="button" class="icon-button" data-close="message-dialog" aria-label="关闭邮件原文查看">
           <svg class="icon" aria-hidden="true"><use href="#icon-close"></use></svg>
         </button>

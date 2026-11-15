@@ -331,7 +331,7 @@ async function refresh() {
   if ($("#stat-accounts")) $("#stat-accounts").innerHTML = accText;
   if ($("#stat-messages")) $("#stat-messages").innerHTML = msgText;
   if ($("#stat-unread")) $("#stat-unread").innerHTML = unreadText;
-  if ($("#sync-time")) $("#sync-time").textContent = syncText;
+  if ($("#sync-time")) $("#sync-time").textContent = status.last_sync ? date(status.last_sync) : "还没有同步记录";
 
   if ($("#stat-inbox-accounts")) $("#stat-inbox-accounts").innerHTML = accText;
   if ($("#stat-inbox-messages")) $("#stat-inbox-messages").innerHTML = msgText;
@@ -343,14 +343,6 @@ async function refresh() {
     "同步全部历史邮件元数据，不限制总封数；正文按需读取，附件仅显示信息。文件夹名称跟随原邮箱；彻底删除后自动清理索引并回收空闲空间。";
   $("#retention-value").textContent = "全部历史邮件元数据";
 
-  $("#side-accounts").innerHTML = accounts.length
-    ? accounts
-        .map(
-          (a) =>
-            `<div class="side-account" title="${esc(a.username)}"><span class="side-account-dot"></span><span>${esc(a.name)}</span></div>`,
-        )
-        .join("")
-    : '<p class="muted small side-accounts-empty">还没有添加邮箱</p>';
 
   const old = $("#account-filter").value;
   $("#account-filter").innerHTML =
@@ -529,9 +521,77 @@ function renderDashboard() {
             ${esc(st.modeText)} · ${esc(st.checkedText)}
           </div>
         </div>
+        ${st.error ? `<p class="dash-account-error">${esc(st.error)}</p>` : ""}
       </div>
     `;
   }).join("");
+  const failing = state.accounts.filter((acc) => {
+    const item = autoMap[acc.id];
+    return automatic?.enabled && item && (item.error || item.state === "retrying");
+  }).length;
+  const note = $("#stat-accounts-note");
+  if (note) {
+    note.textContent = failing ? `${failing} 个连接异常，见下方` : "无连接异常记录";
+    note.classList.toggle("is-alert", failing > 0);
+  }
+}
+
+// Dashboard task card: counts come from the saved tasks of every mailbox
+// (each task's most recent run state) and from the latest 100 write
+// operations. Nothing here is estimated; a failed request is shown as such.
+let dashboardTasksSeq = 0;
+async function loadDashboardTasks() {
+  const box = $("#dashboard-tasks");
+  if (!box) return;
+  const seq = ++dashboardTasksSeq;
+  if (!state.accounts.length) {
+    box.innerHTML = '<p class="muted small">添加邮箱后可在「自动整理」创建整理任务。</p>';
+    return;
+  }
+  let tasks = [];
+  let operations = null;
+  let failedAccounts = 0;
+  const results = await Promise.allSettled([
+    ...state.accounts.map((a) => api(`/api/tasks?account_id=${encodeURIComponent(a.id)}`)),
+    api("/api/operations"),
+  ]);
+  if (seq !== dashboardTasksSeq || state.view !== "dashboard") return;
+  results.slice(0, -1).forEach((r) => {
+    if (r.status === "fulfilled" && Array.isArray(r.value)) tasks = tasks.concat(r.value);
+    else failedAccounts += 1;
+  });
+  const opsResult = results[results.length - 1];
+  if (opsResult.status === "fulfilled" && Array.isArray(opsResult.value)) operations = opsResult.value;
+
+  const enabled = tasks.filter((t) => t.enabled);
+  const failed = tasks.filter((t) => ["failed", "partial", "interrupted"].includes(t.last_state));
+  const running = tasks.filter((t) => ["queued", "running"].includes(t.last_state));
+  const nextRun = enabled
+    .filter((t) => t.trigger_mode === "internal")
+    .map((t) => t.next_run_at)
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b)[0];
+  const pending = operations ? operations.filter((o) => o.state === "needs_verification").length : null;
+  const active = operations ? operations.filter((o) => ["queued", "running"].includes(o.state)).length : null;
+
+  const row = (label, value, tone = "", nav = "") =>
+    `<div class="dash-task-row${tone ? ` is-${tone}` : ""}"><dt>${esc(label)}</dt><dd>${nav ? `<button type="button" class="text-button" data-quick-nav="${esc(nav)}">${esc(value)}</button>` : esc(value)}</dd></div>`;
+  const rows = [
+    row("已保存任务", `${number(tasks.length)} 项 · 启用 ${number(enabled.length)} 项`),
+    row("下次计划运行", nextRun ? date(nextRun) : "无已排程任务"),
+    row("最近一次运行失败", `${number(failed.length)} 项`, failed.length ? "alert" : "", failed.length ? "automation" : ""),
+    row("正在运行或排队", `${number(running.length)} 项`),
+    row(
+      "原邮箱写入待核验",
+      pending === null ? "读取失败" : `${number(pending)} 项`,
+      pending === null || pending ? "warn" : "",
+      pending ? "organizer" : "",
+    ),
+    row("写入进行中", active === null ? "读取失败" : `${number(active)} 项`, active === null ? "warn" : ""),
+  ];
+  box.innerHTML = `<dl class="dash-task-list">${rows.join("")}</dl>${
+    failedAccounts ? `<p class="form-error">${failedAccounts} 个邮箱的任务读取失败，以上任务数不完整。</p>` : ""
+  }`;
 }
 
 function renderAutomatic() {
@@ -566,6 +626,7 @@ async function pollSync() {
   try {
     const changed = await refresh();
     if (changed && state.view === "inbox") await search();
+    if (changed && state.view === "dashboard") loadDashboardTasks().catch(() => {});
   } catch (e) {
     notify(e.message, true);
     if (state.session) syncPollTimer = setTimeout(pollSync, 5000);
@@ -589,28 +650,16 @@ function updateFolderFilter() {
 }
 
 const views = {
-  dashboard: [
-    "SYSTEM DASHBOARD",
-    "系统仪表盘",
-    "全景掌控所有邮箱的运行状态、实时同步进度与自动化任务。",
-  ],
-  inbox: ["MAIL INDEX", "邮件索引", "在一个地方，查看不同邮箱的来信。"],
-  accounts: [
-    "MAILBOX CONNECTIONS",
-    "邮箱连接",
-    "管理连接与访问范围，原始邮件保留在邮箱中。",
-  ],
-  automation: ["AUTOMATION", "自动整理", "规则、任务和它们需要的整理设置集中在这里；任务不能运行时直接显示原因。"],
-  organizer: ["VERIFICATION & MCP", "核验记录与 MCP", "查看原邮箱写入的核验记录，配置外部 MCP 连接。"],
-  agent: ["AGENT & MODEL", "Agent 与模型", "配置内置管理 Agent 的模型连接与授权；默认关闭。"],
-  notifications: ["TELEGRAM", "Telegram", "Bot 凭据、任务通知与私聊交互集中在这里，通知与交互分别开关。"],
-  audit: ["ACTIVITY LOG", "操作记录", "查看登录、同步和配置变更的足迹。"],
-  network: ["OUTBOUND CONNECTIONS", "网络与代理", "管理全局、邮箱、TG 与 Agent 的出口，查看真实连接诊断。"],
-  system: [
-    "SYSTEM SETTINGS",
-    "系统设置",
-    "管理登录账号与密码，查看版本信息和备份恢复方法。",
-  ],
+  dashboard: ["总览", "邮箱连接、同步、处理任务和需要关注的异常。"],
+  inbox: ["邮件索引", "在一个地方查看不同邮箱的来信，正文按需只读读取。"],
+  accounts: ["邮箱连接", "管理连接与访问范围，原始邮件保留在邮箱中。"],
+  automation: ["自动整理", "规则、任务和它们需要的整理设置集中在这里；任务不能运行时直接显示原因。"],
+  organizer: ["核验记录与 MCP", "查看原邮箱写入的核验记录，配置外部 MCP 连接。"],
+  agent: ["Agent 与模型", "配置内置管理 Agent 的模型连接与授权；默认关闭。"],
+  notifications: ["Telegram", "Bot 凭据、任务通知与私聊交互集中在这里，通知与交互分别开关。"],
+  audit: ["操作记录", "查看登录、同步和配置变更的足迹。"],
+  network: ["网络与代理", "管理全局、邮箱、TG 与 Agent 的出口，查看真实连接诊断。"],
+  system: ["账号与安全", "管理登录账号与密码，查看版本信息和备份恢复方法。"],
 };
 
 // Old page names stay valid (links, saved hashes, other scripts) and open
@@ -622,11 +671,10 @@ async function showView(view) {
   const section = viewAliases[view]?.[1];
   view = paneOf(view);
   state.view = view;
-  const [eyebrow, title, description] = views[view] || views.dashboard;
-  $("#page-eyebrow").textContent = eyebrow;
+  $(".main-area").dataset.view = view;
+  const [title, description] = views[view] || views.dashboard;
   $("#page-title").textContent = title;
   $("#page-description").textContent = description;
-  $("#breadcrumb").textContent = `工作台 / ${title}`;
   $(".head-actions").hidden = view === "system";
   if (view !== "system") resetCredentials();
 
@@ -635,11 +683,19 @@ async function showView(view) {
     if (pane) pane.hidden = v !== view;
   });
 
-  $$(".nav-button").forEach((b) =>
-    b.classList.toggle("active", b.dataset.view === view),
-  );
+  $$(".nav-button").forEach((b) => {
+    const active = b.dataset.view === view;
+    b.classList.toggle("active", active);
+    if (active) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+    if (active && b.closest("#nav-more")) setNavMore(true);
+    if (active && window.matchMedia("(max-width: 768px)").matches) b.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
 
-  if (view === "dashboard") renderDashboard();
+  if (view === "dashboard") {
+    renderDashboard();
+    loadDashboardTasks();
+  }
   if (view === "inbox") await search();
   if (view === "audit") await loadAudits();
   if (view === "organizer" && window.loadOrganizer) await window.loadOrganizer();
@@ -892,7 +948,6 @@ function openAccount(account = null) {
   $("#account-advanced").open = false;
   $("#account-error").textContent = "";
   $("#account-dialog-title").textContent = account ? "编辑邮箱配置" : "添加邮箱";
-  $("#account-dialog-eyebrow").textContent = account ? "MANAGE MAILBOX" : "CONNECT A MAILBOX";
   $("#account-edit-note").hidden = !account;
   $("button[type=submit]", form).textContent = account ? "保存修改" : "加密保存邮箱";
   $('#credential-mode option[value="keep"]').hidden = !account;
@@ -1082,10 +1137,15 @@ function navigate(view) {
   showView(view).catch((e) => notify(e.message, true));
 }
 $$(".nav-button").forEach((b) => b.addEventListener("click", () => navigate(b.dataset.view)));
-
-["#add-account", "#side-add"].forEach((id) =>
-  $(id).addEventListener("click", () => openAccount()),
+function setNavMore(open) {
+  $("#nav-more-toggle").setAttribute("aria-expanded", String(open));
+  $(".nav-sub").classList.toggle("open", open);
+}
+$("#nav-more-toggle").addEventListener("click", () =>
+  setNavMore($("#nav-more-toggle").getAttribute("aria-expanded") !== "true"),
 );
+
+$("#add-account").addEventListener("click", () => openAccount());
 
 $$("[data-close]").forEach((b) =>
   b.addEventListener("click", () => closeGuarded($(`#${b.dataset.close}`))),

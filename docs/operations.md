@@ -25,7 +25,7 @@ ma exec app mail-auto bootstrap show
 
 第一条命令立即撤销全部会话、使旧密码失效并生成新临时凭据；第二条主动显示它。成功使用一次后不可再次查看；若在设置前丢失会话，再执行恢复。恢复只通过宿主机 CLI，不提供匿名 HTTP 重置入口。恢复不改动加密主密钥、邮箱连接或元数据。
 
-临时密码过期和会话过期以持久化绝对时间计算，重启不会延长。正常会话绝对有效 12 小时，设置会话 30 分钟。正式登录后，进入「系统设置 → 登录账号与密码」，验证当前密码后修改用户名或密码。新密码留空则只修改用户名；填写新密码须至少 12 个字符、最多 256 字节，且不能与当前密码相同。保存后立即撤销所有设备会话并重新登录。忘记当前密码时仍使用上述宿主机恢复流程。账号修改接口每 5 分钟最多尝试 5 次，并受同源、CSRF 和密码哈希并发限制保护。
+临时密码过期和会话过期以持久化绝对时间计算，重启不会延长。正常会话绝对有效 12 小时，设置会话 30 分钟。正式登录后，进入「系统设置 → 账号与安全」，验证当前密码后修改用户名或密码。新密码留空则只修改用户名；填写新密码须至少 12 个字符、最多 256 字节，且不能与当前密码相同。保存后立即撤销所有设备会话并重新登录。忘记当前密码时仍使用上述宿主机恢复流程。账号修改接口每 5 分钟最多尝试 5 次，并受同源、CSRF 和密码哈希并发限制保护。
 
 ## 0.7.0（schema 13）升级与回退
 
@@ -127,7 +127,7 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 
 | 情况 | 例子 | 做法 | 会丢失什么 |
 | --- | --- | --- | --- |
-| 同 schema 小版本回滚 | 0.8.13 → 0.8.12（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
+| 同 schema 小版本回滚 | 0.9.0 → 0.8.13（都是 schema 13） | 先做一致性备份；把 Compose 镜像改回旧版本标签，`ma up -d --no-build`。数据库和主密钥原样使用，无需恢复快照或 `bootstrap recover` | 只撤回程序行为（新版本的修复随之失效）；本地数据全部保留 |
 | 跨 schema 恢复 | 0.7.x（schema 13）→ 0.6.x（schema 12） | 旧二进制拒绝打开更新的 schema，只换镜像无法启动。停止服务，按下方「联合恢复」把**升级前快照与配套主密钥**放入新卷，再启动旧镜像；0.5.x 起的快照还须按对应小节执行 `bootstrap recover` | 快照之后的全部本地变化：运行记录、规则与任务修改、新增连接、Agent 与 Telegram 记录 |
 
 两种方式都不会撤销已经写入原邮箱的移动或标记；回退后重新同步并人工核对远端状态，不要重放旧任务。不要手工修改 `PRAGMA user_version`，也不要把升级后的 WAL 混入旧快照。
@@ -142,7 +142,7 @@ docker compose -p mail-auto-restored -f compose.yaml exec app mail-auto bootstra
 `scripts/release-verify/release_verify.py` 在本机重新采集一次发布证据（不替代独立审计）：本机读取 git 远端 `main`／版本标签与镜像仓库，服务器部分通过 SSH 把同一脚本交给 `python3 -` 执行，只读取 `docker inspect`、`/healthz`、`/readyz` 和 SQLite（`mode=ro`、`query_only`）。它不拉取或部署镜像、不改配置、不触发任务或模型、不写邮件、不核验或重放待核验操作，也不清理备份和镜像。需要本机有 `git`、`docker buildx`，服务器有 `python3`、`docker`、`curl`，SSH 用户能读取数据卷与密钥卷（一般为 root）。
 
 ```bash
-scripts/release-verify/release_verify.py --version 0.8.13 --commit <发布提交> \
+scripts/release-verify/release_verify.py --version 0.9.0 --commit <发布提交> \
   --ssh <SSH 目标> --compose-dir <服务器上的 Compose 目录> \
   --backup <服务器上的升级前备份目录>
 ```
