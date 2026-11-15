@@ -7,6 +7,8 @@ import io
 import json
 import os
 import shlex
+import subprocess
+import sys
 import sqlite3
 import tempfile
 import unittest
@@ -34,7 +36,8 @@ def make_db(path, runs=(), task_cursor="c1"):
     conn.execute("INSERT INTO automation_tasks VALUES('task-0001','acc',3,'owner-secret',?,1,'internal',?,?)", (json.dumps(task), STARTED + 3600, STARTED - 100))
     conn.execute("CREATE TABLE task_runs(id TEXT,task_id TEXT,source TEXT,state TEXT,payload TEXT,created_at INTEGER,updated_at INTEGER)")
     for i, (state, extra) in enumerate(runs):
-        payload = dict({"scanned": 50, "claimed": 0, "completed": 0, "failed": 0, "unknown": 0, "protected": 0}, **extra)
+        payload = dict({"scanned": 50, "claimed": 0, "completed": 0, "failed": 0, "unknown": 0, "protected": 0,
+                        "queued": 0, "running": 0, "finalized": True}, **extra)
         conn.execute("INSERT INTO task_runs VALUES(?,?,?,?,?,?,?)", ("run-%04d" % i, "task-0001", "internal", state, json.dumps(payload), STARTED + 60 + i, STARTED + 61 + i))
     conn.execute("CREATE TABLE mailboxes(account_id TEXT,name TEXT,uidvalidity INTEGER,synced_at INTEGER)")
     for i in range(3):
@@ -64,6 +67,8 @@ class Fixture:
         self.health_version = "0.8.9"
         self.restarts = 0
         self.fail = set()  # command names that fail
+        self.real = set()  # command names run through rv.run against a fake executable in bindir
+        self.bindir = os.path.join(tmp, "bin")
         self.calls = []
 
     def args(self, **kw):
@@ -80,6 +85,8 @@ class Fixture:
 
     def run(self, cmd, input=None, timeout=60):
         self.calls.append(cmd)
+        if cmd[0] in self.real:  # through the real runner, to a fake executable
+            return rv.run([os.path.join(self.bindir, cmd[0])] + cmd[1:], input=input, timeout=timeout)
         key = cmd[0] if cmd[0] != "docker" else "docker " + cmd[1]
         if key in self.fail or cmd[0] in self.fail:
             raise RuntimeError("%s exited 1: fixture failure" % cmd[0])
@@ -102,11 +109,11 @@ class Fixture:
                 return json.dumps({"config": {"digest": AMD_CFG if ref.endswith(AMD) else ARM_CFG}})
             return json.dumps(self.manifest(self.latest if ref.endswith(":latest") else INDEX))
         if cmd[0] == "ssh":
-            assert cmd[-1].startswith("python3 - --remote ")
+            assert cmd[-1].startswith("python3 - %s " % rv.REMOTE_MODE)
             assert input is not None and "def collect_remote" in input
             params = json.loads(shlex.split(cmd[-1])[3])
             out = io.StringIO()
-            rv.main(["--remote", json.dumps(params)], run=self.run, out=out)
+            rv.main([rv.REMOTE_MODE, json.dumps(params)], run=self.run, out=out)
             return out.getvalue()
         if cmd[:2] == ["docker", "ps"]:
             return "abc123\n"
@@ -265,13 +272,13 @@ class ReleaseVerifyTest(unittest.TestCase):
             with self.subTest(runs=runs):
                 self.fx.sql("live", "DELETE FROM task_runs")
                 for i, (state, extra) in enumerate(runs):
-                    payload = dict({"scanned": 1, "failed": 0, "unknown": 0}, **extra)
+                    payload = dict({"scanned": 1, "failed": 0, "unknown": 0, "queued": 0, "running": 0, "finalized": True}, **extra)
                     self.fx.sql("live", "INSERT INTO task_runs VALUES(?,?,?,?,?,?,?)", "r%d" % i, "task-0001", "internal", state, json.dumps(payload), STARTED + 10 + i, STARTED + 11)
                 _, report = self.fx.execute()
                 check = next(c for c in report["checks"] if c["id"] == "tasks.post_deploy_runs")
                 self.assertEqual(check["status"], status)
                 self.assertIn(text, check["detail"])
-                self.assertEqual("succeeded" in text, "not evidence of a real write" not in check["detail"])
+                self.assertEqual("succeeded" in text or status == "mismatch", "not evidence of a real write" not in check["detail"])
 
     def test_natural_run_fields_are_listed_apart_from_user_fields(self):
         self.fx.sql("live", "UPDATE automation_tasks SET next_run_at=next_run_at+3600, updated_at=updated_at+3600, "
@@ -308,6 +315,242 @@ class ReleaseVerifyTest(unittest.TestCase):
             with contextlib.redirect_stderr(devnull):
                 rv.main(["--version", "0.8.9"], run=self.fx.run)
         self.assertEqual(e.exception.code, 2)
+
+
+SECRET = "SECRET-7f3a"
+LEAKY = ("#!/bin/sh\necho 'fatal: https://user:%s@private.example.net/repo /srv/%s/compose' >&2\n"
+         "echo 'Traceback (most recent call last): %s' >&2\nexit 128\n") % (SECRET, SECRET, SECRET)
+
+
+def add_run(fx, run_id, state, payload, created=STARTED + 10):
+    fx.sql("live", "INSERT INTO task_runs VALUES(?,?,?,?,?,?,?)", run_id, "task-0001", "internal", state,
+           payload if isinstance(payload, str) else json.dumps(payload), created, created + 1)
+
+
+def final(**extra):
+    return dict({"scanned": 5, "claimed": 0, "completed": 0, "failed": 0, "unknown": 0, "queued": 0, "running": 0, "finalized": True}, **extra)
+
+
+class RunEvidenceTest(unittest.TestCase):
+    """RV-01: only finalized runs in a known final state count; the rest is unverified."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.fx = Fixture(self._tmp.name)
+        self.fx.sql("live", "DELETE FROM task_runs")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def check(self):
+        code, report = self.fx.execute()
+        return code, next(c for c in report["checks"] if c["id"] == "tasks.post_deploy_runs"), report
+
+    def test_audit_repro_cancelled_not_finalized_with_running_operation(self):
+        add_run(self.fx, "r1", "cancelled", final(finalized=False, running=1))
+        self.fx.sql("live", "INSERT INTO operations VALUES('op-new','running',?,?)", STARTED + 20, STARTED + 20)
+        code, check, report = self.check()
+        self.assertEqual((code, report["result"], check["status"]), (3, "unverified", "unverified"))
+        self.assertIn("not_finalized 1", check["detail"])
+        self.assertIn("still queued or running", check["detail"])
+        self.assertEqual(report["evidence"]["server"]["runs_since_start"][0]["finalized"], False)
+
+    def test_unsettled_unknown_or_unproven_states_are_unverified(self):
+        cases = [
+            ("future_unknown_state", final(), "unknown_state 1"),
+            ("completed", final(finalized=False, claimed=2, completed=2), "not_finalized 1"),
+            ("completed", final(queued=1), "not_finalized 1"),
+            ("completed", {k: v for k, v in final().items() if k != "finalized"}, "missing_evidence 1"),
+            ("noop", final(finalized="yes"), "missing_evidence 1"),
+            ("noop", final(running="0"), "missing_evidence 1"),
+            ("noop", "{not json", "missing_evidence 1"),
+            ("noop", "[]", "missing_evidence 1"),
+            ("cancelled", final(), "cancelled 1"),
+            ("limited", final(), "limited 1"),
+            ("requires_ai", final(), "requires_ai 1"),
+            ("awaiting_ai", final(finalized=False), "running 1"),
+            ("needs_verification", final(unknown=1), "needs_verification 1"),
+        ]
+        for state, payload, text in cases:
+            with self.subTest(state=state, payload=payload):
+                self.fx.sql("live", "DELETE FROM task_runs")
+                add_run(self.fx, "r1", state, payload)
+                code, check, _ = self.check()
+                self.assertEqual((code, check["status"]), (3, "unverified"))
+                self.assertIn(text, check["detail"])
+
+    def test_settled_states_keep_their_meaning(self):
+        cases = [
+            ("noop", final(), 0, "match", "noop 1", True),
+            ("completed", final(claimed=2, completed=2), 0, "match", "succeeded 1", False),
+            ("observed", final(claimed=3), 0, "match", "observed 1", True),
+            ("failed", final(failed=1), 1, "mismatch", "failed 1", False),
+            ("partial", final(completed=1, failed=1), 1, "mismatch", "failed 1", False),
+            ("interrupted", final(finalized=False), 1, "mismatch", "failed 1", False),
+        ]
+        for state, payload, code_want, status, text, no_write_note in cases:
+            with self.subTest(state=state):
+                self.fx.sql("live", "DELETE FROM task_runs")
+                add_run(self.fx, "r1", state, payload)
+                code, check, _ = self.check()
+                self.assertEqual((code, check["status"]), (code_want, status))
+                self.assertIn(text, check["detail"])
+                self.assertEqual("not evidence of a real write" in check["detail"], no_write_note)
+
+    def test_finished_operation_since_start_does_not_block(self):
+        add_run(self.fx, "r1", "completed", final(claimed=1, completed=1))
+        self.fx.sql("live", "INSERT INTO operations VALUES('op-new','completed',?,?)", STARTED + 20, STARTED + 21)
+        code, check, report = self.check()
+        self.assertEqual((code, check["status"]), (0, "match"))
+        self.assertEqual(report["evidence"]["server"]["operations_since_start"], {"completed": 1})
+
+    def test_one_unsettled_run_among_good_ones(self):
+        add_run(self.fx, "r1", "noop", final())
+        add_run(self.fx, "r2", "cancelled", final(finalized=False), created=STARTED + 20)
+        code, check, _ = self.check()
+        self.assertEqual((code, check["status"]), (3, "unverified"))
+        self.assertIn("noop 1, not_finalized 1", check["detail"])
+
+
+class RedactionTest(unittest.TestCase):
+    """RV-02: failures never pass command stderr or exception text through."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.fx = Fixture(self._tmp.name)
+        os.makedirs(self.fx.bindir)
+        for name in ("ssh", "git", "docker", "curl"):
+            path = os.path.join(self.fx.bindir, name)
+            with open(path, "w") as f:
+                f.write(LEAKY)
+            os.chmod(path, 0o755)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def assertClean(self, text):
+        for bad in (SECRET, "private.example", "Traceback", "/srv/"):
+            self.assertNotIn(bad, text)
+
+    def test_real_command_failures_are_redacted(self):
+        cases = [
+            ("ssh", "ssh exited 128", {"server.image", "master_key"}),
+            ("git", "git rev-parse exited 128", {"git.tag", "git.main"}),
+            ("docker", "docker buildx imagetools exited 128", {"image.platforms"}),
+            ("curl", "curl exited 128", {"server.version"}),
+        ]
+        for name, message, some_unverified in cases:
+            with self.subTest(command=name):
+                self.fx.real = {name}
+                code, report = self.fx.execute()
+                self.assertEqual(code, 3)
+                self.assertLessEqual(some_unverified, set(report["unverified"]))
+                self.assertIn(message, self.fx.last_output)
+                self.assertClean(self.fx.last_output)
+
+    def test_remote_docker_failure_is_redacted(self):
+        # docker on the server side fails: the container section reports only the command name.
+        self.fx.real = {"docker"}
+        self.fx.fail = set()
+        code, report = self.fx.execute()
+        self.assertEqual(code, 3)
+        self.assertEqual(report["evidence"]["server"]["container"], {"error": "docker ps exited 128"})
+        self.assertClean(self.fx.last_output)
+
+    def test_timeout_missing_command_and_exception_text(self):
+        slow = os.path.join(self.fx.bindir, "slow")
+        with open(slow, "w") as f:
+            f.write("#!/bin/sh\nsleep 5\n")
+        os.chmod(slow, 0o755)
+        with self.assertRaises(rv.SafeError) as e:
+            rv.run([slow, "--token=" + SECRET], timeout=0.2)
+        self.assertEqual(str(e.exception), "command timed out")
+        with self.assertRaises(rv.SafeError) as e:
+            rv.run([os.path.join(self.fx.bindir, "nope-" + SECRET)])
+        self.assertNotIn(SECRET, str(e.exception))
+        for exc in (ValueError(SECRET), KeyError(SECRET), sqlite3.OperationalError("no such table: " + SECRET),
+                    PermissionError(13, "denied", "/srv/" + SECRET), OSError(SECRET), RuntimeError(SECRET)):
+            self.assertNotIn(SECRET, rv.short(exc))
+
+    def test_permission_denied_on_key(self):
+        key = os.path.join(self.fx.keys, "master.key")
+        os.chmod(key, 0)
+        try:
+            if os.access(key, os.R_OK):
+                self.skipTest("running as root")
+            code, report = self.fx.execute()
+        finally:
+            os.chmod(key, 0o600)
+        self.assertEqual((code, report["unverified"]), (3, ["master_key"]))
+        self.assertIn("permission denied", self.fx.last_output)
+        self.assertNotIn(self.fx.keys, self.fx.last_output)
+
+    def test_remote_crash_and_odd_remote_errors(self):
+        out, err = io.StringIO(), io.StringIO()
+        real = rv.collect_remote
+        rv.collect_remote = lambda params, run: (_ for _ in ()).throw(RuntimeError(SECRET))
+        try:
+            code = rv.main([rv.REMOTE_MODE, json.dumps({"compose_dir": "/x", "backup": "/y", "service": "app"})], out=out, err=err)
+        finally:
+            rv.collect_remote = real
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue()), {"error": "remote collection failed: error (RuntimeError)"})
+        scrubbed = rv.scrub({"error": "boom " + SECRET + " /srv/x", "container": {"error": "docker ps exited 1"},
+                             "config": {"t": {"error": "sqlite error (OperationalError)"}}, "master_key_error": "permission denied"})
+        self.assertEqual(scrubbed, {"error": "error (details withheld)", "container": {"error": "docker ps exited 1"},
+                                    "config": {"t": {"error": "sqlite error (OperationalError)"}}, "master_key_error": "permission denied"})
+
+
+class ArgumentTest(unittest.TestCase):
+    """RV-03: public --remote never collides with the internal collection mode."""
+
+    SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "release_verify.py")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.fx = Fixture(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_remote_option_in_any_position(self):
+        base = self.fx.args()
+        for argv in (["--remote", "origin"] + base, base + ["--remote", "origin"], ["--remote=origin"] + base,
+                     base[:4] + ["--remote", "upstream"] + base[4:]):
+            with self.subTest(argv=argv[:2]):
+                out, err = io.StringIO(), io.StringIO()
+                self.assertEqual(rv.main(argv, run=self.fx.run, out=out, err=err), 0, err.getvalue())
+                self.assertEqual(json.loads(out.getvalue())["result"], "match")
+        ls_remote = [c for c in self.fx.calls if c[0] == "git" and c[3] == "ls-remote"]
+        self.assertEqual(ls_remote[-1][4], "upstream")
+
+    def cli(self, *argv):
+        return subprocess.run([sys.executable, self.SCRIPT, *argv], capture_output=True, text=True, timeout=30)
+
+    def test_usage_errors_exit_2_without_traceback(self):
+        base = self.fx.args()
+        cases = [
+            ["--remote"],
+            base + ["--remote"],
+            ["--remote", "origin", "--version", "0.8.9"],
+            [x if x != "0.8.9" else "0.8" for x in base],
+            [x if x != COMMIT[:7] else "not-a-sha" for x in base],
+            base + ["--internal-remote-collect", "{}"],
+            base + ["--rem", "origin"],
+            [rv.REMOTE_MODE],
+            [rv.REMOTE_MODE, "{not json"],
+            [rv.REMOTE_MODE, json.dumps({"compose_dir": "/x", "backup": "/y"})],
+            [rv.REMOTE_MODE, json.dumps({"compose_dir": "/x", "backup": "/y", "service": "app", "extra": 1})],
+            [rv.REMOTE_MODE, json.dumps({"compose_dir": "/x", "backup": 3, "service": "app"})],
+            [rv.REMOTE_MODE, "{}", "extra"],
+        ]
+        for argv in cases:
+            with self.subTest(argv=argv):
+                r = self.cli(*argv)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
+                self.assertNotIn("Traceback", r.stderr)
+                self.assertTrue("usage:" in r.stderr or "invalid internal collection parameters" in r.stderr, r.stderr)
 
 
 if __name__ == "__main__":

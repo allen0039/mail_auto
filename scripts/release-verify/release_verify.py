@@ -14,7 +14,9 @@ imagetools). Server side: this same file is piped to `python3 -` over SSH and
 reads docker inspect, /healthz, /readyz and SQLite (mode=ro, query_only). The
 master key is compared on the server; only a boolean leaves it.
 
-stdout: one redacted JSON document. stderr: a short conclusion.
+stdout: one redacted JSON document. stderr: a short conclusion. Failures are
+reported by command name, exit status or error type only; command stderr and
+exception text are never passed through.
 Exit status:
   0  every required check matched
   1  at least one required check did not match (inconsistency found)
@@ -27,6 +29,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -48,24 +51,77 @@ CONFIG_TABLES = [
 TASK_RUNTIME_COLUMNS = {"next_run_at", "updated_at"}
 TASK_RUNTIME_FIELDS = {"cursor", "last_triggered", "next_run_at", "next_times", "last_state"}
 DOC_PREFIXES = ("docs/",)
+# Run classes accepted as post-deploy evidence; every other class is unverified,
+# except "failed" which is a mismatch.
+PASS_CLASSES = {"noop", "succeeded", "observed"}
+FINAL_STATES = {"noop": "noop", "completed": "succeeded", "observed": "observed",
+                "cancelled": "cancelled", "limited": "limited", "requires_ai": "requires_ai"}
+# Marker for the server-side collection piped over SSH; not a public option.
+REMOTE_MODE = "--internal-remote-collect"
+REMOTE_KEYS = {"compose_dir", "backup", "service"}
+SAFE_TEXT = re.compile(r"[A-Za-z0-9_ .,()-]{1,120}")
+
+
+class SafeError(RuntimeError):
+    """An error whose message is built only from fixed text, command names and numbers."""
+
+
+def label(cmd):
+    """Command name for error messages; never arguments, which may hold hosts, paths or URLs."""
+    name = os.path.basename(cmd[0])
+    if name not in ("git", "docker", "ssh", "curl"):
+        name = "command"
+    if name == "git" and len(cmd) > 3:
+        return "git " + cmd[3]
+    if name == "docker" and len(cmd) > 2:
+        return "docker " + (" ".join(cmd[1:3]) if cmd[1] in ("buildx", "image") else cmd[1])
+    return name
 
 
 def run(cmd, input=None, timeout=60):
-    """Runs a command and returns stdout; raises RuntimeError on failure."""
+    """Runs a command and returns stdout; raises SafeError on failure.
+
+    The command's stderr is discarded: it can carry hosts, paths, URLs with
+    credentials or other private text, so only the command name and exit status
+    are reported."""
     try:
         r = subprocess.run(cmd, input=input, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        raise RuntimeError("%s: %s" % (cmd[0], type(e).__name__))
+    except subprocess.TimeoutExpired:
+        raise SafeError("%s timed out" % label(cmd))
+    except FileNotFoundError:
+        raise SafeError("%s not found" % label(cmd))
+    except OSError as e:
+        raise SafeError("%s could not start (%s)" % (label(cmd), type(e).__name__))
     if r.returncode != 0:
-        last = (r.stderr.strip().splitlines() or [""])[-1][:200]
-        raise RuntimeError("%s exited %d: %s" % (cmd[0], r.returncode, last))
+        raise SafeError("%s exited %d" % (label(cmd), r.returncode))
     return r.stdout
 
 
 def short(e):
+    """Redacted one-line description of an exception: never its free text."""
+    if isinstance(e, SafeError):
+        return str(e)
     if isinstance(e, KeyError):
-        return "missing field %s" % e
-    return str(e).splitlines()[0][:200] if str(e) else type(e).__name__
+        return "missing field"
+    if isinstance(e, (ValueError, TypeError, IndexError, StopIteration)):
+        return "invalid data (%s)" % type(e).__name__
+    if isinstance(e, PermissionError):
+        return "permission denied"
+    if isinstance(e, FileNotFoundError):
+        return "file not found"
+    if isinstance(e, sqlite3.Error):
+        return "sqlite error (%s)" % type(e).__name__
+    return "error (%s)" % type(e).__name__
+
+
+def scrub(value):
+    """Replaces error strings received from the server with a fixed text unless plainly safe."""
+    if isinstance(value, dict):
+        return {k: (v if SAFE_TEXT.fullmatch(v) else "error (details withheld)") if isinstance(v, str) and k.endswith("error")
+                else scrub(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    return value
 
 
 def iso(ts):
@@ -84,18 +140,31 @@ def connect(path):
     return conn
 
 
+def count(payload, key):
+    v = payload.get(key, 0)
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
 def classify_run(state, payload):
+    """Class of one run from its state and saved summary.
+
+    Only a finalized run with no write in flight and a known final state can
+    count as evidence; anything else (still running, cancelled but not settled,
+    missing or malformed summary, unknown state) is reported as such."""
+    if not isinstance(payload, dict):
+        return "missing_evidence"
     if state in ("queued", "running", "awaiting_ai"):
         return "running"
-    if state in ("failed", "partial", "interrupted") or payload.get("failed"):
+    counts = {k: count(payload, k) for k in ("failed", "unknown", "queued", "running")}
+    if state in ("failed", "partial", "interrupted") or counts["failed"]:
         return "failed"
-    if state == "needs_verification" or payload.get("unknown"):
+    if state == "needs_verification" or counts["unknown"]:
         return "needs_verification"
-    if state == "noop":
-        return "noop"
-    if state == "completed":
-        return "succeeded"
-    return "other:" + state
+    if None in counts.values() or not isinstance(payload.get("finalized"), bool):
+        return "missing_evidence"
+    if not payload["finalized"] or counts["queued"] or counts["running"]:
+        return "not_finalized"
+    return FINAL_STATES.get(state, "unknown_state")
 
 
 def compare_config(cur, old):
@@ -148,7 +217,7 @@ def collect_remote(params, run=run):
         ids = run(["docker", "ps", "-a", "--filter", "label=com.docker.compose.project.working_dir=" + params["compose_dir"],
                    "--filter", "label=com.docker.compose.service=" + params["service"], "--format", "{{.ID}}"]).split()
         if len(ids) != 1:
-            raise RuntimeError("expected one %s container for the compose directory, found %d" % (params["service"], len(ids)))
+            raise SafeError("expected one service container for the compose directory, found %d" % len(ids))
         cid = ids[0]
         c = json.loads(run(["docker", "inspect", cid]))[0]
         img = json.loads(run(["docker", "image", "inspect", c["Image"]]))[0]
@@ -163,14 +232,14 @@ def collect_remote(params, run=run):
         db_path = os.path.join(mounts[DATA_MOUNT], "mail-auto.db")
         key_path = os.path.join(mounts[KEY_MOUNT], "master.key")
         port = next(iter((c["NetworkSettings"]["Ports"] or {}).values()))[0]
-    except (RuntimeError, ValueError, KeyError, IndexError, StopIteration, TypeError) as e:
+    except Exception as e:
         out["container"] = {"error": short(e)}
         return out
     host = "127.0.0.1" if port["HostIp"] in ("", "0.0.0.0", "::") else port["HostIp"]
     for name in ("healthz", "readyz"):
         try:
             out[name] = json.loads(run(["curl", "-fsS", "--max-time", "5", "http://%s:%s/%s" % (host, port["HostPort"], name)]))
-        except (RuntimeError, ValueError) as e:
+        except Exception as e:
             out[name] = {"error": short(e)}
     cur = old = None
     try:
@@ -180,15 +249,22 @@ def collect_remote(params, run=run):
         out["sync"] = {"folders": r["folders"], "synced_since_start": r["synced"], "newest_synced_at": iso(r["newest"])}
         runs = []
         for r in cur.execute("SELECT id,task_id,source,state,created_at,payload FROM task_runs WHERE created_at>=? ORDER BY created_at,id", (since,)):
-            p = json.loads(r["payload"])
-            runs.append({"run": r["id"][:8], "task": r["task_id"][:8], "source": r["source"], "state": r["state"],
-                         "class": classify_run(r["state"], p), "created_at": iso(r["created_at"]),
-                         **{k: p.get(k, 0) for k in ("scanned", "claimed", "completed", "failed", "unknown", "protected")}})
+            try:
+                p = json.loads(r["payload"])
+            except ValueError:
+                p = None
+            item = {"run": r["id"][:8], "task": r["task_id"][:8], "source": r["source"], "state": r["state"],
+                    "class": classify_run(r["state"], p), "created_at": iso(r["created_at"])}
+            if isinstance(p, dict):
+                item["finalized"] = p.get("finalized")
+                item.update({k: count(p, k) for k in ("scanned", "claimed", "completed", "failed", "unknown", "protected", "queued", "running")})
+            runs.append(item)
         out["runs"] = runs
         out["open_operations"] = {r[0]: r[1] for r in cur.execute(
             "SELECT state,count(*) FROM operations WHERE state IN ('queued','running','needs_verification') GROUP BY state")}
-        out["operations_since_start"] = cur.execute("SELECT count(*) FROM operations WHERE created_at>=?", (since,)).fetchone()[0]
-    except (sqlite3.Error, OSError, ValueError) as e:
+        out["operations_since_start"] = {r[0]: r[1] for r in cur.execute(
+            "SELECT state,count(*) FROM operations WHERE created_at>=? GROUP BY state", (since,))}
+    except Exception as e:
         out["database_error"] = short(e)
     backup = params["backup"]
     out["backup"] = {"name": os.path.basename(backup.rstrip("/")), "present": os.path.isdir(backup)}
@@ -198,13 +274,13 @@ def collect_remote(params, run=run):
             out["backup"]["schema"] = old.execute("PRAGMA user_version").fetchone()[0]
             out["config"] = compare_config(cur, old)
             out["tasks"] = compare_tasks(cur, old)
-        except (sqlite3.Error, OSError, ValueError) as e:
+        except Exception as e:
             out["backup"]["error"] = short(e)
     try:
         with open(key_path, "rb") as f1, open(os.path.join(backup, "keys", "master.key"), "rb") as f2:
             out["master_key_same"] = f1.read() == f2.read()
-    except OSError as e:
-        out["master_key_error"] = type(e).__name__
+    except Exception as e:
+        out["master_key_error"] = short(e)
     for conn in (cur, old):
         if conn is not None:
             conn.rollback()
@@ -226,21 +302,21 @@ def collect_git(args, run=run):
             refs[ref] = sha
         out["main"] = refs.get("refs/heads/main")
         out["tag"] = refs.get("refs/tags/v%s^{}" % args.version) or refs.get("refs/tags/v" + args.version)
-    except (RuntimeError, ValueError) as e:
+    except Exception as e:
         out["error"] = short(e)
         return out
     if out["main"] and out["main"] != commit:
         try:
             run(git + ["cat-file", "-e", out["main"] + "^{commit}"])
-        except RuntimeError:
-            out["main_error"] = "remote main %s is not in the local checkout; run git fetch first" % out["main"][:12]
+        except SafeError:
+            out["main_error"] = "remote main %s is not in the local checkout, run git fetch first" % out["main"][:12]
             return out
         try:
             if run(git + ["merge-base", commit, out["main"]]).strip() == commit:
                 out["after_release"] = run(git + ["diff", "--name-only", commit, out["main"]]).split()
             else:
                 out["after_release"] = None
-        except RuntimeError as e:
+        except Exception as e:
             out["main_error"] = short(e)
     return out
 
@@ -257,7 +333,7 @@ def collect_registry(args, run=run):
         for plat, digest in sorted(out[args.version]["platforms"].items()):
             raw = json.loads(run(["docker", "buildx", "imagetools", "inspect", "--raw", "%s@%s" % (args.image, digest)]))
             out["configs"][plat] = raw["config"]["digest"]
-    except (RuntimeError, ValueError, KeyError, TypeError) as e:
+    except Exception as e:
         out["error"] = short(e)
     return out
 
@@ -267,9 +343,12 @@ def collect_server(args, run=run):
     with open(os.path.abspath(__file__), encoding="utf-8") as f:
         source = f.read()
     try:
-        cmd = "python3 - --remote " + shlex.quote(json.dumps(params))
-        return json.loads(run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", args.ssh, cmd], input=source, timeout=180))
-    except (RuntimeError, ValueError) as e:
+        cmd = "python3 - %s %s" % (REMOTE_MODE, shlex.quote(json.dumps(params)))
+        out = json.loads(run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", args.ssh, cmd], input=source, timeout=180))
+        if not isinstance(out, dict):
+            raise ValueError("not an object")
+        return scrub(out)
+    except Exception as e:
         return {"error": short(e)}
 
 
@@ -355,13 +434,16 @@ def evaluate(args, g, reg, srv):
         for x in runs:
             classes[x["class"]] = classes.get(x["class"], 0) + 1
         summary = ", ".join("%s %d" % kv for kv in sorted(classes.items())) or "no runs since start"
+        in_flight = sum(n for k, n in (srv.get("operations_since_start") or {}).items() if k in ("queued", "running"))
+        if in_flight:
+            summary += "; %d operation(s) since start still queued or running" % in_flight
         if classes.get("failed"):
             status = MISMATCH
-        elif not runs or classes.get("needs_verification") or classes.get("running"):
+        elif not runs or in_flight or set(classes) - PASS_CLASSES:
             status = UNVERIFIED
         else:
             status = MATCH
-        if runs and not classes.get("succeeded"):
+        if runs and status != MISMATCH and not classes.get("succeeded"):
             summary += " (no succeeded run: not evidence of a real write)"
         add("tasks.post_deploy_runs", status, summary)
 
@@ -431,10 +513,18 @@ def conclusion(report):
     return "\n".join(lines)
 
 
+def pattern(regex, what):
+    def check(value):
+        if not re.fullmatch(regex, value):
+            raise argparse.ArgumentTypeError("invalid %s" % what)
+        return value
+    return check
+
+
 def parse_args(argv):
-    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    p.add_argument("--version", required=True, help="expected version, e.g. 0.8.9")
-    p.add_argument("--commit", required=True, help="expected release commit")
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
+    p.add_argument("--version", required=True, type=pattern(r"[0-9]+\.[0-9]+\.[0-9]+", "version (expected X.Y.Z)"), help="expected version, e.g. 0.8.9")
+    p.add_argument("--commit", required=True, type=pattern(r"[0-9a-fA-F]{4,40}", "commit (expected 4-40 hex digits)"), help="expected release commit")
     p.add_argument("--ssh", required=True, help="SSH target of the server (host alias or user@host)")
     p.add_argument("--compose-dir", required=True, help="Compose project directory on the server")
     p.add_argument("--backup", required=True, help="pre-upgrade backup directory on the server (mail-auto.db, keys/master.key)")
@@ -445,13 +535,33 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
+def remote_main(argv, run, out, err):
+    """Server side: argv is [REMOTE_MODE, JSON with exactly REMOTE_KEYS as strings]."""
+    try:
+        params = json.loads(argv[1]) if len(argv) == 2 else None
+    except ValueError:
+        params = None
+    if not isinstance(params, dict) or set(params) != REMOTE_KEYS or not all(isinstance(v, str) and v for v in params.values()):
+        err.write("release-verify: invalid internal collection parameters\n")
+        return 2
+    try:
+        result = collect_remote(params, run=run)
+    except Exception as e:
+        result = {"error": "remote collection failed: " + short(e)}
+    out.write(json.dumps(result, ensure_ascii=False) + "\n")
+    return 0
+
+
 def main(argv=None, run=run, out=sys.stdout, err=sys.stderr):
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["--remote"]:
-        out.write(json.dumps(collect_remote(json.loads(argv[1]), run=run), ensure_ascii=False) + "\n")
-        return 0
+    if argv[:1] == [REMOTE_MODE]:
+        return remote_main(argv, run, out, err)
     args = parse_args(argv)
-    report = build_report(args, collect_git(args, run), collect_registry(args, run), collect_server(args, run))
+    try:
+        report = build_report(args, collect_git(args, run), collect_registry(args, run), collect_server(args, run))
+    except Exception as e:
+        err.write("release-verify: internal error (%s); nothing verified\n" % type(e).__name__)
+        return EXIT[UNVERIFIED]
     out.write(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     err.write(conclusion(report) + "\n")
     return report["exit_code"]
