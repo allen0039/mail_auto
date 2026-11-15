@@ -23,7 +23,7 @@ Go 编写的个人多邮箱工作台：IMAP 自动同步、原邮箱文件夹分
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.8.5`，可使用固定镜像标签 `allen0039/mail-auto:0.8.5`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥。0.7.0 至当前 0.8.x 都是 schema 13（0.6.x 为 schema 12）：同 schema 的小版本之间可直接换回旧镜像回滚；跨 schema 回退时旧二进制拒绝打开数据库，须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md#升级与回退)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.8.6`，可使用固定镜像标签 `allen0039/mail-auto:0.8.6`；`latest` 指向最近一次发布的版本。镜像支持 Linux amd64 / arm64，标准部署无需 `.env`。镜像、Compose、界面、MCP 和 Git 标签使用同一版本号。升级前请备份数据库和主密钥。0.7.0 至当前 0.8.x 都是 schema 13（0.6.x 为 schema 12）：同 schema 的小版本之间可直接换回旧镜像回滚；跨 schema 回退时旧二进制拒绝打开数据库，须恢复升级前快照与配套主密钥，见[运维文档](docs/operations.md#升级与回退)。
 
 在运行 Docker 的主机执行：
 
@@ -123,13 +123,13 @@ make check   # race 测试、vet、gofmt、staticcheck
 go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 ```
 
-修改管理界面后，发布前运行界面检查。它在临时目录构建并启动一个隔离实例（不自动同步、不连接任何邮箱），用一次性临时管理员凭据在 1280 / 375 / 390 px 下运行 `settings`、`model`、`ownership` 三套检查（页面接口均为假数据），结束或失败后都会停止实例、关闭浏览器并删除临时目录。需要 Node 与 `puppeteer-core`；默认使用本机已安装的 Chrome，可用 `CHROME_PATH` 指定浏览器。只有全部检查通过且无页面错误时返回 0；任何断言失败、页面脚本错误、无效检查结果或执行异常都返回非零。不要对生产实例或生产账号运行。
+修改管理界面后，发布前运行界面检查。它在临时目录构建并启动一个隔离实例（不自动同步、不连接任何邮箱），用一次性临时管理员凭据在 1280 / 375 / 390 px 下运行 `settings`、`model`、`ownership`、`task-editor` 四套检查（页面接口均为假数据），结束或失败后都会停止实例、关闭浏览器并删除临时目录。需要 Node 与 `puppeteer-core`；默认使用本机已安装的 Chrome，可用 `CHROME_PATH` 指定浏览器。只有全部检查通过且无页面错误时返回 0；任何断言失败、页面脚本错误、无效检查结果或执行异常都返回非零。不要对生产实例或生产账号运行。
 
 ```bash
 PUPPETEER=/path/to/node_modules/puppeteer-core scripts/ui-check/run.sh
 ```
 
-也可在命令后列出要运行的检查脚本，替代默认的三套。修改检查入口本身后，运行 `node --test scripts/ui-check/gate-test.cjs` 验证结果校验（设置 `PUPPETEER` 时还会经 `run.sh` 端到端核对退出码与临时资源清理）。
+也可在命令后列出要运行的检查脚本，替代默认的四套。修改检查入口本身后，运行 `node --test scripts/ui-check/gate-test.cjs` 验证结果校验（设置 `PUPPETEER` 时还会经 `run.sh` 端到端核对退出码与临时资源清理）。
 
 直接运行源码时默认监听 `127.0.0.1:8080`，使用 `./data`、`./keys`，不读取环境变量。Go 二进制与内置前端单进程运行，无 Node 构建依赖。启动参数必须放在子命令前：
 

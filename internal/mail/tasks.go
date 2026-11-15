@@ -3,6 +3,7 @@ package mail
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -327,7 +328,7 @@ func (s *Service) saveTask(a Access, t Task, m *Mutation) (Task, error) {
 		return t, ErrInput
 	}
 	if issues := taskPolicyIssues(a, t, p, time.Now().Unix()); len(issues) > 0 {
-		return t, issues[0].err
+		return t, issues[0].asError()
 	}
 	old := Task{}
 	if t.ID != "" {
@@ -335,13 +336,20 @@ func (s *Service) saveTask(a Access, t Task, m *Mutation) (Task, error) {
 		if e != nil {
 			return t, e
 		}
-		if old.AccountID != t.AccountID || old.Version != t.Version {
+		if old.AccountID != t.AccountID {
 			return t, ErrConflict
+		}
+		if old.Version != t.Version {
+			return t, taskErr("task_version_conflict", "task", ErrConflict)
 		}
 	} else if t.Version != 0 {
 		return t, ErrInput
 	}
 	_, normalizedIDs, normalizedVersions, e := s.resolveTaskRules(a, t, true)
+	if errors.Is(e, ErrConflict) {
+		// Saving: a bound rule changed version since the editor loaded it.
+		return t, taskErr("rules_changed", "rules", e)
+	}
 	if e != nil {
 		return t, e
 	}
@@ -381,7 +389,7 @@ func (s *Service) saveTask(a Access, t Task, m *Mutation) (Task, error) {
 			return t, e
 		}
 		if n >= 50 {
-			return t, ErrInput
+			return t, taskErr("task_limit_reached", "task", ErrInput)
 		}
 		_, e = tx.Exec("INSERT INTO automation_tasks VALUES(?,?,?,?,?,?,?,?,?)", t.ID, t.AccountID, t.Version, t.ServiceOwner, taskJSON(t), t.Enabled, t.Trigger, t.NextRunAt, t.UpdatedAt)
 	} else {
@@ -390,7 +398,7 @@ func (s *Service) saveTask(a Access, t Task, m *Mutation) (Task, error) {
 		if e == nil {
 			n, _ := r.RowsAffected()
 			if n != 1 {
-				return t, ErrConflict
+				return t, taskErr("task_version_conflict", "task", ErrConflict)
 			}
 		}
 	}
@@ -470,7 +478,7 @@ func (s *Service) setTaskEnabled(a Access, id string, version int, enabled bool,
 		return t, ErrDenied
 	}
 	if t.Version != version {
-		return t, ErrConflict
+		return t, taskErr("task_version_conflict", "task", ErrConflict)
 	}
 	if enabled {
 		t.Enabled = true
@@ -488,7 +496,7 @@ func (s *Service) setTaskEnabled(a Access, id string, version int, enabled bool,
 		return t, e
 	}
 	if t.Version != version {
-		return t, ErrConflict
+		return t, taskErr("task_version_conflict", "task", ErrConflict)
 	}
 	t.Enabled = false
 	t.Version++
@@ -509,7 +517,7 @@ func (s *Service) setTaskEnabled(a Access, id string, version int, enabled bool,
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
-		return t, ErrConflict
+		return t, taskErr("task_version_conflict", "task", ErrConflict)
 	}
 	if e = store.Audit(tx, "mail.task.pause", t.ID, auditActor(a)); e != nil {
 		return t, e

@@ -4,6 +4,9 @@
   // autoRequire in app.js); nothing here acts on another mailbox's cache.
   let tasks = [], policy = null, editing = null, selectedTask = "", telegram = null, timer = null, rules = [], readiness = {}, loaded = null;
   let detailMode = null, detailSeq = 0, preview = null, previewSeq = 0, previewAbort = null;
+  // Last failed enable / pause / run per task of the shown mailbox, kept on the
+  // card until that task's next successful action or a mailbox switch.
+  let actionErrors = {};
   const active = (s) => ["queued", "running", "awaiting_ai"].includes(s);
   const labels = {
     queued: "等待运行",
@@ -60,6 +63,63 @@
     task_paused: () => "任务已暂停，启用后才会按计划运行",
   };
   const fixLabels = { policy: "打开整理授权", folders: "打开文件夹映射", account: "编辑邮箱", rules: "编辑任务", task: "编辑任务" };
+  const fixSteps = {
+    policy: "请在「整理设置 → 整理授权」中调整后再保存。",
+    folders: "请在「整理设置 → 文件夹映射」中配置后再保存。",
+    account: "请在邮箱设置中恢复同步该目录后再保存。",
+  };
+  // Saving, enabling or running a task failed. The reason comes only from the
+  // server's own code (see respondTask in internal/admin/tasks.go); a bare
+  // permission_denied is not narrowed down, and anything unrecognised is said
+  // to be unrecognised. Nothing is retried. Returns {text, area?, refresh?, more?}.
+  function taskFailure(err, action) {
+    const save = action === "save";
+    const kept = save ? "当前编辑内容已保留，未自动重试。" : "";
+    const verb = { save: "保存", enable: "启用", pause: "暂停", run: "运行" }[action];
+    if (err?.status === undefined) {
+      // No HTTP answer: a check on this page, or the request got no reply.
+      if (err instanceof TypeError) return { text: `无法连接服务器，${verb}可能未完成。请检查网络并刷新确认，不要重复提交。${kept}` };
+      return { text: err?.message || `${verb}未完成。${kept}` };
+    }
+    const code = /^[a-z_]{1,48}$/.test(err.code || "") ? err.code : "";
+    if (issueText[code] && code !== "rules_changed") {
+      const next = code === "ai_engine_internal" ? "请把判断方式改为固定规则，或改用仅手动 / 外部 MCP 触发。" : save ? fixSteps[err.area] || "" : "";
+      return { text: `${verb}未完成：${issueText[code]({ code, target: err.target })}。${next}${kept}`, area: save ? "" : err.area };
+    }
+    switch (code) {
+      case "task_version_conflict":
+        return save
+          ? { text: `任务已在其他位置更新（例如另一个窗口、Telegram 或 MCP），这次没有保存。${kept}任务列表已刷新；请记下修改，关闭窗口后重新打开任务，再应用修改并保存。`, refresh: true }
+          : { text: `任务已在其他位置更新，这次没有${verb}。列表已刷新为最新配置，请确认后再试。`, refresh: true };
+      case "rules_changed":
+        return save
+          ? { text: `绑定的规则在此期间已被修改或停用，不能按原版本保存。${kept}可改为“跟随账号全部启用规则”后保存，或从规则列表的“创建任务”按最新版本重新绑定。` }
+          : { text: `${verb}未完成：${issueText.rules_changed()}。`, area: "rules", refresh: true };
+      case "task_limit_reached":
+        return { text: `每个邮箱最多保存 50 项任务，已达到上限，新任务没有保存。${kept}` };
+      case "invalid_input":
+        return save
+          ? { text: `服务器认为部分设置无效（invalid_input），任务没有保存。请检查：名称 1–120 个字符；至少一个源目录；每轮最多处理 1–${policy?.max_batch ?? 50} 封；额外历史起点不晚于今天；外部调用间隔为 0 或 3600–604800 秒。已展开“更多设置”。${kept}`, more: true }
+          : { text: `服务器认为请求无效（invalid_input），这次没有${verb}。列表已刷新，请确认后再试。`, refresh: true };
+      case "permission_denied":
+        return { text: `服务器拒绝${verb}（permission_denied），没有给出具体原因。${save ? "请确认整理授权和登录状态后再保存。" : "请查看本任务的“运行条件”，或检查整理授权后再试。"}${kept}`, refresh: !save };
+      case "not_found":
+        return { text: `任务已不存在（可能已在其他位置删除），这次没有${verb}。${kept}${save ? "" : "列表已刷新。"}`, refresh: true };
+      case "state_conflict":
+        return { text: `服务器检测到状态已变化（state_conflict），这次没有${verb}。${kept}请刷新后再试。`, refresh: true };
+      case "busy":
+      case "remote_state_unknown":
+      case "daily_limit_reached":
+      case "capability_unavailable":
+        return { text: `${verb}未完成：${err.message}（${code}）${kept}` };
+    }
+    return { text: `${verb}未完成，原因未能识别${code ? `（代码：${code}）` : `（HTTP ${err.status}）`}。${kept}请稍后再试；如持续出现，请查看服务日志。` };
+  }
+  function actionErrorHTML(t) {
+    const e = actionErrors[t.id];
+    if (!e) return "";
+    return `<p class="form-error task-action-error" role="alert">${esc(e.text)}${e.area && fixLabels[e.area] ? ` <button type="button" class="text-button" data-task-fix="${esc(e.area)}" data-task-id="${esc(t.id)}">${fixLabels[e.area]}</button>` : ""}</p>`;
+  }
   // The latest run in plain words. Only server counts are used; a state that
   // cannot be broken down is said to be unknown rather than guessed.
   function lastResult(run) {
@@ -132,6 +192,54 @@
       $("#task-engine").value !== "rules" ||
       !rules.some((r) => r.enabled && r.action === "ai" && r.source_folders.some((f) => checked().includes(f)));
     renderTaskRuleOptions();
+    renderEditorSummary();
+  }
+
+  // The editor shows what a run will do in one line; settings in “更多设置”
+  // that differ from a new task's defaults are marked, so nothing that matters
+  // is hidden by the fold. The fold only changes display: every field is
+  // submitted as shown, whether open or closed.
+  const taskDefaults = () => ({ engine: "rules", max_batch: Math.min(20, policy?.max_batch ?? 20), since: "", notify: "inherit", protect_unread: true, protect_flagged: true });
+  function editorCustom() {
+    const d = taskDefaults();
+    return {
+      engine: $("#task-engine").value !== d.engine,
+      max_batch: Number($("#task-limit").value) !== d.max_batch,
+      since: $("#task-since").value !== d.since,
+      notify: $("#task-notify").value !== d.notify,
+      protect: $("#task-protect-unread").checked !== d.protect_unread || $("#task-protect-flagged").checked !== d.protect_flagged,
+    };
+  }
+  function renderEditorSummary() {
+    if (!editing) return;
+    const custom = editorCustom();
+    const part = (text, changed) => (changed ? `<span class="is-custom">${esc(text)}（自定义）</span>` : esc(text));
+    const unread = $("#task-protect-unread").checked, flagged = $("#task-protect-flagged").checked;
+    const protect = unread && flagged ? "保护未读和星标" : unread ? "保护未读，不保护星标" : flagged ? "保护星标，不保护未读" : "不保护未读和星标";
+    const since = $("#task-since").value;
+    $("#task-summary").innerHTML = `当前设置：${[
+      part($("#task-engine").value === "ai" ? "外部 AI 判断" : "固定规则", custom.engine),
+      part(`每轮最多 ${$("#task-limit").value || "?"} 封`, custom.max_batch),
+      part(protect, custom.protect),
+      part(since ? `只处理 ${since} 起收到的邮件` : "历史范围跟随整理授权", custom.since),
+      part(`通知：${policies[$("#task-notify").value] || $("#task-notify").value}`, custom.notify),
+    ].join(" · ")}`;
+    const n = Object.values(custom).filter(Boolean).length;
+    $("#task-more-note").textContent = n ? `（${n} 项自定义）` : "";
+    const execute = $("#task-mode").value === "execute";
+    $("#task-mode-note").textContent = !editing.id
+      ? "新任务保存为暂停的只观察任务，不会写入原邮箱；保存后可在编辑中改为真实执行并启用。"
+      : execute
+      ? "真实执行：运行时会移动或修改原邮箱中的邮件（受整理授权、保护设置和每轮数量限制）。"
+      : "只观察：运行时只记录建议，不移动或修改原邮箱中的邮件。";
+    $("#task-mode-note").classList.toggle("task-mode-write", !!editing.id && execute);
+  }
+  // A field in a closed “更多设置” that fails a check is shown before the error.
+  function fieldError(input, message) {
+    const fold = input.closest("details");
+    if (fold) fold.open = true;
+    input.focus();
+    throw new Error(message);
   }
 
   function resultHTML(t) {
@@ -172,6 +280,7 @@
                 ${resultHTML(t)}
                 <p class="muted small">通知：${policies[t.notify]}${t.trigger_mode === "external" ? " · 客户端日程需在外部建立" : ""}</p>
                 ${issuesHTML(t)}
+                ${actionErrorHTML(t)}
                 <div class="organizer-inline">
                   ${[["preview", "预览影响"], ["edit", "编辑"], ["toggle", t.enabled ? "暂停" : "启用"], ["run", "手动运行"], ["history", "运行记录"], ["detail", t.trigger_mode === "external" || t.engine === "ai" ? "外部调用说明" : "配置详情"]].map(([cmd, text]) => `<button type="button" class="secondary" data-task-command="${cmd}" data-task-id="${esc(t.id)}" ${cmd === "run" && t.engine === "ai" ? 'disabled title="请从外部 MCP 客户端运行 AI 任务"' : ""}>${text}</button>`).join("")}
                 </div>
@@ -207,6 +316,7 @@
     if (!autoCurrent(t)) return;
     let ready;
     [tasks, policy, rules, ready] = out;
+    if (!autoLoaded(loaded) || loaded.account !== key) actionErrors = {};
     loaded = { account: key, epoch: t.epoch };
     $("#new-task").disabled = false;
     readiness = Object.fromEntries(ready.map((r) => [r.task_id, r]));
@@ -336,8 +446,11 @@
     $('#task-trigger option[value="internal"]').disabled = !policy.allow_internal;
     $('#task-mode option[value="execute"]').disabled = policy.mode !== "execute";
 
+    $("#task-since").max = localDate(Math.floor(Date.now() / 1000));
     $("#task-editor-error").textContent = "";
     updateFields();
+    // Existing non-default settings (e.g. 外部 AI, custom protection) open the fold.
+    $("#task-more").open = Object.values(editorCustom()).some(Boolean);
     $("#task-editor-dialog").showModal();
   }
 
@@ -439,6 +552,19 @@
     $(selector).addEventListener("change", updateFields),
   );
 
+  $("#task-editor").addEventListener("input", renderEditorSummary);
+  $("#task-editor").addEventListener("change", renderEditorSummary);
+  // The browser's own check (required, min/max) on a field inside the closed
+  // fold: open it first so the field can be focused and its message shown.
+  $("#task-editor").addEventListener(
+    "invalid",
+    (e) => {
+      const fold = e.target.closest?.("details");
+      if (fold && !fold.open) fold.open = true;
+    },
+    true,
+  );
+
   $("#task-rules-all").addEventListener("change", () => {
     if (!editing) return;
     editing.rule_ids = $("#task-rules-all").checked
@@ -449,6 +575,9 @@
 
   $("#task-editor").addEventListener("submit", async (e) => {
     e.preventDefault();
+    // Set once the request is sent: after that, a failure is reported only to
+    // the editor that sent it (still open, same opening) or as a notice.
+    let ticket = null, owner = null, saved = null, name = "";
     try {
       autoRequire(loaded, editing?.account_id);
       const sources = checked();
@@ -462,6 +591,10 @@
         const rule = rules.find((r) => r.id === id);
         if (rule) ruleVersions[id] = editing.rule_versions?.[id] || rule.version;
       }
+
+      const limit = $("#task-limit"), maxBatch = Number(limit.value);
+      if (!Number.isInteger(maxBatch) || maxBatch < 1 || maxBatch > policy.max_batch) fieldError(limit, `每轮最多处理邮件数须为 1–${policy.max_batch} 的整数`);
+      if ($("#task-since").value && $("#task-since").value > localDate(Math.floor(Date.now() / 1000))) fieldError($("#task-since"), "额外历史起点不能晚于今天");
 
       const expectedSec = Number($("#task-expected").value) || 0;
       if (expectedSec < 0 || expectedSec > 604800 || (expectedSec > 0 && expectedSec < 3600)) {
@@ -503,10 +636,13 @@
         },
       };
 
-      const target = editing, ticket = editorTicket(e.currentTarget), owner = { ...autoTicket(), account: target.account_id };
+      const target = editing;
+      ticket = editorTicket(e.currentTarget);
+      owner = { ...autoTicket(), account: target.account_id };
+      name = input.name;
       let after = "";
       await busy($("#save-task"), "保存中…", async () => {
-        const saved = await request(
+        saved = await request(
           target.id ? `/api/tasks/${encodeURIComponent(target.id)}` : "/api/tasks",
           target.id ? "PUT" : "POST",
           input,
@@ -532,7 +668,27 @@
       // busy() restores the old label; an editor now holding a saved task updates it.
       if (after === "edited" && editorState(ticket) !== "closed") $("#save-task").textContent = "保存修改";
     } catch (err) {
-      $("#task-editor-error").textContent = err.message;
+      if (!ticket) {
+        // A check on this page before anything was sent.
+        $("#task-editor-error").textContent = err.message;
+        return;
+      }
+      if (saved) {
+        // The task was saved; only reloading the list afterwards failed.
+        notify(`任务已保存；刷新任务列表未完成：${err.message}`, true);
+        return;
+      }
+      const f = taskFailure(err, "save");
+      const here = autoSameAccount(owner);
+      if (editorState(ticket) === "closed") {
+        // The editor was closed or reopened for something else: leave it alone.
+        notify(here ? `任务「${name}」没有保存：${f.text}` : `「${accountName(owner.account)}」的任务「${name}」没有保存：${f.text}`, true);
+      } else {
+        $("#task-editor-error").textContent = f.text;
+        if (f.more) $("#task-more").open = true;
+      }
+      // Refreshing the list never touches the editor or its draft.
+      if (f.refresh && here) loadAccount().catch(() => {});
     }
   });
 
@@ -563,27 +719,61 @@
         notify(`「${accountName(t.account_id)}」的任务操作已提交；页面已切换到其他邮箱，当前内容未改动`);
         return true;
       };
+      // Sends one enable / pause / run request. On failure the reason stays on
+      // this task's card (only while the page still shows its mailbox) and the
+      // list is refreshed when the reason calls for it; nothing is retried.
+      const attempt = async (action, send) => {
+        try {
+          await send();
+          if (autoSameAccount(owner) && actionErrors[t.id]) {
+            delete actionErrors[t.id];
+            renderTasks();
+          }
+          return true;
+        } catch (err) {
+          const f = taskFailure(err, action);
+          if (!autoSameAccount(owner)) {
+            notify(`「${accountName(t.account_id)}」的任务「${t.name}」没有完成：${f.text}；页面已切换到其他邮箱，当前内容未改动`, true);
+            return false;
+          }
+          actionErrors[t.id] = { text: f.text, area: f.area || "" };
+          notify(f.text, true);
+          if (f.refresh) await loadAccount().catch(() => renderTasks());
+          else renderTasks();
+          return false;
+        }
+      };
       switch (b.dataset.taskCommand) {
         case "edit":
           openEditor(t);
           break;
         case "toggle":
-          await request(`/api/tasks/${encodeURIComponent(t.id)}/enabled`, "POST", {
-            version: t.version,
-            enabled: !t.enabled,
-          });
+          if (
+            !(await attempt(t.enabled ? "pause" : "enable", () =>
+              request(`/api/tasks/${encodeURIComponent(t.id)}/enabled`, "POST", {
+                version: t.version,
+                enabled: !t.enabled,
+              }),
+            ))
+          )
+            break;
           if (moved()) break;
           await loadAccount();
           notify(t.enabled ? "任务已暂停，剩余动作将停止" : "任务已启用；写入仍受管理员授权限制");
           break;
         case "run":
-          await busy(b, "提交中…", () =>
-            request(`/api/tasks/${encodeURIComponent(t.id)}/run`, "POST", {
-              task_id: t.id,
-              version: t.version,
-              run_key: `manual:${id()}`,
-            }),
-          );
+          if (
+            !(await attempt("run", () =>
+              busy(b, "提交中…", () =>
+                request(`/api/tasks/${encodeURIComponent(t.id)}/run`, "POST", {
+                  task_id: t.id,
+                  version: t.version,
+                  run_key: `manual:${id()}`,
+                }),
+              ),
+            ))
+          )
+            break;
           if (moved()) break;
           selectedTask = t.id;
           await loadRuns();

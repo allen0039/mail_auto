@@ -3,7 +3,7 @@
 # afterwards. Never point this at a production instance or account.
 #
 # Usage: scripts/ui-check/run.sh [check.js ...]
-#   Default checks: settings-ui-check.js, model-ui-check.js, ownership-ui-check.js
+#   Default checks: settings, model, ownership and task-editor *-ui-check.js
 #   PUPPETEER    puppeteer or puppeteer-core module path (default: puppeteer-core
 #                resolved by node, e.g. after `npm i puppeteer-core` in NODE_PATH)
 #   CHROME_PATH  browser executable (default: installed Chrome found by puppeteer)
@@ -13,7 +13,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 checks=("$@")
 if [ ${#checks[@]} -eq 0 ]; then
-  checks=("$root"/scripts/ui-check/{settings,model,ownership}-ui-check.js)
+  checks=("$root"/scripts/ui-check/{settings,model,ownership,task-editor}-ui-check.js)
 fi
 pptr="${PUPPETEER:-puppeteer-core}"
 

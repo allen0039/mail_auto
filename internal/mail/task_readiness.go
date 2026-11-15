@@ -17,6 +17,27 @@ type TaskIssue struct {
 	err      error
 }
 
+// TaskError names the specific reason a task save, enable or run was refused.
+// It wraps the existing sentinel (ErrDenied, ErrInput, ErrConflict, ...), so
+// errors.Is and the error text are unchanged; the admin API adds Code, Area
+// and Target to its response so the page can state the reason and next step.
+type TaskError struct {
+	Code   string
+	Area   string
+	Target string
+	Err    error
+}
+
+func (e *TaskError) Error() string { return e.Err.Error() }
+func (e *TaskError) Unwrap() error { return e.Err }
+
+func taskErr(code, area string, err error) error { return &TaskError{Code: code, Area: area, Err: err} }
+
+// asError reports the issue as a TaskError.
+func (i TaskIssue) asError() error {
+	return &TaskError{Code: i.Code, Area: i.Area, Target: i.Target, Err: i.err}
+}
+
 // TaskReadiness is a read-only answer to "will this task run as configured".
 // It never creates runs, changes grants or calls a model; execution still
 // re-validates everything.

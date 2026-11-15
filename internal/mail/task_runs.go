@@ -165,8 +165,11 @@ func (s *Service) RunTaskGuarded(a Access, in TaskRunInput, source string, guard
 	if !a.Allows(t.AccountID, "", "automation") || !slices.Contains([]string{"manual", "external"}, source) {
 		return TaskRun{}, ErrDenied
 	}
-	if in.RunKey == "" || len(in.RunKey) > 128 || strings.ContainsAny(in.RunKey, "\x00\r\n") || t.Version != in.Version {
+	if in.RunKey == "" || len(in.RunKey) > 128 || strings.ContainsAny(in.RunKey, "\x00\r\n") {
 		return TaskRun{}, ErrInput
+	}
+	if t.Version != in.Version {
+		return TaskRun{}, taskErr("task_version_conflict", "task", ErrInput)
 	}
 	var previous string
 	if s.Store.DB.QueryRow("SELECT id FROM task_runs WHERE task_id=? AND run_key=?", t.ID, in.RunKey).Scan(&previous) == nil {
@@ -205,6 +208,9 @@ func (s *Service) createTaskRunGuarded(a Access, t Task, key, source string, sch
 		}
 	}
 	rules, e := s.taskRules(ruleAccess, t)
+	if errors.Is(e, ErrConflict) {
+		return TaskRun{}, taskErr("rules_changed", "rules", e)
+	}
 	if e != nil {
 		return TaskRun{}, e
 	}
@@ -226,7 +232,7 @@ func (s *Service) createTaskRunGuarded(a Access, t Task, key, source string, sch
 		return r, e
 	}
 	if version != t.Version {
-		return r, ErrConflict
+		return r, taskErr("task_version_conflict", "task", ErrConflict)
 	}
 	if e = runGuard(tx, guard); e != nil {
 		return r, e

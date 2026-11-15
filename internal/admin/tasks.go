@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"errors"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/network"
 	"net/http"
 	"strings"
 )
@@ -23,6 +25,25 @@ func (s *Server) tasksAPI(w http.ResponseWriter, r *http.Request) bool {
 			writeJSON(w, 200, v)
 		}
 	}
+	// Saving, enabling and running a task also report a stable code (and the
+	// setting area and folder or rule when the service knows them).
+	respondTask := func(v any, e error) {
+		if e == nil {
+			writeJSON(w, 200, v)
+			return
+		}
+		if errors.Is(e, network.ErrConfig) || errors.Is(e, network.ErrConflict) || errors.Is(e, network.ErrReferenced) {
+			networkError(w, e)
+			return
+		}
+		status, message, code := operationStatus(e)
+		body := map[string]string{"error": message, "code": code}
+		var te *mail.TaskError
+		if errors.As(e, &te) {
+			body["code"], body["area"], body["target"] = te.Code, te.Area, te.Target
+		}
+		writeJSON(w, status, body)
+	}
 	switch {
 	case path == "/api/tasks" && r.Method == "GET":
 		out, e := s.Mail.Tasks(a, r.URL.Query().Get("account_id"))
@@ -34,7 +55,7 @@ func (s *Server) tasksAPI(w http.ResponseWriter, r *http.Request) bool {
 		var in mail.Task
 		if decode(w, r, &in) {
 			out, e := s.Mail.SaveTask(a, in)
-			respond(out, e)
+			respondTask(out, e)
 		}
 	case strings.HasPrefix(path, "/api/tasks/"):
 		parts := strings.Split(strings.TrimPrefix(path, "/api/tasks/"), "/")
@@ -47,7 +68,7 @@ func (s *Server) tasksAPI(w http.ResponseWriter, r *http.Request) bool {
 			if decode(w, r, &in) {
 				in.ID = id
 				out, e := s.Mail.SaveTask(a, in)
-				respond(out, e)
+				respondTask(out, e)
 			}
 		} else if len(parts) == 2 && parts[1] == "preview" && r.Method == "POST" {
 			var in struct {
@@ -65,14 +86,14 @@ func (s *Server) tasksAPI(w http.ResponseWriter, r *http.Request) bool {
 			}
 			if decode(w, r, &in) {
 				out, e := s.Mail.SetTaskEnabled(a, id, in.Version, in.Enabled)
-				respond(out, e)
+				respondTask(out, e)
 			}
 		} else if len(parts) == 2 && parts[1] == "run" && r.Method == "POST" {
 			var in mail.TaskRunInput
 			if decode(w, r, &in) {
 				in.TaskID = id
 				out, e := s.Mail.RunTask(a, in, "manual")
-				respond(out, e)
+				respondTask(out, e)
 			}
 		} else if len(parts) == 2 && parts[1] == "runs" && r.Method == "GET" {
 			out, e := s.Mail.TaskRuns(a, id)

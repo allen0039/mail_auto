@@ -287,8 +287,10 @@ func TestReadinessChecksEveryGrantSourceLikeRun(t *testing.T) {
 	// The run's own refusal comes from the same admission function.
 	acc, _ := service.Account(account.ID)
 	p, _ := service.loadAutomationPolicy(account.ID)
-	if issues := grantSourceIssues(admin, acc, p); len(issues) != 1 || !errors.Is(issues[0].err, runErr) {
-		t.Fatalf("shared admission = %+v, run = %v", issues, runErr)
+	// The run reports that issue itself: same sentinel, code and folder.
+	var te *TaskError
+	if issues := grantSourceIssues(admin, acc, p); len(issues) != 1 || !errors.Is(runErr, issues[0].err) || !errors.As(runErr, &te) || te.Code != issues[0].Code || te.Target != issues[0].Target {
+		t.Fatalf("shared admission = %+v, run = %v (%+v)", issues, runErr, te)
 	}
 
 	setFolders(nil)

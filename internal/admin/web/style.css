@@ -2354,3 +2354,28 @@ dialog::backdrop {
   outline: 2px solid var(--primary-border);
   outline-offset: 2px;
 }
+/* Task editor: one-line settings summary and the collapsible “更多设置”. */
+.task-summary {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.task-summary .is-custom {
+  font-weight: 600;
+  color: var(--warning-text);
+}
+.task-more {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.task-more > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.task-mode-write {
+  color: var(--warning-text);
+}
+.task-action-error {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}

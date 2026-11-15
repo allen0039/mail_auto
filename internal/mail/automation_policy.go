@@ -243,15 +243,22 @@ func (s *Service) authorizedAutomation(a Access, id string) (Access, AutomationP
 	if e != nil {
 		return a, p, e
 	}
-	if !p.Enabled || p.AdminVersion != a.Version || p.Expires <= time.Now().Unix() {
-		return a, p, ErrDenied
+	// Same codes and order as taskPolicyIssues; all remain ErrDenied.
+	if !p.Enabled {
+		return a, p, taskErr("policy_disabled", "policy", ErrDenied)
+	}
+	if p.Expires <= time.Now().Unix() {
+		return a, p, taskErr("policy_expired", "policy", ErrDenied)
+	}
+	if p.AdminVersion != a.Version {
+		return a, p, taskErr("policy_admin_changed", "policy", ErrDenied)
 	}
 	account, e := s.Account(id)
 	if e != nil {
 		return a, p, e
 	}
 	if issues := grantSourceIssues(a, account, p); len(issues) > 0 {
-		return a, p, issues[0].err
+		return a, p, issues[0].asError()
 	}
 	a.automation = true
 	return a, p, nil

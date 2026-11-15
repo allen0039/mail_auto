@@ -109,7 +109,7 @@
         <a class="wordmark" href="/">
           <span class="wordmark-badge" aria-hidden="true">✉</span>
           <span>MAIL AUTO</span>
-          <span class="badge badge-subtle app-version-label">v0.8.5</span>
+          <span class="badge badge-subtle app-version-label">v0.8.6</span>
         </a>
         <div class="story-content">
           <span class="eyebrow">YOUR MAIL, IN YOUR HANDS</span>
@@ -121,7 +121,7 @@
           <div class="postmark" aria-hidden="true">
             <span>PRIVATE &amp; SELF-HOSTED</span>
             <strong>自托管工作台</strong>
-            <span class="app-version-label">v0.8.5</span>
+            <span class="app-version-label">v0.8.6</span>
           </div>
         </div>
         <p class="story-foot">本地保存设置 · TLS 连接邮箱 · 凭据加密存储 · 保持原邮箱真实状态</p>
@@ -204,7 +204,7 @@
             <span>MAIL AUTO</span>
           </a>
           <div class="workspace-label">
-            个人邮件工作台 <span class="app-version-label">v0.8.5</span>
+            个人邮件工作台 <span class="app-version-label">v0.8.6</span>
           </div>
         </div>
 
@@ -1140,7 +1140,7 @@
 
             <article class="panel system-card">
               <span class="eyebrow">CURRENT VERSION</span>
-              <h2>Mail Auto <span class="app-version-label">v0.8.5</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.8.6</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1423,7 +1423,7 @@
         </fieldset>
 
         <fieldset class="rules-fieldset">
-          <legend class="rules-legend">触发与判断</legend>
+          <legend class="rules-legend">触发与执行</legend>
           <div class="rules-grid">
             <label>
               触发方式
@@ -1434,17 +1434,23 @@
               </select>
             </label>
             <label>
-              判断方式
-              <select id="task-engine">
-                <option value="rules">固定规则</option>
-                <option value="ai">外部 AI 判断</option>
+              运行模式
+              <select id="task-mode">
+                <option value="observe">只观察（记录建议，不移动）</option>
+                <option value="execute">真实执行（整理原邮箱）</option>
               </select>
             </label>
           </div>
+          <p id="task-mode-note" class="small margin-t-8"></p>
           <p id="task-trigger-note" class="muted small margin-t-8"></p>
           <p id="task-ai-warning" class="task-warning small margin-t-8" hidden>
             提示：当前源目录内有 AI 规则，但执行引擎选择为固定规则，这些邮件会被跳过。
           </p>
+          <label id="task-expected-label" class="margin-t-8" hidden>
+            外部客户端调用间隔（秒）
+            <input id="task-expected" type="number" min="0" max="604800" step="1" placeholder="0 表示不监测" />
+            <small id="task-expected-note" class="muted">0 表示不监测；若监测须在 3600–604800 秒（1小时至7天）之间。</small>
+          </label>
         </fieldset>
 
         <fieldset id="task-schedule-fields" hidden class="rules-fieldset">
@@ -1473,21 +1479,15 @@
           <p id="task-new-mail-note" class="muted small margin-t-8" hidden>自动同步发现新邮件后触发，连续到达会合并执行。</p>
         </fieldset>
 
-        <!-- F09 Fix: external call interval hint -->
-        <label id="task-expected-label" hidden>
-          外部客户端调用间隔（秒）
-          <input id="task-expected" type="number" min="0" max="604800" step="1" placeholder="0 表示不监测" />
-          <small id="task-expected-note" class="muted">0 表示不监测；若监测须在 3600–604800 秒（1小时至7天）之间。</small>
-        </label>
-
-        <fieldset class="rules-fieldset">
-          <legend class="rules-legend">执行与保护</legend>
-          <div class="rules-grid">
+        <p id="task-summary" class="task-summary small" role="status"></p>
+        <details id="task-more" class="task-more">
+          <summary>更多设置 <span id="task-more-note" class="muted small"></span></summary>
+          <div class="rules-grid margin-t-10">
             <label>
-              运行模式
-              <select id="task-mode">
-                <option value="observe">只观察（记录建议，不移动）</option>
-                <option value="execute">真实执行（整理原邮箱）</option>
+              判断方式
+              <select id="task-engine">
+                <option value="rules">固定规则</option>
+                <option value="ai">外部 AI 判断</option>
               </select>
             </label>
             <label>每轮最多处理邮件数<input id="task-limit" type="number" min="1" max="50" value="20" required /></label>
@@ -1511,7 +1511,7 @@
             <label class="checkbox-label"><input id="task-protect-unread" type="checkbox" checked />保留未读邮件</label>
             <label class="checkbox-label"><input id="task-protect-flagged" type="checkbox" checked />保留星标邮件</label>
           </div>
-        </fieldset>
+        </details>
 
         <p id="task-editor-error" class="form-error" role="alert"></p>
         <footer class="dialog-actions">

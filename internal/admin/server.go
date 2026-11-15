@@ -434,25 +434,34 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 func operationError(w http.ResponseWriter, e error) {
 	if errors.Is(e, network.ErrConfig) || errors.Is(e, network.ErrConflict) || errors.Is(e, network.ErrReferenced) {
 		networkError(w, e)
-	} else if errors.Is(e, mail.ErrDailyLimit) {
-		fail(w, 429, "已达到今天的自动整理上限，请明天继续或由管理员调整额度")
-	} else if errors.Is(e, mail.ErrInput) || errors.Is(e, mail.ErrLabelInput) {
-		fail(w, 400, "参数无效，请检查邮件和原邮箱目的文件夹")
-	} else if errors.Is(e, mail.ErrDenied) {
-		fail(w, 403, "当前操作未授权，或写入已停用")
-	} else if errors.Is(e, mail.ErrConflict) {
-		fail(w, 409, "邮件状态或计划已变化，请重新预览")
-	} else if errors.Is(e, mail.ErrCapability) {
-		fail(w, 422, "邮箱能力或归档/回收站映射不满足受控移动要求")
-	} else if errors.Is(e, mail.ErrUncertain) {
-		fail(w, 409, "原邮箱操作结果尚未确认，请先刷新原邮箱文件夹或核验任务；不要重复执行")
-	} else if errors.Is(e, sql.ErrNoRows) {
-		fail(w, 404, "记录不存在，请重新同步")
-	} else if errors.Is(e, mail.ErrBusy) {
-		fail(w, 409, e.Error())
-	} else {
-		fail(w, 422, "操作未完成。请检查邮箱授权码、IMAP 服务、允许的文件夹、网络和凭据密钥，然后重试；部分文件夹可能已同步")
+		return
 	}
+	status, message, _ := operationStatus(e)
+	fail(w, status, message)
+}
+
+// operationStatus maps a service error to its HTTP status, message and the
+// sentinel's stable code ("unknown" when none matches).
+func operationStatus(e error) (int, string, string) {
+	switch {
+	case errors.Is(e, mail.ErrDailyLimit):
+		return 429, "已达到今天的自动整理上限，请明天继续或由管理员调整额度", "daily_limit_reached"
+	case errors.Is(e, mail.ErrInput) || errors.Is(e, mail.ErrLabelInput):
+		return 400, "参数无效，请检查邮件和原邮箱目的文件夹", "invalid_input"
+	case errors.Is(e, mail.ErrDenied):
+		return 403, "当前操作未授权，或写入已停用", "permission_denied"
+	case errors.Is(e, mail.ErrConflict):
+		return 409, "邮件状态或计划已变化，请重新预览", "state_conflict"
+	case errors.Is(e, mail.ErrCapability):
+		return 422, "邮箱能力或归档/回收站映射不满足受控移动要求", "capability_unavailable"
+	case errors.Is(e, mail.ErrUncertain):
+		return 409, "原邮箱操作结果尚未确认，请先刷新原邮箱文件夹或核验任务；不要重复执行", "remote_state_unknown"
+	case errors.Is(e, sql.ErrNoRows):
+		return 404, "记录不存在，请重新同步", "not_found"
+	case errors.Is(e, mail.ErrBusy):
+		return 409, e.Error(), "busy"
+	}
+	return 422, "操作未完成。请检查邮箱授权码、IMAP 服务、允许的文件夹、网络和凭据密钥，然后重试；部分文件夹可能已同步", "unknown"
 }
 func (s *Server) account(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/accounts/"), "/")

@@ -239,14 +239,21 @@ async function api(path, options = {}) {
   try {
     data = await response.json();
   } catch {
-    throw new Error("服务响应异常，请稍后重试");
+    throw Object.assign(new Error("服务响应异常，请稍后重试"), { status: response.status, code: "" });
   }
   if (!response.ok) {
     if (response.status === 401 && path !== "/api/login") {
       state.session = null;
       await checkSession();
     }
-    throw new Error(data.error || "请求未完成，请重试");
+    // status and the optional stable code / area / target let a caller explain
+    // the failure (see taskFailure in tasks.js); message stays the server's.
+    throw Object.assign(new Error(data.error || "请求未完成，请重试"), {
+      status: response.status,
+      code: typeof data.code === "string" ? data.code : "",
+      area: typeof data.area === "string" ? data.area : "",
+      target: typeof data.target === "string" ? data.target : "",
+    });
   }
   return data;
 }
