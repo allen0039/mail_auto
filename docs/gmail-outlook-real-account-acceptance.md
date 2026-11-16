@@ -1,6 +1,6 @@
 # 个人 Gmail / Outlook 真实账号验收准备与记录
 
-2026-11-16。原始返工候选 `574b04742ef4b783cb7333de97d2f282ea722bcd` 的四项代码缺陷已独立复验，见 [复验报告](gmail-outlook-independent-reacceptance.md)。最新源码候选为 **`8f8ee807eb457f065be912d4052096a774901a5a`，0.10.3/schema15**；材料提交为 `07f9b9e241748aa2d20615d7ac356903228b71fd`。历史 0.10.2 结果保留在第 8 节早期记录，最新真实状态以第 8.5 节为准。
+2026-11-16。原始返工候选 `574b04742ef4b783cb7333de97d2f282ea722bcd` 的四项代码缺陷已独立复验，见 [复验报告](gmail-outlook-independent-reacceptance.md)。最新源码候选为 **`8f8ee807eb457f065be912d4052096a774901a5a`，0.10.3/schema15**；截至本次修正前的材料提交为 `0754de22b2f7bb0c90cd1475a8d8cbbe174c1395`。历史 0.10.2 结果保留在第 8 节早期记录，最新真实状态以第 8.5 节为准。
 
 晚间最新结果以第 8.5 节为准：Gmail OAuth/IMAP/刷新/QA 同步和标记已通过，两个未知分类写入保持 `needs_verification` 且未重放；Outlook 已补专用 QA 操作，但恢复后的网页对照受官方 TrustedTypePolicy 错误阻塞。**真实账号整体验收仍未完成，不发布部署。** 以下早期“未准备”“写入0”等记录保留其当时时点，不代表最新结果。
 
