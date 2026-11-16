@@ -2,7 +2,7 @@
 
 交接日期：2026-11-16。目标：0.10.0 / schema 15。
 
-**等待主代理独立验收；尚未发布部署。** 本报告是实施协作者自测交接，不是独立验收结论。模拟测试完成，真实账号验收待完成；当前不满足生产发布验收条件。
+**等待主代理独立复验；尚未发布部署。** 初次候选已被独立验收判为不通过；第 1–11 节保留初次实施与自测记录，不能作为返工候选的最终测试证据。本轮 GO-IA-01～04 修复、新候选和新证据以第 12 节为准；独立验收报告及原失败证据未修改。模拟测试完成，真实账号验收待完成；当前不满足生产发布验收条件。
 
 ## 1. 基线与候选
 
@@ -71,6 +71,7 @@
 | 标记已读、未读、星标 | 仅 Seen / Flagged，跨已知视图传播；模拟通过 | 原有路径，模拟通过 | 未验证 | 未验证 |
 | 未知写入核验 | 稳定 ID 只读核验；不重放，不自动补齐未完成标签修改 | 原有受控移动核验；未知 STORE 仅回读 | 未验证 | 未验证 |
 | 人工保留两份 | 拒绝，多个标签视图不证明独立副本 | 保留既有全文核验和持久保护 | 拒绝 | 未验证 |
+| 移动/归档撤销（返工后的限制） | 拒绝：缺少操作前完整成员证据，反向 move 会有移除原有标签风险 | 保留原有受控反向计划 | 同 Gmail，拒绝 | 未验证 |
 | 发信 / 永久删除 / 全局 EXPUNGE | 不提供 | 不提供 | 不提供 | 不提供 |
 
 共享邮箱、代理访问、服务账号、应用级全租户访问、主权云、本地 Exchange 均不支持。Microsoft Graph token 不接受为 IMAP 权限。自定义邮箱域名须手选 Google / Microsoft，不按域名生成主机。
@@ -217,3 +218,85 @@ govulncheck 的可达符号结果为 0；同时报告 2 个导入包漏洞、1 �
 - `docker buildx rm mail-auto-oauth-validation`已退出0，移除仅供本任务使用的构建器，证据`validation/builder-cleanup.log`；未清理任何生产/其他项目资源。保留本地OCI归档和脱敏证据供主代理验收，均排除Git/镜像；当前`bin/mail-auto`为本地0.10.0构建。没有调用REA、启动REA MCP/CLI、委派子代理或访问Oracle1。
 
 交接顺序保持：固定代码候选 → 本报告 → 主代理独立审查/重跑/真实证据核验 → 修复问题 → 主代理复验 → 发布部署。实施协作者没有自行宣布独立验收通过。**等待主代理独立验收；尚未发布部署。**
+
+## 12. GO-IA-01～04 返工与复验交接（2026-11-16）
+
+本节为本轮最新交接。独立报告 `docs/gmail-outlook-independent-acceptance.md` 的“不通过”结论保持原样；本节仅记录实施协作者修复和自测，不宣告独立复验通过。
+
+### 12.1 基线、候选及范围
+
+返工基线 HEAD 为 `ace3a1055bdf0765052ab5bfdbded04bf60e79ed`，初始已跟踪内容无差异。保留原有未跟踪 `.planning/`、`AGENTS.md`、实施方案、协作者提示和独立验收报告。版本继续使用尚未发布的 `0.10.0`，schema 仍为 `15`：本次使用已有冻结 JSON 保存的稳定身份并为新摘要增加明确前缀，无新表/列/DDL，不占用或改写迁移，不创建或覆盖任何发布标签。
+
+新代码候选为 **`574b04742ef4b783cb7333de97d2f282ea722bcd`**，tree 为 `363dcea7e674a4adab30769bc5b85913fba72dcf`，共 18 个文件（625 行增加、21 行删除）。候选暂存逐文件哈希/路径/凭据模式检查退出 0，凭据命中 0；没有纳入原未跟踪资料、`.planning/`、密钥、邮件数据或私有部署配置。后续交接文档提交仅更新本报告及新增两份返工测试/镜像 JSON，不改候选源码。工作流仍只有检查及 `push: false` 镜像构建；本轮仅本地提交，不推送，不发布标签/镜像，不访问或部署 Oracle1，不清理生产资源。
+
+18 个文件逐项列于 `docs/gmail-outlook-rework-test-results.json` 的 `source_candidate.staged_files`；其中实现文件见下表，另外包括 `CHANGELOG.md`、`docs/gmail-outlook-setup.md`、正式回归/夹具、默认 UI 断言、MCP 清单断言及 `scripts/gmail-outlook-rework-verify.py`。本轮未修改 go.mod、依赖、认证 scope、IMAP 协议写入、任务批量或生产保护设置。
+
+### 12.2 四项修复与正式回归
+
+| 问题 | 修复及源码 | 正式回归 |
+| --- | --- | --- |
+| GO-IA-01 / P1 | `gmail.go` 的 `logicalPending` 从 operation_items → operations → 冻结 operation_plans 按位置读取账号和字符串 Gmail ID；`logicalClaims` 从 automation_claims → 冻结 automation_batches 读取同一身份。`automation.go` 的可领取检查、事务内领取复查、`operations.go` 的手动排队均复用持久身份，不依赖当前 messages 行。运行领取表本来已持久保存 Gmail ID，继续保留。 | `TestGmailPersistentPendingFence` 覆盖 queued/running/needs_verification、源行删除、别名重新索引及 UIDVALIDITY 改变、第二 SQLite 连接/新 Service、两个实例并发入队、未结案保持 busy 和结案释放；`TestGmailPersistentAutomationClaim` 覆盖领取批次在源行消失后的手动/自动冲突和过期释放；`TestGmailClaimAIAfterSourceRemoved` 覆盖真实 ClaimAI 入口。 |
+| GO-IA-02 / P1 | `operations_recovery.go/UndoPlan` 在生成任何补偿计划前统一拒绝 Gmail 移动/归档撤销，返回固定 `gmail_undo_unsupported` 及中文行动说明。普通移动、归档和标记能力未扩大。`folder_settings.go`、`automation_policy.go`、MCP mail_undo 描述、Agent 固定提示、UI 授权说明及操作列表说明均展示边界。 | `TestGmailMoveUndoFailsClosed` 覆盖目标原有/新增、用户后续改标签、缺少/过期证据、未知部分写入及归档，断言不生成或保存反向计划；同时核对规则/任务能力声明。MCP 工具清单测试核对拒绝说明；默认 OAuth UI 测试在三种宽度断言撤销限制。 |
+| GO-IA-03 / P2 | `operations.go` 新摘要使用 `v2:`；`recoveryIdentityMatches` 为旧七字段和 schema14 五字段提供受限只读兼容。旧计划不能通过 ExecutePlan 入队；已持久排队操作启动时配置校验安全失败。`finishRecoveredMove` 明确拒绝无版本摘要的清理写入。只读核验前后检查当前完整快照，原计划不自动改写。 | `TestSchema14PersistedRecoveryUpgrade` 从原 0.9.2 实际导出的八张相关表布局及旧 JSON/摘要创建 schema14 库，再经正常启动升级、重复打开；覆盖未改变、邮箱身份/文件夹/网络/OAuth/管理员授权变化、只读成功、拒绝清理及旧排队拒绝。`TestUnversionedCandidateRecoveryIsReadOnly` 覆盖首轮 schema15 七字段候选；`TestLegacyManualKeepReadOnlyCompatibility` 覆盖旧直连人工结案及网络变化拒绝。 |
+| GO-IA-04 / P2 | `manual_resolution.go/ResolveManualKeep` 在远端读取前保存完整当前账号；确认事务调用 `accountNetworkIn` 补全 OAuth、账号网络策略及路由，再比对完整 v2 快照及原冻结摘要。网络读取期间没有 SQLite 事务。 | `TestManualKeepProductionNetworkSnapshot` 使用生产 `network.New(Store,Vault)`，直连/代理各覆盖未变、身份变化、预览后网络变化、确认读取期间网络变化；未变结案成功，变更拒绝且无结案落库、无额外远端写入。 |
+
+正式测试位于 `internal/mail/acceptance_regression_test.go`。schema14 静态夹具和来源说明位于 `internal/mail/testdata/schema14-recovery.sql`、`schema14-recovery.md`：由原基线 `organizerFixture`/不确定移动/冻结计划真实导出，保留相关表精确旧布局和五字段摘要；仅合成数据，归一化 ID、延长测试有效期、移除密文，测试时创建临时 Vault 密文。没有从新版结构假算一个旧摘要来替代迁移夹具。无关空表由正常启动补建；这不是生产数据库升级证据。
+
+### 12.3 历史摘要与升级处理策略
+
+| 持久摘要 | 允许的核验/本地结案 | 新写入/恢复清理 |
+| --- | --- | --- |
+| schema14 无版本五字段 | 必须精确匹配 provider/username/host/port/folders，必须仍是旧密码服务商、无 OAuth，当前有效路由为空（无 Manager 的旧夹具）或 direct；生产 Manager 为 direct。仅只读核验及符合完整原文证据的本地人工保留结案；读取前后完整快照再次相同。 | 一律拒绝；旧预览须重建，旧排队安全失败，待核验记录保留。 |
+| 首轮候选无版本七字段 | 必须精确匹配全部七字段（包括 NetworkRevision/OAuth）；只读核验和本地结案，确认读取前后比较完整 v2 快照。 | 一律拒绝，返回可行动提示。 |
+| 新 `v2:` 摘要 | 绑定原五字段、有效路由、OAuth 代际/配置和账号网络策略，完整比较。 | 沿用现有权限/任务/设置/保护/未知结果控制；Gmail 恢复标签写入及移动撤销继续拒绝。 |
+
+五字段历史摘要没有记录过去的网络证据，不能声称已证明升级前出口不变。对当前代理账号不猜测、不自动切直连，不无证据批量更新摘要，保持待核验并提示人工核对；这是明确的保守兼容限制。只读确认不需要继续原清理授权，任何真正清理仍要求 v2 以及全部既有权限/任务/规则/设置/取消/保护检查，未跳过这些检查。人工结案只落本地完整证据和保护，不清理源副本、不伪造映射。
+
+schema15 布局未改变，但旧未发布候选二进制不了解新摘要及新保护，不应与本候选混用 worker。生产升级仍须备份数据库、配套 master.key、外部 secret 和私有配置，在隔离副本演练；回退原 schema14 仍须恢复配套数据库/主密钥/旧镜像，不能手工降 user_version。远端已执行动作不会随数据库回退撤销，启用任务前须核对未决操作。
+
+### 12.4 新测试证据与开发失败
+
+最终源码全包 race 于 12:37:18（+08:00）开始，291.463 秒完成，退出 0，**558 叶子通过 / 0 失败 / 0 跳过**，含父级 618 个结果事件。8 个新增正式测试包含 31 个叶子场景，均进入实际默认 `go test ./...`。其他门禁使用最终源码，执行于 12:36–12:40；原四反例在最终源码上再次复跑，退出 0、4/0/0。
+
+新入口 `MAIL_AUTO_TEST_BUILDER=mail-auto-rework-validation python3 scripts/gmail-outlook-rework-verify.py` 将结果写入独立 `docs/gmail-outlook-rework-test-results.json` 与 `.planning/gmail-outlook-rework/validation/`，不覆盖初次实施或独立验收产物。先执行 `docker buildx create --driver docker-container --name mail-auto-rework-validation --bootstrap`（本轮退出 0），镜像完成后仅移除本次 builder（退出 0）。首次包装入口实际退出 **1**：包含当时未修正的 ClaimAI 夹具失败以及原有全目录格式异常。最终 race 单独重跑退出 0，已替换 JSON 当前 race 记录，首次失败保留在 `prior_attempts` 与原日志；没有把包装入口改记为 0。
+
+下表路径均相对于 `.planning/gmail-outlook-rework/`。完整命令数组、起始时间、耗时、退出码、版本、计数和补充命令见 `docs/gmail-outlook-rework-test-results.json`；非测试检查不虚构通过数量。
+
+| 实际命令 | 退出码 | 通过 / 失败 / 跳过或结论 | 新脱敏证据 |
+| --- | --- | --- | --- |
+| `go test -race -count=1 -json ./...` | 0 | 558 / 0 / 0 叶子测试 | `final-race.jsonl`、`final-race-result.json` |
+| `go test -overlay=.planning/gmail-outlook-independent-acceptance/overlay.json -race -count=1 -json ./internal/mail -run '^TestIndependent'` | 0 | 4 / 0 / 0，原断言原样执行 | `independent-final.jsonl`、`independent-final-result.json` |
+| `go vet ./...` | 0 | 无诊断 | `validation/vet-20261116-123647.log` |
+| `gofmt -l .` | 0 | 列出 3 个原有临时文件，格式断言仍非绿 | `validation/format-20261116-123649.log` |
+| `gofmt -l cmd internal scripts` | 0 | 未格式化源码 0 | `validation/source-format-20261116-123649.log` |
+| `git write-tree` → `git archive` 候选 tree → 干净导出内 `gofmt -l .` / 空输出断言 | 均 0 | 1 / 0 / 0，候选全目录未格式化 0；临时导出已移除 | `clean-candidate-format.json` |
+| `go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...` | 0 | 无诊断 | `validation/staticcheck-20261116-123649.log` |
+| `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...` | 0 | 可达符号漏洞 0，另有未调用的 2 个包级 / 1 个模块级结果 | `validation/govulncheck-20261116-123653.log` |
+| `python3 -m unittest discover -s scripts/release-verify -v` | 0 | 46 / 0 / 0 | `validation/release-fixtures-20261116-123700.log` |
+| `docker compose config --quiet` | 0 | 配置通过 | `validation/compose-20261116-123703.log` |
+| `make build`；`bin/mail-auto version` | 均 0 | 本机构建完成，输出 0.10.0 | `validation/build-20261116-123703.log`、`extra-checks.json` |
+| `scripts/ui-check/run.sh` | 0 | 1017 / 0 / 0 断言；18 个脚本/宽度组合；页面错误 0；OAuth 32×3=96 | `validation/ui-20261116-123705.log` |
+| `PUPPETEER=puppeteer-core node --test --test-reporter=tap scripts/ui-check/gate-test.cjs` | 0 | 27 / 0 / 0 | `validation/ui-gate-20261116-123807.log` |
+| `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o .planning/gmail-outlook-rework/mail-auto-amd64 ./cmd/mail-auto`；随后 `file` | 均 0 | 静态 Linux x86-64 ELF | `extra-checks.json` |
+| `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o .planning/gmail-outlook-rework/mail-auto-arm64 ./cmd/mail-auto`；随后 `file` | 均 0 | 静态 Linux ARM aarch64 ELF | `extra-checks.json` |
+| `docker buildx build --builder mail-auto-rework-validation --platform linux/amd64,linux/arm64 --output type=oci,dest=.planning/gmail-outlook-rework/candidate-image.tar .` | 0 | 两架构本地 OCI 构建完成，无推送，无发布标签 | `validation/oci-20261116-123912.log` |
+| Python tarfile / SHA-256 检查 OCI | 0 | 2 平台通过 / 0 失败 / 0 跳过；30 个 blob 摘要一致，manifest/config 平台匹配 | `docs/gmail-outlook-rework-image-build.json`（仓库相对路径） |
+| `git diff --check`；`git diff --cached --check`；`git diff --check ace3a10..574b047` | 均 0 | 无空白错误，暂存 18 文件已审查 | `validation/diff-20261116-123912.log`、`candidate-precommit-scan.json`、测试 JSON 的 `candidate_diff_check` |
+
+工具版本：Go 1.27.4 darwin/arm64；staticcheck 2026.2.2 (0.8.2)；govulncheck 1.9.0（库更新时间 2026-11-11 02:51:11 UTC）；Node 24.22.3；Python 3.9.6；Docker 29.8.2；Buildx 0.37.2；Compose 5.5.0；Chrome 157.0.8103.51；puppeteer-core 25.16.0、@puppeteer/browsers 3.2.6；Git 2.39.5 Apple Git-154。版本命令实际均退出 0。本轮没有运行远端 CI，未声称使用 CI 固定 Chrome156/Node24.14；本地默认门禁确实运行三宽度 Chrome157。
+
+全目录格式异常仍是第 7 节列出的三个既有 `.planning/` / `.claude/worktrees/` 文件，未修改或删除它们以获得绿色。干净候选 tree 格式断言单独通过。govulncheck 的符号结果为 0 不等于所有依赖无漏洞。
+
+本地 OCI 归档 SHA-256 为 `0bb01480587e3c5ca44ac7f8320971b6c95a277daad36e638463d98479efed3d`；amd64 manifest 为 `sha256:edc3882645e2461caab1536081a6cf1df988d96ae6d1730868b02501008a4c32`，arm64 manifest 为 `sha256:838dfe176cca0513ac19c1e0f2651328e074f51153bfc250639fa73528874990`。这些仅为本次本地构建证据，不是 registry/生产摘要；新 JSON 和 `.planning/` 归档均未覆盖旧产物。
+
+已保留的开发记录：首批 28 叶子回归 race 通过；增加正式 ClaimAI 后，夹具先因目标与来源重叠被规则校验拒绝，之后因默认历史起点保护合成的未知收信时间而没有领取，均修正夹具到独立 QA 目标和明确 Since=0。没有修改生产保护、减少断言或跳过测试；首轮全量失败结果保留。原四个 independent overlay 反例在本轮已原样复跑，退出 0，4 通过 / 0 失败 / 0 跳过；最终证据另列。
+
+具体失败计数：`targeted-2.jsonl` 为 31 通过 / 1 失败 / 0 跳过、退出 1；首轮 `validation/race-20261116-123155.log` 为 557 / 1 / 0、退出 1，均只有新增 ClaimAI 夹具失败。修正后该单项 race 为 1 / 0 / 0、退出 0，随后最终完整 race 为 558 / 0 / 0、退出 0。未发生本轮外部构建/网络失败；既有异常仅全目录格式诊断。独立原报告、probe 源码、overlay 及 `probes.log` 均保留，哈希索引见测试 JSON 的 `independent_original_hashes`；本轮新通过输出保存在新目录，未覆盖旧失败日志。
+
+### 12.5 未完成项及外部步骤
+
+G-PERSONAL-01、MS-PERSONAL-01 均无可用 OAuth 应用、本人官方登录及明确测试邮件；本轮真实写入为 0，没有真实 run/operation ID。Gmail / Outlook 仍是“模拟测试完成，真实账号验收待完成”；Workspace / Microsoft 365 仍为未验证兼容扩展。所需最少用户步骤与第 9 节一致：固定私有 HTTPS 实例 → 受保护设置填写应用配置及精确回调 → 本人在官方页同意 → 只对专用标签/文件夹和选定测试邮件完成真实 refresh、同步、重启、重授权、规则和网页状态对照。不要在聊天中提供密码、token 或 client secret。
+
+当前 Gmail 移动/归档撤销为明确拒绝，若后续希望开放，须另行保存操作前完整成员关系、验证并发及用户后续修改、处理部分写入，再用专用真实测试数据验收。不得把反向 move 恢复为通用撤销。历史代理账号无网络证据的只读恢复限制也保留为需人工核对项。
+
+**等待主代理独立复验；尚未发布部署。** 主代理应独立审查新候选差异，原样重跑四反例及正式迁移/并发/人工结案回归，核对新测试与真实账号证据；本协作者没有替主代理宣布通过。

@@ -1,0 +1,793 @@
+{
+  "status": "final_source_checks_passed; existing workspace format exceptions remain; independent reacceptance pending",
+  "real_accounts": "pending",
+  "timezone": "Asia/Shanghai",
+  "commands": [
+    {
+      "name": "race",
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./..."
+      ],
+      "started_at": "2026-11-16T12:37:18.051834+08:00",
+      "elapsed_seconds": 291.463,
+      "exit_code": 0,
+      "counts": {
+        "pass": 558,
+        "fail": 0,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 618
+      },
+      "raw_log": ".planning/gmail-outlook-rework/final-race.jsonl"
+    },
+    {
+      "name": "vet",
+      "command": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "started_at": "2026-11-16T12:36:47.974761+08:00",
+      "elapsed_seconds": 1.448,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/vet-20261116-123647.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "format",
+      "command": [
+        "gofmt",
+        "-l",
+        "."
+      ],
+      "started_at": "2026-11-16T12:36:49.422855+08:00",
+      "elapsed_seconds": 0.285,
+      "exit_code": 0,
+      "counts": {
+        "unformatted_files": 3
+      },
+      "raw_log": ".planning/gmail-outlook-rework/validation/format-20261116-123649.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "source-format",
+      "command": [
+        "gofmt",
+        "-l",
+        "cmd",
+        "internal",
+        "scripts"
+      ],
+      "started_at": "2026-11-16T12:36:49.708788+08:00",
+      "elapsed_seconds": 0.038,
+      "exit_code": 0,
+      "counts": {
+        "unformatted_files": 0
+      },
+      "raw_log": ".planning/gmail-outlook-rework/validation/source-format-20261116-123649.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "staticcheck",
+      "command": [
+        "go",
+        "run",
+        "honnef.co/go/tools/cmd/staticcheck@v0.8.2",
+        "./..."
+      ],
+      "started_at": "2026-11-16T12:36:49.746849+08:00",
+      "elapsed_seconds": 3.955,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/staticcheck-20261116-123649.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "govulncheck",
+      "command": [
+        "go",
+        "run",
+        "golang.org/x/vuln/cmd/govulncheck@v1.9.0",
+        "./..."
+      ],
+      "started_at": "2026-11-16T12:36:53.702702+08:00",
+      "elapsed_seconds": 6.812,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/govulncheck-20261116-123653.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "release-fixtures",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/release-verify",
+        "-v"
+      ],
+      "started_at": "2026-11-16T12:37:00.515205+08:00",
+      "elapsed_seconds": 2.656,
+      "exit_code": 0,
+      "counts": {
+        "pass": 46,
+        "fail": 0,
+        "skip": 0
+      },
+      "raw_log": ".planning/gmail-outlook-rework/validation/release-fixtures-20261116-123700.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "compose",
+      "command": [
+        "docker",
+        "compose",
+        "config",
+        "--quiet"
+      ],
+      "started_at": "2026-11-16T12:37:03.172522+08:00",
+      "elapsed_seconds": 0.206,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/compose-20261116-123703.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "build",
+      "command": [
+        "make",
+        "build"
+      ],
+      "started_at": "2026-11-16T12:37:03.379588+08:00",
+      "elapsed_seconds": 2.066,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/build-20261116-123703.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "ui",
+      "command": [
+        "scripts/ui-check/run.sh"
+      ],
+      "started_at": "2026-11-16T12:37:05.446054+08:00",
+      "elapsed_seconds": 61.84,
+      "exit_code": 0,
+      "counts": {
+        "pass": 1017,
+        "fail": 0,
+        "skip": 0,
+        "viewports": [
+          {
+            "script": "settings-ui-check.js",
+            "width": 1280,
+            "pass": true,
+            "total": 45,
+            "failed": []
+          },
+          {
+            "script": "settings-ui-check.js",
+            "width": 375,
+            "pass": true,
+            "total": 45,
+            "failed": []
+          },
+          {
+            "script": "settings-ui-check.js",
+            "width": 390,
+            "pass": true,
+            "total": 45,
+            "failed": []
+          },
+          {
+            "script": "model-ui-check.js",
+            "width": 1280,
+            "pass": true,
+            "total": 63,
+            "failed": []
+          },
+          {
+            "script": "model-ui-check.js",
+            "width": 375,
+            "pass": true,
+            "total": 63,
+            "failed": []
+          },
+          {
+            "script": "model-ui-check.js",
+            "width": 390,
+            "pass": true,
+            "total": 63,
+            "failed": []
+          },
+          {
+            "script": "ownership-ui-check.js",
+            "width": 1280,
+            "pass": true,
+            "total": 87,
+            "failed": []
+          },
+          {
+            "script": "ownership-ui-check.js",
+            "width": 375,
+            "pass": true,
+            "total": 87,
+            "failed": []
+          },
+          {
+            "script": "ownership-ui-check.js",
+            "width": 390,
+            "pass": true,
+            "total": 87,
+            "failed": []
+          },
+          {
+            "script": "task-editor-ui-check.js",
+            "width": 1280,
+            "pass": true,
+            "total": 99,
+            "failed": []
+          },
+          {
+            "script": "task-editor-ui-check.js",
+            "width": 375,
+            "pass": true,
+            "total": 99,
+            "failed": []
+          },
+          {
+            "script": "task-editor-ui-check.js",
+            "width": 390,
+            "pass": true,
+            "total": 99,
+            "failed": []
+          },
+          {
+            "script": "manual-keep-ui-check.js",
+            "width": 1280,
+            "pass": true,
+            "total": 13,
+            "failed": []
+          },
+          {
+            "script": "manual-keep-ui-check.js",
+            "width": 375,
+            "pass": true,
+            "total": 13,
+            "failed": []
+          },
+          {
+            "script": "manual-keep-ui-check.js",
+            "width": 390,
+            "pass": true,
+            "total": 13,
+            "failed": []
+          },
+          {
+            "script": "mail-oauth-ui-check.js",
+            "width": 1280,
+            "pass": true,
+            "total": 32,
+            "failed": []
+          },
+          {
+            "script": "mail-oauth-ui-check.js",
+            "width": 375,
+            "pass": true,
+            "total": 32,
+            "failed": []
+          },
+          {
+            "script": "mail-oauth-ui-check.js",
+            "width": 390,
+            "pass": true,
+            "total": 32,
+            "failed": []
+          }
+        ],
+        "page_errors": 0
+      },
+      "raw_log": ".planning/gmail-outlook-rework/validation/ui-20261116-123705.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "ui-gate",
+      "command": [
+        "node",
+        "--test",
+        "--test-reporter=tap",
+        "scripts/ui-check/gate-test.cjs"
+      ],
+      "started_at": "2026-11-16T12:38:07.287091+08:00",
+      "elapsed_seconds": 64.946,
+      "exit_code": 0,
+      "counts": {
+        "pass": 27,
+        "fail": 0,
+        "skip": 0
+      },
+      "raw_log": ".planning/gmail-outlook-rework/validation/ui-gate-20261116-123807.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "diff",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "started_at": "2026-11-16T12:39:12.233824+08:00",
+      "elapsed_seconds": 0.025,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/diff-20261116-123912.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    },
+    {
+      "name": "oci",
+      "command": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "mail-auto-rework-validation",
+        "--platform",
+        "linux/amd64,linux/arm64",
+        "--output",
+        "type=oci,dest=.planning/gmail-outlook-rework/candidate-image.tar",
+        "."
+      ],
+      "started_at": "2026-11-16T12:39:12.259930+08:00",
+      "elapsed_seconds": 48.08,
+      "exit_code": 0,
+      "counts": null,
+      "raw_log": ".planning/gmail-outlook-rework/validation/oci-20261116-123912.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    }
+  ],
+  "versions": {
+    "go": {
+      "exit_code": 0,
+      "output": "go version go1.27.4 darwin/arm64"
+    },
+    "node": {
+      "exit_code": 0,
+      "output": "v24.22.3"
+    },
+    "python": {
+      "exit_code": 0,
+      "output": "Python 3.9.6"
+    },
+    "docker": {
+      "exit_code": 0,
+      "output": "Docker version 29.8.2, build 7fc2dff"
+    },
+    "buildx": {
+      "exit_code": 0,
+      "output": "github.com/docker/buildx v0.37.2 2d379c0c3f22da0d2759d132a0ec81ca949098f0"
+    },
+    "compose": {
+      "exit_code": 0,
+      "output": "Docker Compose version v5.5.0"
+    },
+    "staticcheck": {
+      "exit_code": 0,
+      "output": "staticcheck 2026.2.2 (0.8.2)"
+    },
+    "govulncheck": {
+      "exit_code": 0,
+      "output": "Go: go1.27.4\nScanner: govulncheck@v1.9.0\nDB: https://vuln.go.dev\nDB updated: 2026-11-11 02:51:11 +0000 UTC"
+    },
+    "chrome": {
+      "exit_code": 0,
+      "output": "Google Chrome 157.0.8103.51"
+    }
+  },
+  "prior_attempts": [
+    {
+      "name": "race",
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./..."
+      ],
+      "started_at": "2026-11-16T12:31:55.879824+08:00",
+      "elapsed_seconds": 292.06,
+      "exit_code": 1,
+      "counts": {
+        "pass": 557,
+        "fail": 1,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 618
+      },
+      "raw_log": ".planning/gmail-outlook-rework/validation/race-20261116-123155.log",
+      "evidence": "raw local logs excluded from Git; this summary contains no provider responses or credentials"
+    }
+  ],
+  "source_candidate": {
+    "command": [
+      "git",
+      "commit",
+      "-m",
+      "fix: preserve Gmail logical fences and safe legacy recovery"
+    ],
+    "exit_code": 0,
+    "commit": "574b04742ef4b783cb7333de97d2f282ea722bcd",
+    "tree": "363dcea7e674a4adab30769bc5b85913fba72dcf",
+    "pushed": false,
+    "staged_files": [
+      "CHANGELOG.md",
+      "docs/gmail-outlook-setup.md",
+      "internal/admin/web/index.html",
+      "internal/agent/prompt.go",
+      "internal/mail/acceptance_regression_test.go",
+      "internal/mail/automation.go",
+      "internal/mail/automation_policy.go",
+      "internal/mail/folder_settings.go",
+      "internal/mail/gmail.go",
+      "internal/mail/manual_resolution.go",
+      "internal/mail/operations.go",
+      "internal/mail/operations_recovery.go",
+      "internal/mail/testdata/schema14-recovery.md",
+      "internal/mail/testdata/schema14-recovery.sql",
+      "internal/mcpserver/server.go",
+      "internal/mcpserver/server_test.go",
+      "scripts/gmail-outlook-rework-verify.py",
+      "scripts/ui-check/mail-oauth-ui-check.js"
+    ]
+  },
+  "baseline": "ace3a1055bdf0765052ab5bfdbded04bf60e79ed",
+  "target_version": "0.10.0",
+  "schema": 15,
+  "wrapper_exit_code": 1,
+  "wrapper_exit_reason": "First full invocation included the then-failing ClaimAI fixture and three existing unformatted workspace diagnostics; final full race rerun passed and is recorded separately. Original failed runs are preserved.",
+  "supplementary": {
+    "targeted-result": {
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mail",
+        "-run",
+        "Test(GmailPersistent|GmailMoveUndo|ManualKeepProduction|Schema14Persisted|UnversionedCandidate)"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "pass": 28,
+        "fail": 0,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 32
+      }
+    },
+    "targeted-2-result": {
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mail",
+        "./internal/mcpserver",
+        "-run",
+        "Test(GmailPersistent|GmailMoveUndo|GmailClaimAI|ManualKeepProduction|Schema14Persisted|UnversionedCandidate|LegacyManual|StreamableMCP)"
+      ],
+      "exit_code": 1,
+      "counts": {
+        "pass": 31,
+        "fail": 1,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 37
+      }
+    },
+    "claim-fixture-fixed-result": {
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mail",
+        "-run",
+        "^TestGmailClaimAIAfterSourceRemoved$"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 1
+      }
+    },
+    "independent-result": {
+      "command": [
+        "go",
+        "test",
+        "-overlay=.planning/gmail-outlook-independent-acceptance/overlay.json",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mail",
+        "-run",
+        "^TestIndependent"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 4
+      }
+    },
+    "independent-final-result": {
+      "name": "independent-final",
+      "command": [
+        "go",
+        "test",
+        "-overlay=.planning/gmail-outlook-independent-acceptance/overlay.json",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mail",
+        "-run",
+        "^TestIndependent"
+      ],
+      "exit_code": 0,
+      "counts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0,
+        "count_basis": "leaf Go tests",
+        "all_test_events": 4
+      },
+      "raw_log": ".planning/gmail-outlook-rework/independent-final.jsonl"
+    },
+    "builder-create-result": {
+      "command": [
+        "docker",
+        "buildx",
+        "create",
+        "--driver",
+        "docker-container",
+        "--name",
+        "mail-auto-rework-validation",
+        "--bootstrap"
+      ],
+      "exit_code": 0
+    },
+    "builder-cleanup-result": {
+      "command": [
+        "docker",
+        "buildx",
+        "rm",
+        "mail-auto-rework-validation"
+      ],
+      "exit_code": 0,
+      "output": "mail-auto-rework-validation removed",
+      "scope": "only the builder created by this rework; no production resources"
+    },
+    "clean-candidate-format": {
+      "tree": "363dcea7e674a4adab30769bc5b85913fba72dcf",
+      "exit_code": 0,
+      "counts": {
+        "pass": 1,
+        "fail": 0,
+        "skip": 0,
+        "basis": "clean staged candidate root format assertion"
+      },
+      "commands": [
+        {
+          "command": [
+            "git",
+            "archive",
+            "--format=tar",
+            "-o",
+            "/var/folders/g4/txxqn9p529j33pr0g31k_cs00000gn/T/mail-auto-rework-format-yts24px2/candidate.tar",
+            "363dcea7e674a4adab30769bc5b85913fba72dcf"
+          ],
+          "cwd": null,
+          "exit_code": 0,
+          "output": ""
+        },
+        {
+          "command": [
+            "tar",
+            "-xf",
+            "/var/folders/g4/txxqn9p529j33pr0g31k_cs00000gn/T/mail-auto-rework-format-yts24px2/candidate.tar",
+            "-C",
+            "/var/folders/g4/txxqn9p529j33pr0g31k_cs00000gn/T/mail-auto-rework-format-yts24px2/source"
+          ],
+          "cwd": null,
+          "exit_code": 0,
+          "output": ""
+        },
+        {
+          "command": [
+            "gofmt",
+            "-l",
+            "."
+          ],
+          "cwd": "/var/folders/g4/txxqn9p529j33pr0g31k_cs00000gn/T/mail-auto-rework-format-yts24px2/source",
+          "exit_code": 0,
+          "output": ""
+        }
+      ],
+      "unformatted_files": 0,
+      "temporary_export_removed": true
+    },
+    "extra-checks": [
+      {
+        "command": [
+          "git",
+          "--version"
+        ],
+        "environment": {},
+        "exit_code": 0,
+        "output": "git version 2.39.5 (Apple Git-154)"
+      },
+      {
+        "command": [
+          "node",
+          "-p",
+          "JSON.stringify({puppeteer:require(\"./scripts/ui-check/node_modules/puppeteer-core/package.json\").version,browsers:require(\"./scripts/ui-check/node_modules/@puppeteer/browsers/package.json\").version})"
+        ],
+        "environment": {},
+        "exit_code": 0,
+        "output": "{\"puppeteer\":\"25.16.0\",\"browsers\":\"3.2.6\"}"
+      },
+      {
+        "command": [
+          "go",
+          "build",
+          "-trimpath",
+          "-o",
+          ".planning/gmail-outlook-rework/mail-auto-amd64",
+          "./cmd/mail-auto"
+        ],
+        "environment": {
+          "CGO_ENABLED": "0",
+          "GOOS": "linux",
+          "GOARCH": "amd64"
+        },
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": [
+          "file",
+          ".planning/gmail-outlook-rework/mail-auto-amd64"
+        ],
+        "environment": {},
+        "exit_code": 0,
+        "output": ".planning/gmail-outlook-rework/mail-auto-amd64: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, Go BuildID=gJ6cHXYPOEeenrXJM37v/s4F9KGieFFQb-unizkqh/1-fgYblnPRwLQ7WGCVmP/HQV8wXKOxJub3DijOJdZ, BuildID[sha1]=d0d5757d91f75ebf142923d8e6f044238083ce24, with debug_info, not stripped"
+      },
+      {
+        "command": [
+          "go",
+          "build",
+          "-trimpath",
+          "-o",
+          ".planning/gmail-outlook-rework/mail-auto-arm64",
+          "./cmd/mail-auto"
+        ],
+        "environment": {
+          "CGO_ENABLED": "0",
+          "GOOS": "linux",
+          "GOARCH": "arm64"
+        },
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": [
+          "file",
+          ".planning/gmail-outlook-rework/mail-auto-arm64"
+        ],
+        "environment": {},
+        "exit_code": 0,
+        "output": ".planning/gmail-outlook-rework/mail-auto-arm64: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, Go BuildID=zK8cnXyvJH0cLesdi0Tz/OwPZ8qt4I1a8ECj0xJI-/qflUXIRCSkLKvuSCu8Bb/vhfzrwQGMrEMyGX4UGj5, BuildID[sha1]=6e0dc1e4d033afe9381691cb9fc5ed55714d82b9, with debug_info, not stripped"
+      },
+      {
+        "command": [
+          "bin/mail-auto",
+          "version"
+        ],
+        "environment": {},
+        "exit_code": 0,
+        "output": "0.10.0"
+      },
+      {
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "environment": {},
+        "exit_code": 0,
+        "output": ""
+      }
+    ],
+    "candidate-precommit-scan": {
+      "command": [
+        "git diff --cached --check",
+        "staged path and private credential pattern checks"
+      ],
+      "exit_code": 0,
+      "files": [
+        "CHANGELOG.md",
+        "docs/gmail-outlook-setup.md",
+        "internal/admin/web/index.html",
+        "internal/agent/prompt.go",
+        "internal/mail/acceptance_regression_test.go",
+        "internal/mail/automation.go",
+        "internal/mail/automation_policy.go",
+        "internal/mail/folder_settings.go",
+        "internal/mail/gmail.go",
+        "internal/mail/manual_resolution.go",
+        "internal/mail/operations.go",
+        "internal/mail/operations_recovery.go",
+        "internal/mail/testdata/schema14-recovery.md",
+        "internal/mail/testdata/schema14-recovery.sql",
+        "internal/mcpserver/server.go",
+        "internal/mcpserver/server_test.go",
+        "scripts/gmail-outlook-rework-verify.py",
+        "scripts/ui-check/mail-oauth-ui-check.js"
+      ],
+      "credential_pattern_hits": 0,
+      "review": "manually reviewed all added code and synthetic fixtures; no real credentials, keys, private mailbox data or deployment config staged",
+      "files_sha256": {
+        "CHANGELOG.md": "fdb56d2531b13e63b538ad804a51b309bdeae557592cb4e1b3c59b393b0198f8",
+        "docs/gmail-outlook-setup.md": "b4f2172020ad80ff7e5d99fd33d77f873e206c1f630cc79a163510968c9ef772",
+        "internal/admin/web/index.html": "f2afb018353fd697c7592872d372099f62394a7bb73cb094c747aaa0f26a0666",
+        "internal/agent/prompt.go": "d0539c925e966ddcf6897ecad3e96d98136a4a6b01378c661137cb982d149f45",
+        "internal/mail/acceptance_regression_test.go": "fdc4e2ddafaa7aa04763e44e24b684084d828fb35386209dbdd30972783e1b1d",
+        "internal/mail/automation.go": "52dc30708be509271f74ec9bb0024d7322b59136384bc5b3f18492d392e5cd3d",
+        "internal/mail/automation_policy.go": "5495201ca2e161dd70dad55dc4477c45b7287d07630212f94ba009a31113a3d8",
+        "internal/mail/folder_settings.go": "19d1354da5a6c935795456625bb060b24c51764cd13b996f7999d2f8cf814ca9",
+        "internal/mail/gmail.go": "b101107e9d1e161b7c5a7bc24b0e58c99b8e34e093334cd31ce6430be49b83bc",
+        "internal/mail/manual_resolution.go": "166e345dd411148916175bd632079dce7265075e5c0893ed082f861f76b629b6",
+        "internal/mail/operations.go": "dc901126df8568425d4506c8fb472d25e77cf7d4e1e043e552c61d15aac95b33",
+        "internal/mail/operations_recovery.go": "8e4e6aad39c3342d7976db22a8dd7aa90ac43174b9969b2b6ce23fd503cabf86",
+        "internal/mail/testdata/schema14-recovery.md": "49bb1f3dc32dc27f793e07dd1b8227954be45d92d4c2ac1b25585590eac56765",
+        "internal/mail/testdata/schema14-recovery.sql": "eb53e45e06aa14c3520a82ec51760b919cb4380f424d7ea28594efd0784ec0c8",
+        "internal/mcpserver/server.go": "959f30fa101d04250398b44b6c0a6dc645b83738b55c8c1d7462c914377949eb",
+        "internal/mcpserver/server_test.go": "decf11e96d8f247874438e73779d4980a533547d95898b777c5fec1d55c68258",
+        "scripts/gmail-outlook-rework-verify.py": "2ccaffb0e4a5f0b80ff9e9bdb5185d44e4e84b40374cc0572200a32511e96abc",
+        "scripts/ui-check/mail-oauth-ui-check.js": "3ab6ca15988e7993c32e7e116822557d784eb3395b3491cc21eee5d10aae2a05"
+      }
+    }
+  },
+  "independent_original_hashes": {
+    "docs/gmail-outlook-independent-acceptance.md": "096e307b0c4b3ef4140ecbe4935bee61d9b5d0640a77a2be773368920bf26732",
+    ".planning/gmail-outlook-independent-acceptance/independent_acceptance_test.go": "4e4def165bada72b6beb71b162f44d532f8d4e404af5e71b215ccd21ba6c533d",
+    ".planning/gmail-outlook-independent-acceptance/overlay.json": "0232dbb2c511994525932160dbcfcb0cee708aea9475f2344a9d6c38a2301e82",
+    ".planning/gmail-outlook-independent-acceptance/probes.log": "9a76e05b4615fe23f4ffba52b55a6e59299053c01f5305d8da2552cc66b0db55"
+  },
+  "candidate_diff_check": {
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "ace3a1055bdf0765052ab5bfdbded04bf60e79ed..574b04742ef4b783cb7333de97d2f282ea722bcd"
+    ],
+    "exit_code": 0,
+    "output": ""
+  }
+}
