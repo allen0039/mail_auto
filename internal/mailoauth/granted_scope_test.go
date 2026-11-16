@@ -1,6 +1,7 @@
 package mailoauth
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/url"
@@ -9,6 +10,38 @@ import (
 
 	"mail-auto/internal/network"
 )
+
+func TestGooglePartialConsentPreservesConnectedMailbox(t *testing.T) {
+	for _, granted := range []string{"openid email", "openid email https://www.googleapis.com/auth/gmail.readonly"} {
+		t.Run(granted, func(t *testing.T) {
+			manager, session := fixture(t, "google")
+			bindFixture(t, manager, session, "google")
+			before, err := manager.Account("account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, _ := authorize(t, manager, session, "google")
+			manager.transport = func(network.Route) http.RoundTripper {
+				return roundTrip(func(incoming *http.Request) (*http.Response, error) {
+					if incoming.URL.Host != "oauth2.googleapis.com" || incoming.URL.Path != "/token" {
+						t.Fatal("partial reauthorization continued to identity validation")
+					}
+					return response(200, map[string]any{"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "token_type": "Bearer", "expires_in": 3600, "scope": granted}), nil
+				})
+			}
+			if _, _, err = manager.Exchange(context.Background(), request, "synthetic-code"); Code(err) != "oauth_scope_missing" {
+				t.Fatal("partial consent did not fail closed")
+			}
+			after, err := manager.Account("account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if before.Status != "connected" || after.Status != before.Status || after.Subject != before.Subject || after.Scope != before.Scope || after.Generation != before.Generation || !bytes.Equal(after.Refresh, before.Refresh) {
+				t.Fatal("failed partial reauthorization downgraded existing credentials or identity")
+			}
+		})
+	}
+}
 
 func TestGoogleIdentityOnlyConsentDoesNotBindMailbox(t *testing.T) {
 	for _, granted := range []string{

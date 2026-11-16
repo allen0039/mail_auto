@@ -3,7 +3,7 @@
   const check = (name, ok) => results.push({name, ok: !!ok});
   const wait = () => new Promise((resolve) => setTimeout(resolve, 30));
   const until = async (condition) => { for (let attempt = 0; attempt < 100; attempt++) { if (condition()) return; await wait(); } throw new Error("OAuth UI timed out"); };
-  const originalApi = window.api, originalConfirm = window.confirm, originalAccounts = state.accounts;
+  const originalApi = window.api, originalConfirm = window.confirm, originalAccounts = state.accounts, originalStatus = state.status, originalURL = location.href, originalResult = mailOAuthCallbackResult, originalStoredResult = sessionStorage.getItem(mailOAuthResultKey);
   let allowDiscard = true, pendingLoad = null, pendingSave = null, pendingStart = null, saved = null, startRequests = 0;
   const apps = [{provider: "google", configured: false, client_id: "", origin: ""}, {provider: "microsoft", configured: true, client_id: "ms-client", origin: "https://mail.test", authority: "consumers"}];
   window.confirm = () => allowDiscard;
@@ -103,8 +103,90 @@
     for (const [status, text] of [["pending", "待授权"], ["reauthorize", "需要重新授权"], ["network_error", "网络失败"]]) check(`account status ${status}`, getAccountStatus({...base, oauth: {status}}, null, false).label === text);
     for (const error_code of ["oauth_scope_missing", "oauth_imap_denied"]) check(`permission status ${error_code}`, getAccountStatus({...base, oauth: {status: "reauthorize", error_code}}, null, false).label === "权限受限");
     check("denied callback has actionable Chinese error", mailOAuthMessage("oauth_denied").includes("重新"));
+    check("scope failure explains personal Gmail mail consent", mailOAuthMessage("oauth_scope_missing").includes("个人资料") && mailOAuthMessage("oauth_scope_missing").includes("明确同意"));
+    check("callback has persistent account-bound result handler", typeof captureMailOAuthCallback === "function");
     check("Gmail capability failure is actionable", mailOAuthMessage("oauth_gmail_capability_missing").includes("X-GM-EXT-1"));
     check("account mismatch is explicit", mailOAuthMessage("oauth_identity_mismatch").includes("原账号"));
+    const callback = (outcome, accountID = base.id, extra = "") => {
+      history.replaceState(null, "", `/?mail_oauth=${encodeURIComponent(outcome)}&account=${encodeURIComponent(accountID)}${extra}`);
+      captureMailOAuthCallback();
+      renderAccounts();
+    };
+    callback("oauth_scope_missing", base.id, "&code=synthetic-code&state=synthetic-state&verifier=synthetic-verifier");
+    let resultNotice = $(".mail-oauth-result");
+    check("callback result persists on matching account card", resultNotice?.textContent.includes("明确同意") && resultNotice.closest("[data-account]").dataset.account === base.id);
+    check("callback is explicitly historical not connection fact", resultNotice?.textContent.includes("本次授权回调提示") && resultNotice.textContent.includes("不代表当前连接状态"));
+    check("callback URL cleaned immediately", location.search === "");
+    check("callback has explicit official retry entry", !!resultNotice?.querySelector('[data-action="oauth"]'));
+    check("callback notice fits viewport", resultNotice?.getBoundingClientRect().width <= innerWidth && document.documentElement.scrollWidth <= innerWidth);
+    const storedNotice = sessionStorage.getItem(mailOAuthResultKey);
+    check("only non-sensitive result enum and account snapshot retained", storedNotice && !["synthetic-code", "synthetic-state", "synthetic-verifier"].some((value) => storedNotice.includes(value)) && Object.keys(JSON.parse(storedNotice)).sort().join(",") === "accountID,baseline,outcome,provider");
+    mailOAuthCallbackResult = null;
+    captureMailOAuthCallback(); renderAccounts();
+    check("result survives reload from sanitized session record", !!$(".mail-oauth-result") && mailOAuthCallbackResult?.outcome === "oauth_scope_missing");
+    await showView("system"); await showView("accounts");
+    check("result survives closing and reopening account view", !!$(".mail-oauth-result"));
+    $(".mail-oauth-result [data-action=oauth-dismiss]").click();
+    check("dismiss clears notice and saved result", !$(".mail-oauth-result") && !sessionStorage.getItem(mailOAuthResultKey));
+    renderAccounts();
+    check("dismissed result does not reappear on rerender", !$(".mail-oauth-result"));
+    callback("oauth_scope_missing"); callback("ok");
+    check("successful callback replaces previous error", $(".mail-oauth-result")?.textContent.includes("授权完成") && !$(".mail-oauth-result").textContent.includes("未授予"));
+    state.accounts = [{...base, oauth: {status: "connected", generation: 3}}];
+    callback("oauth_scope_missing");
+    check("failed reauthorization preserves connected status", state.accounts[0].oauth.status === "connected" && state.accounts[0].oauth.generation === 3 && $(".mail-oauth-result")?.textContent.includes("当前账号授权已连接"));
+    const now = Math.floor(Date.now() / 1000);
+    state.status = {...originalStatus, automatic: {enabled: true, accounts: [{account_id: base.id, state: "watching", checked_at: now - 10}]}, sync_jobs: [{account_id: base.id, state: "completed", started_at: now - 20, updated_at: now - 10}]};
+    callback("oauth_scope_missing");
+    state.status = {...originalStatus, automatic: {enabled: true, accounts: [{account_id: base.id, state: "connecting", checked_at: now - 10}]}, sync_jobs: []};
+    renderAccounts();
+    check("old success disappearing or reconnecting cannot clear failure", !!$(".mail-oauth-result"));
+    state.status = {...originalStatus, automatic: {enabled: false, accounts: []}, sync_jobs: [{account_id: base.id, state: "completed", started_at: now - 30, updated_at: now - 15}]};
+    renderAccounts();
+    check("late older completed job cannot clear failure", !!$(".mail-oauth-result"));
+    state.status = {...originalStatus, automatic: {enabled: false, accounts: []}, sync_jobs: [{account_id: base.id, state: "completed", started_at: now + 1, updated_at: now + 2}]};
+    renderAccounts();
+    check("later successful sync clears stale failed callback", !$(".mail-oauth-result") && !sessionStorage.getItem(mailOAuthResultKey));
+    state.status = {...originalStatus, automatic: {enabled: true, accounts: [{account_id: base.id, state: "connecting", checked_at: now} ]}, sync_jobs: []};
+    callback("oauth_scope_missing");
+    state.status.automatic.accounts[0] = {account_id: base.id, state: "watching", checked_at: now + 2}; renderAccounts();
+    check("positive newer automatic check clears failure", !$(".mail-oauth-result"));
+    state.status = originalStatus;
+    callback("oauth_scope_missing");
+    state.accounts[0] = {...state.accounts[0], oauth: {status: "connected", generation: 4}};
+    renderAccounts();
+    check("new authorized generation clears previous failure", !$(".mail-oauth-result"));
+    for (const [outcome, accountID, label] of [["__proto__", base.id, "prototype outcome"], ["<img src=x onerror=alert(1)>", base.id, "HTML outcome"], ["oauth_scope_missing", "<svg onload=alert(1)>", "HTML account"], ["ok", "missing-account", "nonexistent account"]]) {
+      callback(outcome, accountID);
+      check(`${label} cannot produce callback notice`, !$(".mail-oauth-result") && !$("#account-list img") && !$("#account-list svg") && location.search === "");
+    }
+    callback("oauth_scope_missing", base.id, "&account=other-account");
+    check("ambiguous callback parameters rejected", !$(".mail-oauth-result"));
+    state.accounts = [base, {...base, id: "another-oauth-account", provider: "microsoft"}];
+    callback("oauth_scope_missing");
+    state.accounts.reverse(); renderAccounts();
+    check("account switching cannot attach result to another account", $$(".mail-oauth-result").length === 1 && $(".mail-oauth-result").closest("[data-account]").dataset.account === base.id);
+    state.accounts = state.accounts.filter((account) => account.id !== base.id); renderAccounts();
+    check("account deletion clears callback permanently", !$(".mail-oauth-result") && !sessionStorage.getItem(mailOAuthResultKey));
+    state.accounts = [base];
+    callback("oauth_scope_missing");
+    const callbackApi = window.api;
+    let releaseRefresh, accountLoads = 0;
+    window.api = async (url, options = {}) => {
+      if (url === "/api/accounts") {
+        accountLoads++;
+        if (accountLoads === 1) return new Promise((resolve) => { releaseRefresh = () => resolve([base]); });
+        return [{...base, oauth: {status: "connected", generation: 5}}];
+      }
+      if (url === "/api/status") return {...originalStatus, automatic: {enabled: false, accounts: []}, sync_jobs: []};
+      if (url === "/api/network") return state.network;
+      return callbackApi(url, options);
+    };
+    const oldRefresh = refresh(); await until(() => !!releaseRefresh);
+    await refresh(); releaseRefresh(); await oldRefresh;
+    check("late refresh cannot restore old status or callback", state.accounts[0].oauth.status === "connected" && state.accounts[0].oauth.generation === 5 && !$(".mail-oauth-result"));
+    window.api = callbackApi;
+    state.accounts = [base]; state.status = originalStatus; clearMailOAuthCallback(); renderAccounts();
     markClean(form); $("#mail-oauth-dialog").close();
     const beforeAuthorization = location.href;
     let releaseStart;
@@ -124,7 +206,10 @@
     await navigating;
     check("late authorization cannot redirect after A B A navigation", location.href === beforeAuthorization);
   } finally {
-    window.api = originalApi; window.confirm = originalConfirm; state.accounts = originalAccounts;
+    window.api = originalApi; window.confirm = originalConfirm; state.accounts = originalAccounts; state.status = originalStatus;
+    mailOAuthCallbackResult = originalResult;
+    if (originalStoredResult === null) sessionStorage.removeItem(mailOAuthResultKey); else sessionStorage.setItem(mailOAuthResultKey, originalStoredResult);
+    history.replaceState(null, "", originalURL);
     for (const selector of ["#mail-oauth-dialog", "#account-dialog"]) { const dialog = $(selector); for (const form of dialog.querySelectorAll("form")) markClean(form); if (dialog.open) dialog.close(); }
   }
   return {pass: results.every((result) => result.ok), results};

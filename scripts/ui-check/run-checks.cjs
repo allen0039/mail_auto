@@ -76,6 +76,33 @@ async function main() {
         await page.setViewport({ width: w, height: h });
         await page.goto(base, { waitUntil: "networkidle0" });
         const r = await page.evaluate(code);
+        if (file.endsWith("/mail-oauth-ui-check.js") && Array.isArray(r?.results)) {
+          const startupAccount = {id: "startup-oauth-fixture", name: "Startup QA", username: "fixture@example.test", provider: "google", authentication: "oauth2", host: "imap.gmail.com", port: 993, folders: [], synced_folders: [], oauth: {status: "pending", generation: 1}};
+          const intercept = (request) => {
+            if (new URL(request.url()).pathname === "/api/accounts") request.respond({status: 200, contentType: "application/json", body: JSON.stringify([startupAccount])});
+            else request.continue();
+          };
+          await page.setRequestInterception(true);
+          page.on("request", intercept);
+          try {
+            await page.goto(`${base}/?mail_oauth=oauth_scope_missing&account=${startupAccount.id}&code=synthetic-code&state=synthetic-state`, {waitUntil: "networkidle0"});
+            await page.waitForSelector(".mail-oauth-result");
+            r.results.push(...await page.evaluate(() => [
+              {name: "real startup captures before account load and cleans URL", ok: location.search === "" && document.querySelector(".mail-oauth-result").textContent.includes("明确同意")},
+              {name: "real startup notice fits viewport", ok: document.documentElement.scrollWidth <= innerWidth},
+            ]));
+            await page.reload({waitUntil: "networkidle0"});
+            await page.waitForSelector(".mail-oauth-result");
+            r.results.push({name: "real page reload retains sanitized callback notice", ok: true});
+            await page.click(".mail-oauth-result [data-action=oauth-dismiss]");
+            await page.reload({waitUntil: "networkidle0"});
+            r.results.push({name: "real reload cannot resurrect dismissed callback", ok: await page.$(".mail-oauth-result") === null});
+          } finally {
+            page.off("request", intercept);
+            await page.setRequestInterception(false);
+          }
+          r.pass = r.results.every((result) => result.ok);
+        }
         const failed = problems(r);
         out.push({ script: file.split("/").pop(), width: w, pass: failed.length === 0, total: r && (Array.isArray(r.results) ? r.results.length : r.total), failed });
       }

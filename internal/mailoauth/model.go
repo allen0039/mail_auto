@@ -40,9 +40,9 @@ func Message(code string) string {
 	case "oauth_identity_invalid":
 		return "服务商身份验证未通过，请重新授权并检查实例时间"
 	case "oauth_scope_missing":
-		return "未授予 IMAP 邮件权限，请重新授权并同意邮件权限；组织账号请联系管理员"
+		return "未授予 IMAP 邮件权限，请重新进入官方授权并明确同意 IMAP 邮件访问。个人 Gmail 仅同意 Google 登录或个人资料不等于授予邮件权限；Workspace / Microsoft 365 组织账号还需联系管理员检查授权策略。"
 	case "oauth_reauthorization_required":
-		return "邮箱授权已失效，请重新授权；Google Testing 应用的邮件授权通常仅持续七天"
+		return "邮箱授权已撤销或过期，请重新授权；Google Testing 邮件授权通常七天到期"
 	case "oauth_pending":
 		return "邮箱尚未授权，请点击官方登录授权"
 	case "oauth_rate_limited":
@@ -50,7 +50,7 @@ func Message(code string) string {
 	case "oauth_provider_unavailable":
 		return "服务商暂时不可用，请稍后重试"
 	case "oauth_imap_denied":
-		return "OAuth 授权成功但 IMAP 登录被拒绝，请检查邮箱地址、IMAP 开关和租户策略，再重新授权"
+		return "OAuth 授权成功但 IMAP 登录被拒绝，请检查邮箱地址和 IMAP 开关；仅 Workspace / Microsoft 365 组织账号还需检查管理员策略"
 	case "oauth_gmail_capability_missing":
 		return "Gmail IMAP 未提供所需的 X-GM-EXT-1 能力，请检查是否连接到官方 Gmail 服务器并联系管理员"
 	case "oauth_config_invalid":

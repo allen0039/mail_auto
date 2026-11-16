@@ -15,6 +15,8 @@ const state = {
   network: null,
 };
 let mailOAuthStartGeneration = 0;
+let accountRefreshGeneration = 0;
+let mailOAuthCallbackResult = null;
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -306,16 +308,19 @@ async function checkSession() {
   if (window.checkOAuthConsent) await window.checkOAuthConsent();
 }
 async function refresh() {
+  const generation = ++accountRefreshGeneration;
   const [accounts, status, network] = await Promise.all([
     api("/api/accounts"),
     api("/api/status"),
     api("/api/network"),
   ]);
+  if (generation !== accountRefreshGeneration) return false;
   const accountsChanged = JSON.stringify(state.accounts) !== JSON.stringify(accounts);
   const indexChanged = accountsChanged || state.status.index_revision !== status.index_revision || state.status.messages !== status.messages || state.status.unread !== status.unread;
   state.accounts = accounts;
   state.status = status;
   state.network = network;
+  const callbackChanged = reconcileMailOAuthCallback();
 
   if (status.version) {
     state.version = status.version;
@@ -354,7 +359,7 @@ async function refresh() {
   if (accounts.some((a) => a.id === old)) $("#account-filter").value = old;
   updateFolderFilter();
 
-  if (accountsChanged || !$("#account-list").children.length) {
+  if (callbackChanged || accountsChanged || !$("#account-list").children.length) {
     renderAccounts();
   } else {
     updateAccountCardStatuses();
@@ -790,6 +795,7 @@ async function search() {
 }
 
 function renderAccounts() {
+  reconcileMailOAuthCallback();
   const autoMap = Object.fromEntries((state.status.automatic?.accounts || []).map((a) => [a.account_id, a]));
   $("#account-list").innerHTML = state.accounts.length
     ? state.accounts
@@ -816,6 +822,7 @@ function renderAccounts() {
                 <div><dt>凭据加密</dt><dd>${a.authentication === "oauth2" ? "官方 OAuth · refresh token 加密保存" : a.credential_source === "external" ? `外部 secret · ${esc(a.secret_file)}` : "本地加密保存"}</dd></div>
               </dl>
               <p class="automatic-account muted small" aria-live="polite"></p>
+              ${mailOAuthCallbackNotice(a)}
               <div class="account-actions">
                 ${a.authentication === "oauth2" ? '<button class="primary" data-action="oauth">官方登录 / 重新授权</button><button class="secondary" data-action="oauth-disconnect">断开本地授权</button>' : ""}
                 <button class="secondary" data-action="edit">编辑配置</button>
@@ -1128,6 +1135,8 @@ $("#credentials-form").addEventListener("submit", async (e) => {
       form.reset();
       state.view = "dashboard";
       state.accounts = [];
+      clearMailOAuthCallback();
+      accountRefreshGeneration++;
       state.offset = 0;
       await checkSession();
       $("#login-form").elements.username.value = data.username;
@@ -1144,6 +1153,8 @@ async function logout() {
     await api("/api/logout", { method: "POST", body: "{}" });
     hideDialogs();
     state.accounts = [];
+    clearMailOAuthCallback();
+    accountRefreshGeneration++;
     state.offset = 0;
     state.view = "dashboard";
     await checkSession();
@@ -1258,7 +1269,10 @@ $("#account-list").addEventListener("click", async (e) => {
     id = card.dataset.account,
     account = state.accounts.find((a) => a.id === id);
   try {
-    if (button.dataset.action === "edit") {
+    if (button.dataset.action === "oauth-dismiss") {
+      if (mailOAuthCallbackResult?.accountID === id) clearMailOAuthCallback();
+      renderAccounts();
+    } else if (button.dataset.action === "edit") {
       openAccount(account);
     } else if (button.dataset.action === "oauth") {
       await busy(button, "准备授权…", () => startMailOAuth(id));
@@ -1309,7 +1323,105 @@ $("#account-list").addEventListener("click", async (e) => {
 });
 
 function mailOAuthMessage(code) {
-  return ({ok: "邮箱官方授权完成，请查看连接和同步状态", oauth_denied: "授权已取消，可重新点击官方登录", oauth_state_invalid: "授权请求过期或会话变化，请重新发起", oauth_config_changed: "应用或网络配置已变化，请重新授权", oauth_identity_mismatch: "登录账号与邮箱绑定不一致，请登录原账号", oauth_scope_missing: "缺少 IMAP 权限；请重新授权，组织账号请检查租户策略", oauth_reauthorization_required: "授权失效，请重新授权", oauth_imap_denied: "IMAP 登录被拒绝，请检查地址、IMAP 开关和租户策略", oauth_gmail_capability_missing: "Gmail IMAP 缺少 X-GM-EXT-1 能力，请检查是否连接到官方 Gmail 服务器", oauth_network_failed: "网络失败，请检查所选代理和服务商网络后重试"})[code] || "邮箱授权未完成，请检查应用配置并重新发起";
+  return Object.hasOwn(mailOAuthMessages, code) ? mailOAuthMessages[code] : "邮箱授权未完成，请检查应用配置并重新发起";
+}
+
+const mailOAuthMessages = Object.freeze({
+  ok: "邮箱官方授权完成，请查看连接和同步状态",
+  oauth_denied: "授权已取消，可重新点击官方登录",
+  oauth_state_invalid: "授权请求过期或会话变化，请重新发起",
+  oauth_config_missing: "请先配置邮箱 OAuth 应用，再发起官方授权",
+  oauth_config_changed: "应用或网络配置已变化，请重新授权",
+  oauth_identity_invalid: "服务商身份验证未通过，请重新授权并检查实例时间",
+  oauth_identity_mismatch: "登录账号与邮箱绑定不一致，请登录原账号",
+  oauth_scope_missing: "未授予 IMAP 邮件权限，请重新进入官方授权并明确同意 IMAP 邮件访问。个人 Gmail 仅同意 Google 登录或个人资料不等于授予邮件权限；Workspace / Microsoft 365 组织账号还需联系管理员检查授权策略。",
+  oauth_reauthorization_required: "邮箱授权已撤销或过期，请重新授权；Google Testing 邮件授权通常七天到期",
+  oauth_imap_denied: "OAuth 授权成功但 IMAP 登录被拒绝，请检查邮箱地址和 IMAP 开关；仅 Workspace / Microsoft 365 组织账号还需检查管理员策略",
+  oauth_gmail_capability_missing: "Gmail IMAP 缺少 X-GM-EXT-1 能力，请检查是否连接到官方 Gmail 服务器",
+  oauth_network_failed: "网络失败，请检查所选代理和服务商网络后重试",
+  oauth_rate_limited: "服务商暂时限流，请稍后重试",
+  oauth_provider_unavailable: "服务商暂时不可用，请稍后重试",
+});
+const mailOAuthResultKey = "mail-auto.oauth-result";
+
+function saveMailOAuthCallback() {
+  try {
+    if (mailOAuthCallbackResult?.provider) sessionStorage.setItem(mailOAuthResultKey, JSON.stringify(mailOAuthCallbackResult));
+    else sessionStorage.removeItem(mailOAuthResultKey);
+  } catch {}
+}
+
+function clearMailOAuthCallback() {
+  mailOAuthCallbackResult = null;
+  saveMailOAuthCallback();
+}
+
+function captureMailOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("mail_oauth")) {
+    history.replaceState(null, "", window.location.pathname + window.location.hash);
+    const outcome = params.get("mail_oauth"), accountID = params.get("account");
+    clearMailOAuthCallback();
+    if (params.getAll("mail_oauth").length === 1 && params.getAll("account").length === 1 && Object.hasOwn(mailOAuthMessages, outcome) && accountID && accountID.length <= 256) {
+      mailOAuthCallbackResult = {accountID, outcome, provider: null, baseline: null};
+      state.view = "accounts";
+    }
+    return;
+  }
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(mailOAuthResultKey));
+    if (stored && typeof stored.accountID === "string" && stored.accountID.length <= 256 && typeof stored.outcome === "string" && Object.hasOwn(mailOAuthMessages, stored.outcome) && ["google", "microsoft"].includes(stored.provider) && typeof stored.baseline === "string" && stored.baseline.length <= 256) {
+      mailOAuthCallbackResult = {accountID: stored.accountID, outcome: stored.outcome, provider: stored.provider, baseline: stored.baseline};
+      state.view = "accounts";
+    }
+  } catch {}
+}
+
+function mailOAuthSuccessStamp(account) {
+  const automatic = state.status.automatic?.accounts?.find((entry) => entry.account_id === account.id);
+  const job = state.status.sync_jobs?.find((entry) => entry.account_id === account.id && entry.state === "completed");
+  return JSON.stringify({generation: Number(account.oauth?.generation || 0), automaticCheckedAt: Number(automatic?.checked_at || 0), syncUpdatedAt: Number(job?.updated_at || 0), observedAt: Math.floor(Date.now() / 1000)});
+}
+
+function mailOAuthHasLaterSuccess(account, baseline) {
+  try {
+    const previous = JSON.parse(baseline);
+    if (!previous || ![previous.generation, previous.automaticCheckedAt, previous.syncUpdatedAt, previous.observedAt].every(Number.isFinite)) return false;
+    if (Number(account.oauth?.generation || 0) > previous.generation) return true;
+    const automatic = state.status.automatic?.accounts?.find((entry) => entry.account_id === account.id && !entry.error && ["watching", "waiting"].includes(entry.state));
+    const job = state.status.sync_jobs?.find((entry) => entry.account_id === account.id && entry.state === "completed");
+    return Number(automatic?.checked_at || 0) > Math.max(previous.automaticCheckedAt, previous.observedAt) || Number(job?.updated_at || 0) > Math.max(previous.syncUpdatedAt, previous.observedAt);
+  } catch {
+    return false;
+  }
+}
+
+function reconcileMailOAuthCallback() {
+  const result = mailOAuthCallbackResult;
+  if (!result) return false;
+  const account = state.accounts.find((entry) => entry.id === result.accountID && entry.authentication === "oauth2" && ["google", "microsoft"].includes(entry.provider));
+  if (!account || (result.provider && result.provider !== account.provider)) {
+    clearMailOAuthCallback();
+    return true;
+  }
+  const stamp = mailOAuthSuccessStamp(account);
+  if (result.provider && result.outcome !== "ok" && account.oauth?.status === "connected" && mailOAuthHasLaterSuccess(account, result.baseline)) {
+    clearMailOAuthCallback();
+    return true;
+  }
+  if (!result.provider) {
+    result.provider = account.provider;
+    result.baseline = stamp;
+    saveMailOAuthCallback();
+  }
+  return false;
+}
+
+function mailOAuthCallbackNotice(account) {
+  const result = mailOAuthCallbackResult;
+  if (!result || result.accountID !== account.id) return "";
+  const current = account.oauth?.status === "connected" ? "当前账号授权已连接；本次尝试的提示不会撤销已有连接。" : "当前连接状态请以上方账号状态为准。";
+  return `<section class="mail-oauth-result" role="status"><strong>本次授权回调提示（不代表当前连接状态）</strong><p>${esc(mailOAuthMessage(result.outcome))}</p><p>${esc(current)}</p><div class="account-actions"><button class="secondary" data-action="oauth">进入官方登录 / 重新授权</button><button class="secondary" data-action="oauth-dismiss">关闭本次提示</button></div></section>`;
 }
 
 async function startMailOAuth(id) {
@@ -1406,13 +1518,7 @@ mailOAuthForm.addEventListener("submit", async (event) => {
   }
 });
 
-{
-  const callback = new URLSearchParams(window.location.search).get("mail_oauth");
-  if (callback) {
-    history.replaceState(null, "", window.location.pathname);
-    setTimeout(() => notify(mailOAuthMessage(callback), callback !== "ok"), 500);
-  }
-}
+captureMailOAuthCallback();
 
 $("#sync-all").addEventListener("click", (e) =>
   syncAll(e.currentTarget).catch((err) => notify(err.message, true)),
