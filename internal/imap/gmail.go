@@ -143,14 +143,23 @@ func (adapter Adapter) gmailMove(ctx context.Context, account mail.Account, pass
 			}
 		}
 	}
+	result, present, err := gmailLocation(conn, destination, message.GmailMessageID)
+	if err != nil || !present {
+		return result, mail.ErrUncertain
+	}
+	conn.resetBudget()
+	selected, err = conn.c.Select(destination, false)
+	if err != nil || selected.ReadOnly || selected.UidValidity != result.UIDValidity {
+		return result, mail.ErrUncertain
+	}
 	label := message.Folder
 	if sourceRole == "inbox" {
 		label = "\\Inbox"
 	}
-	if err = gmailStoreLabel(conn, message.UID, "-", label); err != nil {
+	if err = gmailStoreLabel(conn, result.UID, "-", label); err != nil {
 		return mail.MoveResult{}, err
 	}
-	result, present, err := gmailLocation(conn, destination, message.GmailMessageID)
+	result, present, err = gmailLocation(conn, destination, message.GmailMessageID)
 	if err != nil || !present {
 		return result, mail.ErrUncertain
 	}

@@ -23,7 +23,7 @@ Go 编写的个人多邮箱工作台：IMAP 自动同步、原邮箱文件夹分
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前开发候选版本为 `0.10.2`、schema 15，尚待独立验收和真实账号验证，**没有发布该版本标签或镜像**。候选 Compose 的 `allen0039/mail-auto:0.10.2` 仅供验收通过后的发布使用；现有生产 `latest` 未更新。镜像支持 Linux amd64 / arm64。运行时、界面与 MCP 统一读取版本号。schema 15 增加 Gmail / Outlook OAuth 与 Gmail 消息身份，保留原有授权码、外部 secret、任务和人工保留保护。旧二进制不能打开 schema 15；回退必须恢复升级前数据库和配套主密钥，见[接入与回退说明](docs/gmail-outlook-setup.md)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前开发候选版本为 `0.10.3`、schema 15，尚待独立验收和真实账号验证，**没有发布该版本标签或镜像**。候选 Compose 的 `allen0039/mail-auto:0.10.3` 仅供验收通过后的发布使用；现有生产 `latest` 未更新。镜像支持 Linux amd64 / arm64。运行时、界面与 MCP 统一读取版本号。schema 15 增加 Gmail / Outlook OAuth 与 Gmail 消息身份，保留原有授权码、外部 secret、任务和人工保留保护。旧二进制不能打开 schema 15；回退必须恢复升级前数据库和配套主密钥，见[接入与回退说明](docs/gmail-outlook-setup.md)。
 
 Google / Microsoft OAuth 应用各注册一次即可供多个自用实例和邮箱复用；支持[导出并在部署时自动载入](docs/oauth-app-reuse.md)，添加邮箱时分别官方登录授权。新域名仍须登记精确回调，镜像不包含通用客户端密钥。
 

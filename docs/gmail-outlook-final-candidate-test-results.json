@@ -2,6 +2,63 @@
   "generated_at": "2026-11-16T21:44:41.036382+08:00",
   "timezone": "Asia/Shanghai",
   "status": "implementation_self_test_only; waiting for independent reacceptance; real-account acceptance incomplete",
+  "followup_0_10_3": {
+    "version": "0.10.3",
+    "schema": 15,
+    "source_changes": [
+      "Gmail ordinary-label move now locates the destination UID before removing the source X-GM-LABELS membership",
+      "Gmail IMAP fixtures cover existing destination, read-only destination, UIDVALIDITY change, and disconnect during source removal",
+      "Partial-consent and normalized identity-scope OAuth regressions are formal tests"
+    ],
+    "gates": {
+      "race": {"exit_code": 0, "pass": 639, "fail": 0, "skip": 0, "evidence": ".planning/oauth-consent-followup/gates/race.json"},
+      "independent_overlay": {"exit_code": 0, "pass": 4, "fail": 0, "skip": 0, "evidence": ".planning/oauth-consent-followup/gates/independent.json"},
+      "ui": {"exit_code": 0, "pass": 1032, "fail": 0, "skip": 0, "combinations": 18, "page_errors": 0, "evidence": ".planning/oauth-consent-followup/gates/ui.json"},
+      "ui_gate": {"exit_code": 0, "pass": 27, "fail": 0, "skip": 0, "evidence": ".planning/oauth-consent-followup/gates/ui-gate.json"},
+      "release": {"exit_code": 0, "pass": 46, "fail": 0, "skip": 0, "evidence": ".planning/oauth-consent-followup/gates/release.json"},
+      "vet": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/vet.json"},
+      "staticcheck": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/staticcheck.json"},
+      "govulncheck": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/govulncheck.json"},
+      "compose": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/compose.json"},
+      "compose_example": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/compose-example.json"},
+      "build": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/build.json"},
+      "linux_amd64": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/linux-amd64.json"},
+      "linux_arm64": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/linux-arm64.json"},
+      "multiarch_oci": {"exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/multiarch.json"}
+    },
+    "real_accounts": {
+      "gmail": {
+        "alias": "G-PERSONAL-01",
+        "oauth_callback": "connected/generation2",
+        "sync": "4 QA labels; first/repeat/increment 13/6, 13/6, 14/7 label entries/unique IDs",
+        "x_gm_ext_1": true,
+        "refresh": "new Manager refresh grant and XOAUTH2 passed",
+        "gmail_ids": "all observed as 19-digit strings",
+        "flag_operations": "4 completed; QA web state confirmed",
+        "move_fix_direct_qa": "G-INCREMENT moved to QA-Target; refreshed web view shows target only",
+        "needs_verification_preserved": [
+          "DgF8upu533oF1a1Dx6UC-ryD1_BWQoy9",
+          "SFIfWNVqhfFe14-BIv3whu2QuPhzv2S0"
+        ],
+        "move_acceptance": "incomplete; original unknown writes were not replayed",
+        "evidence": ".planning/oauth-consent-followup/gmail-prepare-v2.json, gmail-direct.json, gmail-actions-v2.json, gmail-reconcile.json, gmail-flags.json"
+      },
+      "outlook": {
+        "alias": "MS-PERSONAL-01",
+        "refresh_and_readonly_probe": "passed; 13 folders",
+        "web_qa_operations": "mark unread/read and Trash/restore completed",
+        "web_blocker": "TrustedTypePolicy boot error recurred after restore; restore-after web comparison incomplete",
+        "evidence": ".planning/oauth-consent-followup/outlook-readonly-probe.json and outlook-web-*.json"
+      }
+    },
+    "external_blockers": [
+      "Gmail unknown writes require user-controlled/manual resolution or safe provider evidence; no automatic replay",
+      "Outlook restore-after web comparison remains blocked by official web TrustedTypePolicy error",
+      "Gmail Trash/restore, Gmail rules, Gmail manual-keep, and same-identity Outlook reauthorization remain incomplete"
+    ],
+    "published": false,
+    "deployed": false
+  },
   "source_candidate": {
     "baseline": "fbc1054a2490ecf86bc05f39eaadc688dcccdfe7",
     "commit": "811ab7a8c72c00c11f6b314841e8506c0bdddb58",

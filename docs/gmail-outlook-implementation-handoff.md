@@ -564,3 +564,28 @@ Outlook 先前 19:58 的用户授权已将同步范围改为全部可读取文�
 5. **主代理复验**：读取固定源码 SHA/tree、33 文件清单、最终测试 JSON 和原始证据，独立复跑关键测试，核对两家真实缺项。源码提交后的材料提交不扩大代码验收范围。只有主代理独立代码及真实账号验收均通过后，由主代理执行发布流程。
 
 **代码实现、自测及本地候选固定已完成；两家个人账号真实整体验收尚未完成。等待主代理独立验收；尚未发布部署。**
+
+### 15.8 Gmail 真实多标签语义修复与 0.10.3 增量
+
+Gmail 官方回调已于 22:14:22(+08) 成功，G-PERSONAL-01 为 connected/generation2；保存 scope 含完整 `https://mail.google.com/`，refresh token 加密保存。新 Manager 实际 refresh、XOAUTH2、X-GM-EXT-1、四个 QA 标签 LIST 和同步均通过。首次/重复/增量同步分别为 13/6、13/6、14/7（标签条目/唯一 Gmail ID），X-GM-MSGID 均以字符串保存。
+
+第一条真实普通标签移动 `G-MULTI` operation `DgF8upu533oF1a1Dx6UC-ryD1_BWQoy9` 和目标原本已有标签的 `G-EXISTING` operation `SFIfWNVqhfFe14-BIv3whu2QuPhzv2S0` 均进入 `needs_verification`；目标 UID 已保存但源、目标及无关标签仍存在。既有只读核验保留待核验，未取消、清除或盲目重放。真实只读 `X-GM-LABELS` 证据也显示当前选中标签可能不出现在返回集合中，不能单凭该字段判断成员。
+
+普通标签分类路径已修为：先按账号 + X-GM-MSGID 在目标标签视图定位，核对目标 UIDVALIDITY 和可写状态，再使用目标视图 UID 定向 `-X-GM-LABELS.SILENT` 移除源标签，并重新核对源/目标成员。新增夹具覆盖目标已有、目标只读、目标 UIDVALIDITY 变化和移除断线；修正后 IMAP 回归通过。独立新邮件 `G-INCREMENT` 的直接 QA 操作返回目标 UID，网页刷新后只出现在目标标签，证明协议修复生效，但不替代待核验 operation 的结案。
+
+Gmail `G-FLAGS` 的未读、已读、加旗标、取消旗标四项均 completed；网页确认 G-STAR 保持星标、G-UNREAD 保持未读、G-FLAGS 已读且无星标。Outlook 新增未读/已读以及 Trash/恢复四项 completed；恢复后网页再次触发 TrustedTypePolicy 加载错误，未伪称网页恢复后态通过。QA 任务/策略及写入均关闭。
+
+源码候选增量版本为 `0.10.3`、schema15。完整门禁退出 0：race 639/0/0、independent 4/0/0、UI 1032/0/0（18 组合，1280/375/390，页面错误0）、UI gate 27/0/0、release 46/0/0，vet/staticcheck/govulncheck/Compose/构建/amd64/arm64/双架构 OCI 均通过。证据 `.planning/oauth-consent-followup/gates/`；真实和修复证据 `.planning/oauth-consent-followup/`。未提交、未推送、未发布、未部署，原失败和待核验记录保留；等待主代理独立验收。
+
+### 15.7 本人授权返回后的权限核查（2026-11-16 晚间补充）
+
+收到用户“两个账号已授权”及 Gmail 缺少 IMAP 权限截图后，重新只读核对真实绑定状态、官方请求、回调结果和 Google 已关联应用权限，没有将口头确认替代成功绑定：
+
+- Gmail 仍为 pending、generation=1、无主体和 refresh。21:59:07 的浏览器历史结果为 `oauth_scope_missing`；原始 token 响应没有保存，因此无法追溯该次返回 scope 的精确字符串。当前官方请求包含 `openid email https://mail.google.com/`、S256、offline 和精确本机回调。Google 同一目标账号的“Mail Auto Personal QA”权限详情仅列 Google 登录/个人资料，没有 Gmail 数据访问权。这支持“仅登录权限、邮件权限未授予”的判断，未发现可复现的 scope 规范化误判，未放宽服务端校验，也没有改 OAuth 应用。
+- 新增正式测试 `internal/mailoauth/granted_scope_test.go`：四种无 IMAP scope 的 code grant 必须在身份验证前拒绝，不泄露 token、不绑定账号；四种包含正确 Gmail scope 的返回，包括 identity scope 的规范化别名和空白分隔，均接受。`go test -race -count=1 -json ./internal/mailoauth ./internal/admin` 退出 0，150 个叶子测试通过（新增 8）、失败 0、跳过 0；相关 `go vet`、新增测试格式与差异检查通过。完整证据位于 `.planning/oauth-consent-followup/`，这批新增测试尚未包含在固定源码提交 `811ab7a` 中；产品实现、版本 0.10.2 和 schema15 未改变。
+- Outlook 仍 connected、generation=4，最近一条成功授权审计为 19:34:39；尚无本轮晚间同身份重新授权回调成功证据。22:06:34–22:06:37，新 Manager 无 access-token 缓存的真实只读诊断再次通过 refresh、XOAUTH2 和 13 目录列表，MOVE/UIDPLUS 可用，退出 0；没有改过期时间。
+- Outlook 官方网页首次仍发生 TrustedTypePolicy default 冲突；点击官方建议的 Refresh 后恢复，确认是同一绑定邮箱。仅进入专用 QA 目录核对，源 3、目标 3、存档 1。随后仅对 M-FLAGS-02 执行 `mark_unread` / `mark_read`，以网页前后状态补验；operation ID、时间、退出码与截图见 `outlook-web-*.json` 和补充汇总。这是新增两个操作，不能替代其他动作尚缺的逐动作网页对照。每次 helper 完成后恢复 `writes_enabled=false`，任务和策略未开启。
+
+证据汇总为 `.planning/oauth-consent-followup/followup-results.json`，权限和 QA 截图只留在受限本地目录，不入 Git。首次打开 Outlook 默认收件箱时，网页自动渲染了私人邮件列表预览，随后立即进入 QA 目录；没有打开私人邮件或保存这些预览内容，不能将其描述成“未见任何私人正文片段”。没有修改私人邮件、发信、永久删除或访问生产。
+
+剩余最少本人步骤：在本机 Gmail 卡片发起的有效官方授权中选择约定账号，并在权限页明确勾选 Gmail 邮件访问项后继续；只同意 Google 登录不足以完成邮箱授权。请求过期时从原管理会话重新发起。随后才能执行 Gmail 的全部真实 IMAP、刷新、多标签、整理及保护验收。Outlook 的晚间同身份重新授权、其他动作逐项网页前后对照和安全真实人工保留夹具仍待补齐。组织账号仍未验证；等待主代理独立验收；尚未发布部署。

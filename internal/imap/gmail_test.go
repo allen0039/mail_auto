@@ -139,10 +139,17 @@ func (fixture *gmailFixture) adapter(t *testing.T) Adapter {
 				case "EXAMINE", "SELECT":
 					folder = strings.Trim(args, "\"")
 					mode := "READ-ONLY"
+					validity := 7
 					if command == "SELECT" {
 						mode = "READ-WRITE"
+						if folder == "Bills" && fixture.mode == "destination_readonly" {
+							mode = "READ-ONLY"
+						}
+						if folder == "Bills" && fixture.mode == "destination_uidvalidity_changed" {
+							validity = 8
+						}
 					}
-					fmt.Fprintf(right, "* FLAGS (\\Seen \\Flagged)\r\n* 1 EXISTS\r\n* OK [UIDVALIDITY 7] validity\r\n%s OK [%s] selected\r\n", tag, mode)
+					fmt.Fprintf(right, "* FLAGS (\\Seen \\Flagged)\r\n* 1 EXISTS\r\n* OK [UIDVALIDITY %d] validity\r\n%s OK [%s] selected\r\n", validity, tag, mode)
 				case "UID":
 					if strings.HasPrefix(args, "FETCH ") {
 						id := fixtureGmailID
@@ -161,14 +168,20 @@ func (fixture *gmailFixture) adapter(t *testing.T) Adapter {
 							fmt.Fprintf(right, "* SEARCH\r\n%s OK search\r\n", tag)
 						}
 					} else if strings.Contains(args, "X-GM-LABELS.SILENT") {
-						if fixture.mode == "disconnect_store" {
+						if fixture.mode == "disconnect_store" || (fixture.mode == "disconnect_remove" && strings.Contains(args, "-X-GM-LABELS")) {
 							return
 						}
 						fixture.mu.Lock()
+						_, label, _ := strings.Cut(args, "X-GM-LABELS.SILENT ")
+						label = strings.Trim(label, "()\"")
+						label = strings.ReplaceAll(label, "\\\\", "\\")
+						if label == "\\Inbox" {
+							label = "INBOX"
+						}
 						if strings.Contains(args, "+X-GM-LABELS") {
-							fixture.labels["Bills"] = true
-						} else {
-							delete(fixture.labels, folder)
+							fixture.labels[label] = true
+						} else if label != folder {
+							delete(fixture.labels, label)
 						}
 						fixture.mu.Unlock()
 						fmt.Fprintf(right, "%s OK store\r\n", tag)
@@ -215,7 +228,7 @@ func TestGmailSpecialUseCapabilities(t *testing.T) {
 }
 
 func TestGmailLabelMoveAndArchive(t *testing.T) {
-	for _, mode := range []string{"move", "existing_target", "archive", "wrong_id", "disconnect_store", "protected", "protected_after_add", "trash_rejected", "all_mail_source_rejected"} {
+	for _, mode := range []string{"move", "existing_target", "archive", "wrong_id", "disconnect_store", "disconnect_remove", "destination_readonly", "destination_uidvalidity_changed", "protected", "protected_after_add", "trash_rejected", "all_mail_source_rejected"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := &gmailFixture{labels: map[string]bool{"INBOX": true, "Unrelated": true, fixtureAllMail: true}, mode: mode}
 			adapter := fixture.adapter(t)
@@ -254,7 +267,7 @@ func TestGmailLabelMoveAndArchive(t *testing.T) {
 			if wantSuccess && (result != mapping || result.UIDValidity != 7 || result.Folder != destination) {
 				t.Fatal("real destination mapping missing")
 			}
-			if mode == "disconnect_store" || mode == "protected_after_add" {
+			if mode == "disconnect_store" || mode == "disconnect_remove" || mode == "destination_readonly" || mode == "destination_uidvalidity_changed" || mode == "protected_after_add" {
 				if !errors.Is(err, mail.ErrUncertain) {
 					t.Fatal("issued write lost unknown outcome")
 				}
@@ -269,6 +282,18 @@ func TestGmailLabelMoveAndArchive(t *testing.T) {
 			}
 			if wantSuccess && source {
 				t.Fatal("source membership retained")
+			}
+			if (mode == "destination_readonly" || mode == "destination_uidvalidity_changed") && strings.Contains(trace, "-X-GM-LABELS.SILENT") {
+				t.Fatal("source label removal issued against an unsafe destination snapshot")
+			}
+			if wantSuccess {
+				targetUID := 99
+				if mode == "archive" {
+					targetUID = 100
+				}
+				if !strings.Contains(trace, fmt.Sprintf(" UID STORE %d -X-GM-LABELS.SILENT", targetUID)) {
+					t.Fatal("source label was not removed using the destination view UID")
+				}
 			}
 			for _, forbidden := range []string{"COPY ", "MOVE ", "EXPUNGE", "\\Deleted"} {
 				if strings.Contains(trace, forbidden) {

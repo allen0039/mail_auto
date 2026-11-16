@@ -831,6 +831,9 @@ class ManualKeepSchemaTest(unittest.TestCase):
             ("0.10.2", 14, 15, True), ("0.10.2", 15, 15, True),
             ("0.10.2", 13, 15, False), ("0.10.2", 14, 14, False),
             ("0.10.2", 15, 16, False), ("0.10.2", None, 15, False),
+            ("0.10.3", 14, 15, True), ("0.10.3", 15, 15, True),
+            ("0.10.3", 13, 15, False), ("0.10.3", 14, 14, False),
+            ("0.10.3", 15, 16, False), ("0.10.3", None, 15, False),
         ]:
             with self.subTest(version=version, before=before, after=after):
                 self.assertEqual(rv.schema_matches(version, before, after), expected)

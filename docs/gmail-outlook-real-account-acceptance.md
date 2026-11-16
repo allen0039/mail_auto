@@ -207,3 +207,25 @@ Gmail 仅创建待授权账号，允许范围精确为 `MailAuto-QA-A`、`MailAu
 - **组织账号与受限操作**：Workspace/M365 未验证；Gmail Trash/恢复、特殊目录移动、保留两份、move/archive undo、未知标签写入补齐仍服务端拒绝。
 
 **代码实现和自测已完成；Gmail 与 Outlook 真实整体验收均未完成。等待主代理独立验收；尚未发布部署。** 下一步最少本人动作是完成 Google 和 Microsoft 官方账号选择/同意；不要向聊天提供密码、密钥、验证码或 token。
+
+### 8.5 Gmail 回调成功后的专用 QA 实测及分类阻塞
+
+Gmail 官方回调于 22:14:22(+08) 成功，G-PERSONAL-01 为 connected/generation2，scope 包含完整 `https://mail.google.com/`。新 Manager 实际 refresh/XOAUTH2/X-GM-EXT-1 通过；四个 QA 标签首次/重复/增量同步分别为 13/6、13/6、14/7（标签条目/唯一 Gmail ID），Gmail QA-A 网页显示七封合成主题、未读及星标。
+
+真实分类发现 `G-MULTI` 和目标原本已有的 `G-EXISTING` 均进入待核验，目标 UID 已保存但源标签没有安全移除，源、目标和无关标签仍同时存在。原 operation 与只读核验均保持 `needs_verification`，不取消、不删除、不重放。独立新邮件 `G-INCREMENT` 直接 QA 操作返回目标 UID，网页刷新确认只存在于目标标签；该证据用于验证修复，不替代待核验操作结案。
+
+代码候选增量至 0.10.3：分类先在目标标签视图按稳定 Gmail ID 定位，核对目标 UIDVALIDITY/可写状态，再移除源标签；新增目标已有、只读、UIDVALIDITY 变化和断线夹具。标记动作四项 completed，网页确认 QA 标记状态。Gmail 规则/分类整体验收仍未通过，因未知写入尚未安全结案；Trash/恢复、人工保留及规则 run 未执行。
+
+Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的官方网页仍有 TrustedTypePolicy 错误，不能算恢复后网页对照通过。完整门禁 race 639/0/0、independent 4/0/0、UI 1032/0/0、UI gate 27/0/0、release 46/0/0，其余检查和双架构构建均退出0。证据位于 `.planning/oauth-consent-followup/` 和 `gates/`。**Gmail 与 Outlook 真实整体验收仍未完成；等待主代理独立验收；尚未发布部署。**
+
+### 8.4 授权返回失败的独立核对与 Outlook 网页恢复
+
+2026-11-16 晚间收到 Gmail 权限错误截图后，核对 Google 官方请求确实含 `openid email https://mail.google.com/`、offline、PKCE S256 和本机精确回调。21:59:07 浏览器历史留下 `oauth_scope_missing`，G-PERSONAL-01 仍 pending/generation1，无主体和 refresh。Google 账号的关联应用详情仅显示 Mail Auto Personal QA 获准 Google 登录/个人资料，未列 Gmail 数据访问。这是当前缺邮件授权的直接官方页面证据；没有保存原始 token 响应，不能声称已知其精确 scope 字符串，也未复现 scope 规范化误判。
+
+补充正式回归覆盖 identity-only、规范化 identity scope、Gmail readonly 与缺 scope 的拒绝，以及正确 IMAP scope 与 identity 别名/空白组合的接受。两包 race 共 150 个叶子通过、0 失败/跳过，新增 8 项；相关 vet、格式及差异检查通过。只新增测试，不改变产品校验，不以 mock 替代真实 Gmail 验收。
+
+MS-PERSONAL-01 仍 connected/generation4，成功授权审计最近为 19:34:39；晚间重新授权不能记为通过。22:06 的新 Manager 真实刷新后只读 IMAP 诊断通过，13 目录、MOVE/UIDPLUS。官方网页首次加载错误仍保留；按官方 Refresh 建议后恢复同一账号的 QA 目录：源 3 封、目标 3 封、存档 1 封。随后仅对 `[MA-QA-574b047] M-FLAGS-02` 补做未读/已读网页前后核对，新增两条 completed 操作；其他动作的逐项网页对照仍未全部补齐。任务/策略保持关闭，临时写入每次恢复关闭。
+
+本轮起始打开 Outlook 默认收件箱时自动出现私人列表预览，随后立即切到 QA；未打开私人邮件，未将这些预览存入证据或报告。补充 JSON、实际 operation ID、退出码及仅 QA/授权页截图在 `.planning/oauth-consent-followup/`，对应实施交接第 15.7 节。原证据和失败记录均保留。
+
+当前必须本人在 Google 官方页面明确授予 Gmail 邮件权限，之后才能继续 Gmail 实测；未代点账号选择或权限同意。Outlook 晚间同身份重新授权、其余网页动作对照、真实人工保留及所有 Gmail 验收仍未完成。**等待主代理独立验收；尚未发布部署。**
