@@ -251,6 +251,16 @@ Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的�
 
 运行状态另有偏差：检查时发现QA后端PID32026仍监听18090，并非已关闭；确认其为本项目私有QA可执行文件后发送SIGTERM，随后无监听，未重启。关闭后普通只读SQLite因WAL侧文件打开失败，改用已停机数据库的 `mode=ro&immutable=1` 完成只读核对，没有创建侧文件或修改业务记录。保持QA后端关闭，不发布部署。
 
+#### 8.6.2 检查点A：停机数据库与身份只读复核（2026-11-17）
+
+按主代理授权执行只读检查：实际 HEAD 为 `891414354e46526dc323a05a1ee126f71c665870`，源码候选仍为 `8f8ee807eb457f065be912d4052096a774901a5a`、0.10.3/schema15。18090 无监听，未启动 Worker；数据库无 WAL sidecar，确认无活动写入后以 `mode=ro&immutable=1` 读取必要列。user_version=15；两个账号 `writes_enabled=0`，两个任务均停用，queued/running=0，completed=24，needs_verification=3。三条 unknown 的状态、冻结计划 SHA256、settings version 和稳定ID脱敏摘要见 `.planning/service-qa-followup/checkpoint-a-readonly.json`。
+
+当前本地索引仍有 SVC2 六个逻辑稳定ID、12个成员条目，与 `gmail-v2-rules.json` after_rules 逐项一致；helper源码确认六个主题后缀及RFC Message-ID模板，冻结完成计划中的G-MULTI、G-EXISTING、G-RULE与索引对应。因后端已停且本检查点禁止启动新认证helper，没有执行新的远端IMAP查询；不能把本地索引当作当前服务商状态。
+
+主代理报告的官方网页现场仍与本地/历史证据矛盾：MailAuto-QA-Target显示4封旧 `[MA-QA-811ab7a]`，精确SVC2搜索曾返回旧SVC1邮件。本轮未导航或交互该主代理所属浏览器会话，未归因于缓存、身份、线程聚合或产品缺陷。历史 `oauth_scope_missing` 只证明当时授权返回缺少邮件scope；本检查点未读取当前OAuth响应、token或secret，不能宣称当前仍缺scope，也不降低 `https://mail.google.com/` 校验。
+
+三个unknown证据足以证明稳定身份和冻结计划存在，但没有本轮提供的服务商只读核验结果；因此均**证据不足以正式结案，继续保留 `needs_verification`**，未调用恢复接口、未手改SQL、未跨标签绕过busy。检查点A到此停止，等待主代理复核后再决定是否进入B/C。
+
 ### 8.4 授权返回失败的独立核对与 Outlook 网页恢复
 
 2026-11-16 晚间收到 Gmail 权限错误截图后，核对 Google 官方请求确实含 `openid email https://mail.google.com/`、offline、PKCE S256 和本机精确回调。21:59:07 浏览器历史留下 `oauth_scope_missing`，G-PERSONAL-01 仍 pending/generation1，无主体和 refresh。Google 账号的关联应用详情仅显示 Mail Auto Personal QA 获准 Google 登录/个人资料，未列 Gmail 数据访问。这是当前缺邮件授权的直接官方页面证据；没有保存原始 token 响应，不能声称已知其精确 scope 字符串，也未复现 scope 规范化误判。
