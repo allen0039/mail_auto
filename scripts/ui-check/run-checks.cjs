@@ -93,7 +93,7 @@ async function main() {
             ]));
             await page.reload({waitUntil: "networkidle0"});
             await page.waitForSelector(".mail-oauth-result");
-            r.results.push({name: "real page reload retains sanitized callback notice", ok: true});
+            r.results.push({name: "real page reload retains sanitized callback notice", ok: await page.$eval(".mail-oauth-result", (notice, accountID) => notice.textContent.includes("明确同意 IMAP 邮件访问") && notice.closest("[data-account]").dataset.account === accountID && location.search === "", startupAccount.id)});
             await page.click(".mail-oauth-result [data-action=oauth-dismiss]");
             await page.reload({waitUntil: "networkidle0"});
             r.results.push({name: "real reload cannot resurrect dismissed callback", ok: await page.$(".mail-oauth-result") === null});
