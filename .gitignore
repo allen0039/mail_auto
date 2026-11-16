@@ -33,6 +33,7 @@
 /progress.md
 /local-data/
 /local-keys/
+/mail-oauth-apps*.json
 *.log
 *.tar
 *.tar.gz

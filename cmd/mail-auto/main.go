@@ -20,6 +20,7 @@ import (
 	"mail-auto/internal/credentials"
 	remote "mail-auto/internal/imap"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 	"mail-auto/internal/telegram"
@@ -60,8 +61,9 @@ func run(args []string) error {
 	isShow := len(cmd) == 2 && cmd[0] == "bootstrap" && cmd[1] == "show"
 	isRecover := len(cmd) == 2 && cmd[0] == "bootstrap" && cmd[1] == "recover"
 	isBackup := len(cmd) == 2 && cmd[0] == "backup"
-	if !isServe && !isShow && !isRecover && !isBackup {
-		return errors.New("usage: mail-auto [flags] [serve | version | bootstrap show | bootstrap recover | backup PATH | healthcheck]")
+	isOAuthExport := len(cmd) == 3 && cmd[0] == "mail-oauth" && cmd[1] == "export"
+	if !isServe && !isShow && !isRecover && !isBackup && !isOAuthExport {
+		return errors.New("usage: mail-auto [flags] [serve | version | bootstrap show | bootstrap recover | backup PATH | mail-oauth export PATH | healthcheck]")
 	}
 	if !isServe {
 		if _, e = os.Stat(filepath.Join(c.DataDir, "mail-auto.db")); e != nil {
@@ -110,6 +112,14 @@ func run(args []string) error {
 		fmt.Println("Consistent database snapshot created. Back up master.key separately.")
 		return nil
 	}
+	if isOAuthExport {
+		manager := &mailoauth.Manager{Store: st, Vault: vault}
+		if e = manager.ExportApps(cmd[2]); e != nil {
+			return e
+		}
+		fmt.Println("OAuth application deployment file created with mode 0600. Contains client secrets; keep private and mount read-only. No mailbox tokens were exported.")
+		return nil
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	networks := network.New(st, vault)
@@ -117,6 +127,11 @@ func run(args []string) error {
 	adapter := remote.NewAdapter()
 	adapter.Network = networks
 	service := &mail.Service{Store: st, Vault: vault, Network: networks, Remote: adapter, SecretDir: c.SecretDir, Context: ctx, NotificationPublicURL: c.PublicURL}
+	if c.MailOAuthAppsFile != "" {
+		if e = service.OAuthManager().ProvisionApps(c.MailOAuthAppsFile, c.PublicURL); e != nil {
+			return e
+		}
+	}
 	if e = service.RecoverSync(ctx); e != nil {
 		return e
 	}

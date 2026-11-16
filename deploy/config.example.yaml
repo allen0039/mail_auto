@@ -6,6 +6,10 @@ secret_dir: /run/secrets
 # 通过 HTTPS 代理访问时，设置精确的浏览器访问 Origin（不含路径）。
 # public_url: "https://mail.example.com"
 # secure_cookie: true
+# 复用已有 Google / Microsoft OAuth 应用；文件只挂载到运行环境，不放进镜像。
+# 文件须仅所有者可读（0400/0600），容器运行用户为 65532。
+# 需要上述 HTTPS public_url；回调在服务商控制台登记，详见 docs/oauth-app-reuse.md。
+# mail_oauth_apps_file: /run/secrets/mail-oauth-apps.json
 session_hours: 12
 # Legacy compatibility only; metadata now always covers all history.
 retention_days: 0

@@ -1,0 +1,821 @@
+{
+  "baseline": "fbc1054a2490ecf86bc05f39eaadc688dcccdfe7",
+  "candidate_commit": null,
+  "candidate_status": "uncommitted working tree; implementation file hashes in candidate_files",
+  "version": "0.10.1",
+  "schema": 15,
+  "real_account_acceptance": "pending",
+  "published": false,
+  "versions": {
+    "go": {
+      "argv": [
+        "go",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "go version go1.27.4 darwin/arm64"
+    },
+    "node": {
+      "argv": [
+        "node",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "v24.22.3"
+    },
+    "python": {
+      "argv": [
+        "python3",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "Python 3.9.6"
+    },
+    "docker": {
+      "argv": [
+        "docker",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "Docker version 29.8.2, build 7fc2dff"
+    },
+    "compose": {
+      "argv": [
+        "docker",
+        "compose",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "Docker Compose version v5.5.0"
+    },
+    "buildx": {
+      "argv": [
+        "docker",
+        "buildx",
+        "version"
+      ],
+      "exit_code": 0,
+      "output": "github.com/docker/buildx v0.37.2 2d379c0c3f22da0d2759d132a0ec81ca949098f0"
+    },
+    "chrome": {
+      "argv": [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "Google Chrome 157.0.8103.51"
+    },
+    "git": {
+      "argv": [
+        "git",
+        "--version"
+      ],
+      "exit_code": 0,
+      "output": "git version 2.39.5 (Apple Git-154)"
+    },
+    "staticcheck": {
+      "argv": [
+        "go",
+        "run",
+        "honnef.co/go/tools/cmd/staticcheck@v0.8.2",
+        "-version"
+      ],
+      "exit_code": 0,
+      "output": "staticcheck 2026.2.2 (0.8.2)"
+    },
+    "govulncheck": {
+      "argv": [
+        "go",
+        "run",
+        "golang.org/x/vuln/cmd/govulncheck@v1.9.0",
+        "-version"
+      ],
+      "exit_code": 0,
+      "output": "Go: go1.27.4\nScanner: govulncheck@v1.9.0\nDB: https://vuln.go.dev\nDB updated: 2026-11-11 02:51:11 +0000 UTC"
+    }
+  },
+  "additional_tool_versions": {
+    "puppeteer-core": "25.16.0",
+    "@puppeteer/browsers": "3.2.6",
+    "verification": "Node require.resolve with paths=['scripts/ui-check']; exit 0"
+  },
+  "checks": [
+    {
+      "name": "targeted",
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mailoauth",
+        "./internal/config",
+        "./cmd/mail-auto",
+        "-run",
+        "TestDeployment|TestMailOAuthDeploymentFile|TestOAuthApplicationExportCommand|TestServeRejectsBadOAuthBundle"
+      ],
+      "started": "2026-11-16T14:55:20.728181+08:00",
+      "seconds": 31.462,
+      "exit_code": 0,
+      "counts": {
+        "pass": 29,
+        "fail": 0,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/targeted.log"
+    },
+    {
+      "name": "full-race",
+      "argv": [
+        "go",
+        "test",
+        "-race",
+        "-count=1",
+        "-json",
+        "./..."
+      ],
+      "started": "2026-11-16T14:55:20.728705+08:00",
+      "seconds": 307.975,
+      "exit_code": 0,
+      "counts": {
+        "pass": 587,
+        "fail": 0,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/full-race.log"
+    },
+    {
+      "name": "vet",
+      "argv": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "started": "2026-11-16T14:55:20.728842+08:00",
+      "seconds": 3.067,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/vet.log"
+    },
+    {
+      "name": "staticcheck",
+      "argv": [
+        "go",
+        "run",
+        "honnef.co/go/tools/cmd/staticcheck@v0.8.2",
+        "./..."
+      ],
+      "started": "2026-11-16T14:55:23.797490+08:00",
+      "seconds": 64.505,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/staticcheck.log"
+    },
+    {
+      "name": "govulncheck",
+      "argv": [
+        "go",
+        "run",
+        "golang.org/x/vuln/cmd/govulncheck@v1.9.0",
+        "./..."
+      ],
+      "started": "2026-11-16T14:55:52.191852+08:00",
+      "seconds": 10.08,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/govulncheck.log"
+    },
+    {
+      "name": "source-format",
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess,sys; result=subprocess.run(['gofmt','-l','cmd','internal','scripts'],capture_output=True,text=True); print(result.stdout,end=''); print(result.stderr,end='',file=sys.stderr); sys.exit(result.returncode or bool(result.stdout.strip()))"
+      ],
+      "started": "2026-11-16T14:56:02.272894+08:00",
+      "seconds": 0.126,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/source-format.log"
+    },
+    {
+      "name": "workspace-format",
+      "argv": [
+        "python3",
+        "-c",
+        "import subprocess,sys; result=subprocess.run(['gofmt','-l','.'],capture_output=True,text=True); print(result.stdout,end=''); print(result.stderr,end='',file=sys.stderr); sys.exit(result.returncode or bool(result.stdout.strip()))"
+      ],
+      "started": "2026-11-16T14:56:02.399737+08:00",
+      "seconds": 0.388,
+      "exit_code": 1,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/workspace-format.log"
+    },
+    {
+      "name": "release-fixtures",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/release-verify",
+        "-v"
+      ],
+      "started": "2026-11-16T14:56:02.788254+08:00",
+      "seconds": 2.763,
+      "exit_code": 0,
+      "counts": {
+        "pass": 46,
+        "fail": 0,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/release-fixtures.log"
+    },
+    {
+      "name": "compose",
+      "argv": [
+        "docker",
+        "compose",
+        "config",
+        "--quiet"
+      ],
+      "started": "2026-11-16T14:56:05.551504+08:00",
+      "seconds": 0.217,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/compose.log"
+    },
+    {
+      "name": "compose-example",
+      "argv": [
+        "docker",
+        "compose",
+        "-f",
+        "compose.yaml",
+        "-f",
+        "deploy/compose.override.example.yaml",
+        "config",
+        "--quiet"
+      ],
+      "started": "2026-11-16T14:56:05.769264+08:00",
+      "seconds": 0.099,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/compose-example.log"
+    },
+    {
+      "name": "build",
+      "argv": [
+        "make",
+        "build"
+      ],
+      "started": "2026-11-16T14:56:05.868486+08:00",
+      "seconds": 2.821,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/build.log"
+    },
+    {
+      "name": "ui",
+      "argv": [
+        "scripts/ui-check/run.sh"
+      ],
+      "started": "2026-11-16T14:56:08.689818+08:00",
+      "seconds": 62.236,
+      "exit_code": 0,
+      "counts": {
+        "pass": 1020,
+        "fail": 0,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/ui.log",
+      "script_width_combinations": 18,
+      "page_errors": 0,
+      "details": [
+        {
+          "script": "settings-ui-check.js",
+          "width": 1280,
+          "pass": true,
+          "total": 45,
+          "failed": []
+        },
+        {
+          "script": "settings-ui-check.js",
+          "width": 375,
+          "pass": true,
+          "total": 45,
+          "failed": []
+        },
+        {
+          "script": "settings-ui-check.js",
+          "width": 390,
+          "pass": true,
+          "total": 45,
+          "failed": []
+        },
+        {
+          "script": "model-ui-check.js",
+          "width": 1280,
+          "pass": true,
+          "total": 63,
+          "failed": []
+        },
+        {
+          "script": "model-ui-check.js",
+          "width": 375,
+          "pass": true,
+          "total": 63,
+          "failed": []
+        },
+        {
+          "script": "model-ui-check.js",
+          "width": 390,
+          "pass": true,
+          "total": 63,
+          "failed": []
+        },
+        {
+          "script": "ownership-ui-check.js",
+          "width": 1280,
+          "pass": true,
+          "total": 87,
+          "failed": []
+        },
+        {
+          "script": "ownership-ui-check.js",
+          "width": 375,
+          "pass": true,
+          "total": 87,
+          "failed": []
+        },
+        {
+          "script": "ownership-ui-check.js",
+          "width": 390,
+          "pass": true,
+          "total": 87,
+          "failed": []
+        },
+        {
+          "script": "task-editor-ui-check.js",
+          "width": 1280,
+          "pass": true,
+          "total": 99,
+          "failed": []
+        },
+        {
+          "script": "task-editor-ui-check.js",
+          "width": 375,
+          "pass": true,
+          "total": 99,
+          "failed": []
+        },
+        {
+          "script": "task-editor-ui-check.js",
+          "width": 390,
+          "pass": true,
+          "total": 99,
+          "failed": []
+        },
+        {
+          "script": "manual-keep-ui-check.js",
+          "width": 1280,
+          "pass": true,
+          "total": 13,
+          "failed": []
+        },
+        {
+          "script": "manual-keep-ui-check.js",
+          "width": 375,
+          "pass": true,
+          "total": 13,
+          "failed": []
+        },
+        {
+          "script": "manual-keep-ui-check.js",
+          "width": 390,
+          "pass": true,
+          "total": 13,
+          "failed": []
+        },
+        {
+          "script": "mail-oauth-ui-check.js",
+          "width": 1280,
+          "pass": true,
+          "total": 33,
+          "failed": []
+        },
+        {
+          "script": "mail-oauth-ui-check.js",
+          "width": 375,
+          "pass": true,
+          "total": 33,
+          "failed": []
+        },
+        {
+          "script": "mail-oauth-ui-check.js",
+          "width": 390,
+          "pass": true,
+          "total": 33,
+          "failed": []
+        }
+      ],
+      "environment": {
+        "PUPPETEER": "puppeteer-core",
+        "CHROME_PATH": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      }
+    },
+    {
+      "name": "ui-gate",
+      "argv": [
+        "node",
+        "--test",
+        "--test-reporter=tap",
+        "scripts/ui-check/gate-test.cjs"
+      ],
+      "started": "2026-11-16T14:56:28.304388+08:00",
+      "seconds": 65.604,
+      "exit_code": 1,
+      "counts": {
+        "pass": 26,
+        "fail": 1,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/ui-gate.log",
+      "environment": {
+        "PUPPETEER": "puppeteer-core",
+        "CHROME_PATH": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      }
+    },
+    {
+      "name": "ui-gate-isolated",
+      "argv": [
+        "node",
+        "--test",
+        "--test-reporter=tap",
+        "scripts/ui-check/gate-test.cjs"
+      ],
+      "started": "2026-11-16T14:59:12.492180+08:00",
+      "seconds": 67.109,
+      "exit_code": 0,
+      "counts": {
+        "pass": 27,
+        "fail": 0,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/ui-gate-isolated.log",
+      "environment": {
+        "PUPPETEER": "puppeteer-core",
+        "CHROME_PATH": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      }
+    },
+    {
+      "name": "original-counterexamples",
+      "argv": [
+        "go",
+        "test",
+        "-overlay=.planning/gmail-outlook-independent-acceptance/overlay.json",
+        "-race",
+        "-count=1",
+        "-json",
+        "./internal/mail",
+        "-run",
+        "^TestIndependent"
+      ],
+      "started": "2026-11-16T14:57:10.927993+08:00",
+      "seconds": 8.461,
+      "exit_code": 0,
+      "counts": {
+        "pass": 4,
+        "fail": 0,
+        "skip": 0
+      },
+      "evidence": ".planning/oauth-app-reuse/original-counterexamples.log"
+    },
+    {
+      "name": "linux-amd64",
+      "argv": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/Users/allen/Downloads/Agent_Worker/mail_auto/.planning/oauth-app-reuse/mail-auto-amd64",
+        "./cmd/mail-auto"
+      ],
+      "started": "2026-11-16T14:57:19.390065+08:00",
+      "seconds": 2.849,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/linux-amd64.log",
+      "environment": {
+        "GOOS": "linux",
+        "GOARCH": "amd64",
+        "CGO_ENABLED": "0"
+      }
+    },
+    {
+      "name": "linux-arm64",
+      "argv": [
+        "go",
+        "build",
+        "-trimpath",
+        "-o",
+        "/Users/allen/Downloads/Agent_Worker/mail_auto/.planning/oauth-app-reuse/mail-auto-arm64",
+        "./cmd/mail-auto"
+      ],
+      "started": "2026-11-16T14:57:22.239580+08:00",
+      "seconds": 2.322,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/linux-arm64.log",
+      "environment": {
+        "GOOS": "linux",
+        "GOARCH": "arm64",
+        "CGO_ENABLED": "0"
+      }
+    },
+    {
+      "name": "diff-check",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "started": "2026-11-16T14:57:24.561606+08:00",
+      "seconds": 0.024,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/diff-check.log"
+    },
+    {
+      "name": "builder-create",
+      "argv": [
+        "docker",
+        "buildx",
+        "create",
+        "--driver",
+        "docker-container",
+        "--name",
+        "mail-auto-oauth-reuse-0101",
+        "--bootstrap"
+      ],
+      "started": "2026-11-16T14:58:09.862187+08:00",
+      "seconds": 3.148,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/builder-create.log"
+    },
+    {
+      "name": "multiarch-image",
+      "argv": [
+        "docker",
+        "buildx",
+        "build",
+        "--builder",
+        "mail-auto-oauth-reuse-0101",
+        "--platform",
+        "linux/amd64,linux/arm64",
+        "--output",
+        "type=oci,dest=/Users/allen/Downloads/Agent_Worker/mail_auto/.planning/oauth-app-reuse/candidate-image.tar",
+        "."
+      ],
+      "started": "2026-11-16T14:58:13.010733+08:00",
+      "seconds": 76.578,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/multiarch-image.log"
+    },
+    {
+      "name": "builder-cleanup",
+      "argv": [
+        "docker",
+        "buildx",
+        "rm",
+        "mail-auto-oauth-reuse-0101"
+      ],
+      "started": "2026-11-16T14:59:29.591308+08:00",
+      "seconds": 1.082,
+      "exit_code": 0,
+      "counts": null,
+      "evidence": ".planning/oauth-app-reuse/builder-cleanup.log"
+    }
+  ],
+  "image_verification": {
+    "exit_code": 0,
+    "checked_blobs": 32,
+    "platforms": [
+      {
+        "platform": "linux/amd64",
+        "manifest": "sha256:fcc628b69c8f5b70a8543dc8b8f5ec15a10e99934ddb51bbcd24892092410036",
+        "config": "sha256:c81b03eb38ff46072c794ebd9b614ffb1ac7975831186efaa90eed688eacb407"
+      },
+      {
+        "platform": "linux/arm64",
+        "manifest": "sha256:03ae0416359c516a910e4fac5d5481d91dfbc1b8f33b3e2d0be14658302b43be",
+        "config": "sha256:e969bee5d7ae2aafe18a958935095ba7d23524b2540c20522774a0e765f3e15e"
+      }
+    ],
+    "archive_sha256": "6a4b89e87a57c96daa6c166d7c571638a0f09d6f5f1c4aa5b027e70756fa9bf9",
+    "push": false
+  },
+  "final_review": {
+    "exit_code": 0,
+    "candidate_file_count": 22,
+    "hashes_match": true,
+    "evidence_paths_exist": true,
+    "sensitive_literal_pattern_hits": 0,
+    "checks": {
+      "diff": {
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0,
+        "output": ""
+      },
+      "source_format": {
+        "argv": [
+          "gofmt",
+          "-l",
+          "cmd",
+          "internal",
+          "scripts"
+        ],
+        "exit_code": 0,
+        "output": ""
+      },
+      "version": {
+        "argv": [
+          "bin/mail-auto",
+          "version"
+        ],
+        "exit_code": 0,
+        "output": "0.10.1\n"
+      }
+    },
+    "scope_note": "Pattern scan is limited; manual diff review also performed. No index or commit mutation."
+  },
+  "local_google_reuse_smoke": {
+    "exit_code": 0,
+    "checks": [
+      {
+        "restart": 0,
+        "ready_version": "0.10.1",
+        "schema": 15,
+        "configured_providers": [
+          "google"
+        ],
+        "application_version": 1,
+        "mailbox_accounts": 0,
+        "encrypted_secret": true
+      },
+      {
+        "restart": 1,
+        "ready_version": "0.10.1",
+        "schema": 15,
+        "configured_providers": [
+          "google"
+        ],
+        "application_version": 1,
+        "mailbox_accounts": 0,
+        "encrypted_secret": true
+      }
+    ],
+    "restart_did_not_rotate_credentials": true,
+    "real_mailbox_authorization": false,
+    "real_mail_writes": 0,
+    "evidence": [
+      ".planning/oauth-app-reuse/local-google-smoke-0.log",
+      ".planning/oauth-app-reuse/local-google-smoke-1.log"
+    ]
+  },
+  "known_failures": [
+    {
+      "name": "workspace-format",
+      "classification": "pre-existing temporary Go files outside candidate source",
+      "exit_code": 1,
+      "paths": [
+        ".claude/worktrees/acceptance-report-optimization-410bae/.planning/acceptance-round3-20261112/crash_flags_probe_test.go",
+        ".planning/acceptance-round3-20261112/crash_flags_probe_test.go",
+        ".planning/manual-resolution-092/preview-probe/main.go"
+      ]
+    },
+    {
+      "name": "ui-gate",
+      "classification": "resource-count assertion raced with concurrently running default UI suite",
+      "exit_code": 1,
+      "counts": {
+        "pass": 26,
+        "fail": 1,
+        "skip": 0
+      },
+      "rerun": "ui-gate-isolated",
+      "rerun_exit_code": 0,
+      "rerun_counts": {
+        "pass": 27,
+        "fail": 0,
+        "skip": 0
+      }
+    }
+  ],
+  "collection_errors": [
+    "Initial auxiliary summary assumed UI results array; corrected to actual out/total shape. No test assertion changed.",
+    "Additional Node version query at repository root could not resolve puppeteer-core; resolved from scripts/ui-check successfully. No UI execution failed due to this query."
+  ],
+  "candidate_files": [
+    {
+      "path": ".gitignore",
+      "sha256": "e5283aeb16c4b76904fd347500502a8fe4146bbd6fc0546a38ca4b148e4f7487"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "ebe9409c5d0a757fcbce686791ee80b880b1ff2d12c98e8fd9fb67fc32f738ca"
+    },
+    {
+      "path": "README.md",
+      "sha256": "cc60009eb6e0dd43fae6dea4490200d672478d82116ab3b7fdfe64ae43c05cc4"
+    },
+    {
+      "path": "cmd/mail-auto/main.go",
+      "sha256": "1f8f4029f970b447980cb8d7e76bc2b9b73025da4126b7d0c22d6cc648069120"
+    },
+    {
+      "path": "cmd/mail-auto/main_test.go",
+      "sha256": "4322b12f987db152cf7e6c59f3c717d6ccfc4410a2909a7c80fd5c2e5ece8c93"
+    },
+    {
+      "path": "compose.yaml",
+      "sha256": "784722b818daf0217beb9a97955c692ce4d2b667211ac803aba729b9f5e54674"
+    },
+    {
+      "path": "deploy/compose.override.example.yaml",
+      "sha256": "fde6d0670eee4c03c5f7ee23f51468e82f219a5cd074c18ccdd7d2efa01bb85f"
+    },
+    {
+      "path": "deploy/config.example.yaml",
+      "sha256": "f685c147b2a9e1304b73e2fec0d079cf6d0a86fadd8656b9a2c3d8d244ef5aab"
+    },
+    {
+      "path": "docs/configuration.md",
+      "sha256": "be2ed06c27ebced7eee7db693d81fd9f97fc7fd181f32ee2b774b7daf0855f95"
+    },
+    {
+      "path": "docs/gmail-outlook-setup.md",
+      "sha256": "60463d25d10498daac07acc12f9eb83f7679cbe53d065ea5c16915099e6db417"
+    },
+    {
+      "path": "docs/oauth-app-reuse.md",
+      "sha256": "af5260e4864c717a151671855c931248d8efe68b503fa3cd8ca1d1918dab7e19"
+    },
+    {
+      "path": "internal/admin/web/index.html",
+      "sha256": "6397d0cb5af49b9c28a16e3d4404640d639b338444917c14c6c586970b08bd23"
+    },
+    {
+      "path": "internal/config/config.go",
+      "sha256": "dd90be29aafd6310911d66c27446431292953b3be25663026aa0413b40d420ed"
+    },
+    {
+      "path": "internal/config/config_test.go",
+      "sha256": "0941c048c55e24650d71cd37e06ed45f0fdbf1dfde58c7923c4759fc8a436fdf"
+    },
+    {
+      "path": "internal/mailoauth/deployment.go",
+      "sha256": "8f11adeae9f5363eb890f51680792dbf13fac1fd336705183afadb074fbf9a5a"
+    },
+    {
+      "path": "internal/mailoauth/deployment_test.go",
+      "sha256": "05242601f26b75765031087f9eec4bd9817e01e530f69ccce09a8c4a5cad0404"
+    },
+    {
+      "path": "internal/mailoauth/manager.go",
+      "sha256": "efc42713811223cb8fe84960616474cc19581dc897a324246b3fe2b844a69ae8"
+    },
+    {
+      "path": "internal/mailoauth/model.go",
+      "sha256": "66a9412d7bf1b55476b6dbd3811c70a18a54c501463ab1eee35bbaad996abd4f"
+    },
+    {
+      "path": "internal/version/version.go",
+      "sha256": "3a09a2cf3d7c730dec517c60c2dce076e6c851485f9bd8cb33e841872400d9f9"
+    },
+    {
+      "path": "scripts/release-verify/release_verify.py",
+      "sha256": "8165f9b156c6588a938e501eed42773aba9314a11b7a2a70fdf82f32a681653f"
+    },
+    {
+      "path": "scripts/release-verify/test_release_verify.py",
+      "sha256": "09816519c3277c018e0ce1defcd91659af0b84c44f602041a1e89e96c16543e7"
+    },
+    {
+      "path": "scripts/ui-check/mail-oauth-ui-check.js",
+      "sha256": "74e04f1b2f2f31cd09470e0f5416f7bfa6644448eebef2a8c4b40ac91ca40c89"
+    }
+  ],
+  "independent_evidence_sha256": {
+    "docs/gmail-outlook-independent-acceptance.md": "096e307b0c4b3ef4140ecbe4935bee61d9b5d0640a77a2be773368920bf26732",
+    ".planning/gmail-outlook-independent-acceptance/overlay.json": "0232dbb2c511994525932160dbcfcb0cee708aea9475f2344a9d6c38a2301e82",
+    ".planning/gmail-outlook-independent-acceptance/probes.log": "9a76e05b4615fe23f4ffba52b55a6e59299053c01f5305d8da2552cc66b0db55"
+  }
+}

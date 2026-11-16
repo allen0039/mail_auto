@@ -76,50 +76,12 @@ func (manager *Manager) App(provider string) (App, error) {
 	return app, err
 }
 func (manager *Manager) SaveApp(provider string, input AppInput) (App, error) {
-	input.ClientID = strings.TrimSpace(input.ClientID)
-	input.Origin = strings.TrimRight(strings.TrimSpace(input.Origin), "/")
-	if input.Authority == "" {
-		input.Authority = "consumers"
-	}
-	if !IsProvider(provider) || !validOrigin(input.Origin) || input.ClientID == "" || len(input.ClientID) > 512 || strings.ContainsAny(input.ClientID, "\r\n\x00") || len(input.ClientSecret) > 8192 || (provider == "microsoft" && input.Authority != "consumers" && input.Authority != "common") {
-		return App{}, Failure("oauth_config_invalid")
-	}
 	tx, err := manager.Store.DB.Begin()
 	if err != nil {
 		return App{}, err
 	}
 	defer tx.Rollback()
-	var old App
-	err = tx.QueryRow(`SELECT client_id,secret,authority,origin,version FROM mail_oauth_apps WHERE provider=?`, provider).Scan(&old.ClientID, &old.Secret, &old.Authority, &old.Origin, &old.Version)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return App{}, err
-	}
-	secret := old.Secret
-	if input.ClientSecret != "" {
-		secret, err = manager.Vault.Encrypt(input.ClientSecret, "mail-oauth-app:"+provider)
-		if err != nil {
-			return App{}, err
-		}
-	} else if old.ClientID != input.ClientID || len(secret) == 0 {
-		return App{}, Failure("oauth_config_invalid")
-	}
-	version := old.Version + 1
-	_, err = tx.Exec(`INSERT INTO mail_oauth_apps(provider,client_id,secret,authority,origin,version,secret_expires,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(provider) DO UPDATE SET client_id=excluded.client_id,secret=excluded.secret,authority=excluded.authority,origin=excluded.origin,version=excluded.version,secret_expires=excluded.secret_expires,updated_at=excluded.updated_at`, provider, input.ClientID, secret, input.Authority, input.Origin, version, input.SecretExpires, time.Now().Unix())
-	if err != nil {
-		return App{}, err
-	}
-	if _, err = tx.Exec("DELETE FROM mail_oauth_states WHERE provider=?", provider); err != nil {
-		return App{}, err
-	}
-	if old.ClientID == input.ClientID && old.Authority == input.Authority && old.Origin == input.Origin {
-		_, err = tx.Exec("UPDATE mail_oauth_accounts SET config_version=?,generation=generation+1 WHERE provider=?", version, provider)
-	} else {
-		_, err = tx.Exec("UPDATE mail_oauth_accounts SET config_version=?,generation=generation+1,refresh=NULL,status='reauthorize',error_code='oauth_config_changed' WHERE provider=?", version, provider)
-	}
-	if err != nil {
-		return App{}, err
-	}
-	if err = store.Audit(tx, "mail.oauth_app.update", provider, "ok"); err != nil {
+	if _, err = manager.saveAppIn(tx, provider, input, false); err != nil {
 		return App{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -127,6 +89,68 @@ func (manager *Manager) SaveApp(provider string, input AppInput) (App, error) {
 	}
 	manager.Invalidate("")
 	return manager.App(provider)
+}
+
+func normalizeAppInput(provider string, input AppInput) (AppInput, error) {
+	input.ClientID = strings.TrimSpace(input.ClientID)
+	input.Origin = strings.TrimRight(strings.TrimSpace(input.Origin), "/")
+	if input.Authority == "" {
+		input.Authority = "consumers"
+	}
+	if !IsProvider(provider) || !validOrigin(input.Origin) || input.ClientID == "" || len(input.ClientID) > 512 || strings.ContainsAny(input.ClientID, "\r\n\x00") || len(input.ClientSecret) > 8192 || (provider == "microsoft" && input.Authority != "consumers" && input.Authority != "common") {
+		return AppInput{}, Failure("oauth_config_invalid")
+	}
+	return input, nil
+}
+
+func (manager *Manager) saveAppIn(tx *sql.Tx, provider string, input AppInput, skipUnchanged bool) (bool, error) {
+	input, err := normalizeAppInput(provider, input)
+	if err != nil {
+		return false, err
+	}
+	var old App
+	err = tx.QueryRow(`SELECT client_id,secret,authority,origin,version,secret_expires FROM mail_oauth_apps WHERE provider=?`, provider).Scan(&old.ClientID, &old.Secret, &old.Authority, &old.Origin, &old.Version, &old.SecretExpires)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if skipUnchanged && old.ClientID == input.ClientID && old.Authority == input.Authority && old.Origin == input.Origin && old.SecretExpires == input.SecretExpires && len(old.Secret) > 0 {
+		plain, decryptErr := manager.Vault.Decrypt(old.Secret, "mail-oauth-app:"+provider)
+		if decryptErr != nil {
+			return false, decryptErr
+		}
+		if plain == input.ClientSecret {
+			return false, nil
+		}
+	}
+	secret := old.Secret
+	if input.ClientSecret != "" {
+		secret, err = manager.Vault.Encrypt(input.ClientSecret, "mail-oauth-app:"+provider)
+		if err != nil {
+			return false, err
+		}
+	} else if old.ClientID != input.ClientID || len(secret) == 0 {
+		return false, Failure("oauth_config_invalid")
+	}
+	version := old.Version + 1
+	_, err = tx.Exec(`INSERT INTO mail_oauth_apps(provider,client_id,secret,authority,origin,version,secret_expires,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(provider) DO UPDATE SET client_id=excluded.client_id,secret=excluded.secret,authority=excluded.authority,origin=excluded.origin,version=excluded.version,secret_expires=excluded.secret_expires,updated_at=excluded.updated_at`, provider, input.ClientID, secret, input.Authority, input.Origin, version, input.SecretExpires, time.Now().Unix())
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec("DELETE FROM mail_oauth_states WHERE provider=?", provider); err != nil {
+		return false, err
+	}
+	if old.ClientID == input.ClientID && old.Authority == input.Authority && old.Origin == input.Origin {
+		_, err = tx.Exec("UPDATE mail_oauth_accounts SET config_version=?,generation=generation+1 WHERE provider=?", version, provider)
+	} else {
+		_, err = tx.Exec("UPDATE mail_oauth_accounts SET config_version=?,generation=generation+1,refresh=NULL,status='reauthorize',error_code='oauth_config_changed' WHERE provider=?", version, provider)
+	}
+	if err != nil {
+		return false, err
+	}
+	if err = store.Audit(tx, "mail.oauth_app.update", provider, "ok"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 const accountColumns = "account_id,provider,subject,tenant,login,scope,refresh,generation,config_version,status,error_code"
@@ -284,6 +308,12 @@ func (manager *Manager) Exchange(ctx context.Context, request Request, code stri
 }
 
 func (manager *Manager) Bind(ctx context.Context, request Request, token Token, identity Identity, diagnostic error) error {
+	if diagnostic != nil {
+		switch Code(diagnostic) {
+		case "oauth_imap_denied", "oauth_scope_missing", "oauth_reauthorization_required":
+			return diagnostic
+		}
+	}
 	if token.Refresh == "" {
 		return Failure("oauth_reauthorization_required")
 	}
@@ -307,6 +337,15 @@ func (manager *Manager) Bind(ctx context.Context, request Request, token Token, 
 		return err
 	}
 	defer tx.Rollback()
+	if manager.Network != nil {
+		current, routeErr := manager.Network.ResolveIn(tx, "account", request.Account.ID)
+		if routeErr != nil {
+			return routeErr
+		}
+		if current.Key != request.NetworkRevision {
+			return Failure("oauth_config_changed")
+		}
+	}
 	if request.Account.Subject == "" {
 		var active int
 		if err = tx.QueryRow("SELECT count(*) FROM accounts a LEFT JOIN mail_oauth_accounts o ON o.account_id=a.id WHERE o.account_id IS NULL OR o.subject<>''").Scan(&active); err != nil {
@@ -420,9 +459,36 @@ func (manager *Manager) credential(ctx context.Context, id, expectedRoute string
 	token, err := manager.tokenRequest(ctx, client, app, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "scope": {scopes(account.Provider)}})
 	if err != nil {
 		code := Code(err)
+		currentRoute, routeErr := manager.route(id)
+		if routeErr != nil {
+			return Credential{}, routeErr
+		}
+		if currentRoute.Key != configuredRoute.Key {
+			return Credential{}, Failure("oauth_config_changed")
+		}
 		if code == "oauth_reauthorization_required" || code == "oauth_scope_missing" {
-			_, writeErr := manager.Store.DB.Exec("UPDATE mail_oauth_accounts SET status='reauthorize',error_code=? WHERE account_id=? AND generation=? AND config_version=? AND refresh=?", code, id, account.Generation, app.Version, account.Refresh)
+			tx, writeErr := manager.Store.DB.BeginTx(ctx, nil)
 			if writeErr != nil {
+				return Credential{}, writeErr
+			}
+			defer tx.Rollback()
+			if manager.Network != nil {
+				current, resolveErr := manager.Network.ResolveIn(tx, "account", id)
+				if resolveErr != nil {
+					return Credential{}, resolveErr
+				}
+				if current.Key != configuredRoute.Key {
+					return Credential{}, Failure("oauth_config_changed")
+				}
+			}
+			result, writeErr := tx.Exec("UPDATE mail_oauth_accounts SET status='reauthorize',error_code=? WHERE account_id=? AND generation=? AND config_version=? AND refresh=?", code, id, account.Generation, app.Version, account.Refresh)
+			if writeErr != nil {
+				return Credential{}, writeErr
+			}
+			if count, _ := result.RowsAffected(); count != 1 {
+				return Credential{}, Failure("oauth_config_changed")
+			}
+			if writeErr = tx.Commit(); writeErr != nil {
 				return Credential{}, writeErr
 			}
 		}
@@ -448,12 +514,29 @@ func (manager *Manager) credential(ctx context.Context, id, expectedRoute string
 	if currentRoute.Key != configuredRoute.Key {
 		return Credential{}, Failure("oauth_config_changed")
 	}
-	result, err := manager.Store.DB.Exec(`UPDATE mail_oauth_accounts SET refresh=?,error_code='',status='connected' WHERE account_id=? AND generation=? AND config_version=? AND refresh=? AND status<>'reauthorize' AND EXISTS (SELECT 1 FROM mail_oauth_apps WHERE provider=? AND version=?)`, encrypted, id, account.Generation, app.Version, account.Refresh, account.Provider, app.Version)
+	tx, err := manager.Store.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return Credential{}, err
+	}
+	defer tx.Rollback()
+	if manager.Network != nil {
+		current, routeErr := manager.Network.ResolveIn(tx, "account", id)
+		if routeErr != nil {
+			return Credential{}, routeErr
+		}
+		if current.Key != configuredRoute.Key {
+			return Credential{}, Failure("oauth_config_changed")
+		}
+	}
+	result, err := tx.Exec(`UPDATE mail_oauth_accounts SET refresh=?,error_code='',status='connected' WHERE account_id=? AND generation=? AND config_version=? AND refresh=? AND status<>'reauthorize' AND EXISTS (SELECT 1 FROM mail_oauth_apps WHERE provider=? AND version=?)`, encrypted, id, account.Generation, app.Version, account.Refresh, account.Provider, app.Version)
 	if err != nil {
 		return Credential{}, err
 	}
 	if count, _ := result.RowsAffected(); count != 1 {
 		return Credential{}, Failure("oauth_config_changed")
+	}
+	if err = tx.Commit(); err != nil {
+		return Credential{}, err
 	}
 	manager.mu.Lock()
 	if manager.cache == nil {

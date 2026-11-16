@@ -7,6 +7,11 @@ services:
     # 如需外部授权码，取消下面两行注释，并准备仅宿主机可读的 secret 文件。
     # secrets:
     #   - qq_password
+    # 复用 OAuth 应用时，同时在私有 config.yaml 设置 mail_oauth_apps_file。
+    # 使用仅 UID 65532 可读的文件，0400；不要提交实际文件。
+    #   - mail-oauth-apps.json
 # secrets:
 #   qq_password:
 #     file: ./secrets/qq_password
+#   mail-oauth-apps.json:
+#     file: ./secrets/mail-oauth-apps.json

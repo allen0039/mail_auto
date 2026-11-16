@@ -58,3 +58,19 @@ func TestMCPOptionalDomainAndHTTPSRequirement(t *testing.T) {
 		t.Fatal(c, e)
 	}
 }
+
+func TestMailOAuthDeploymentFile(t *testing.T) {
+	for _, origin := range []string{"", "http://mail.test"} {
+		if _, _, err := Load([]string{"--mail-oauth-apps-file", "/run/secrets/mail-oauth-apps.json", "--public-url", origin}); err == nil {
+			t.Fatal("OAuth deployment file accepted without HTTPS public_url")
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("mail_oauth_apps_file: /run/secrets/old.json\npublic_url: https://mail.test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := Load([]string{"--config", path, "--mail-oauth-apps-file", "/run/secrets/mail-oauth-apps.json"})
+	if err != nil || loaded.MailOAuthAppsFile != "/run/secrets/mail-oauth-apps.json" || !loaded.SecureCookie || loaded.MCPEnabled {
+		t.Fatal("deployment config precedence or MCP independence", err)
+	}
+}

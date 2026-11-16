@@ -1309,7 +1309,7 @@ $("#account-list").addEventListener("click", async (e) => {
 });
 
 function mailOAuthMessage(code) {
-  return ({ok: "邮箱官方授权完成，请查看连接和同步状态", oauth_denied: "授权已取消，可重新点击官方登录", oauth_state_invalid: "授权请求过期或会话变化，请重新发起", oauth_config_changed: "应用或网络配置已变化，请重新授权", oauth_identity_mismatch: "登录账号与邮箱绑定不一致，请登录原账号", oauth_scope_missing: "缺少 IMAP 权限；请重新授权，组织账号请检查租户策略", oauth_reauthorization_required: "授权失效，请重新授权", oauth_imap_denied: "IMAP 登录被拒绝，请检查地址、IMAP 开关和租户策略", oauth_network_failed: "网络失败，请检查所选代理和服务商网络后重试"})[code] || "邮箱授权未完成，请检查应用配置并重新发起";
+  return ({ok: "邮箱官方授权完成，请查看连接和同步状态", oauth_denied: "授权已取消，可重新点击官方登录", oauth_state_invalid: "授权请求过期或会话变化，请重新发起", oauth_config_changed: "应用或网络配置已变化，请重新授权", oauth_identity_mismatch: "登录账号与邮箱绑定不一致，请登录原账号", oauth_scope_missing: "缺少 IMAP 权限；请重新授权，组织账号请检查租户策略", oauth_reauthorization_required: "授权失效，请重新授权", oauth_imap_denied: "IMAP 登录被拒绝，请检查地址、IMAP 开关和租户策略", oauth_gmail_capability_missing: "Gmail IMAP 缺少 X-GM-EXT-1 能力，请检查是否连接到官方 Gmail 服务器", oauth_network_failed: "网络失败，请检查所选代理和服务商网络后重试"})[code] || "邮箱授权未完成，请检查应用配置并重新发起";
 }
 
 async function startMailOAuth(id) {

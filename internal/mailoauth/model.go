@@ -51,8 +51,18 @@ func Message(code string) string {
 		return "服务商暂时不可用，请稍后重试"
 	case "oauth_imap_denied":
 		return "OAuth 授权成功但 IMAP 登录被拒绝，请检查邮箱地址、IMAP 开关和租户策略，再重新授权"
+	case "oauth_gmail_capability_missing":
+		return "Gmail IMAP 未提供所需的 X-GM-EXT-1 能力，请检查是否连接到官方 Gmail 服务器并联系管理员"
 	case "oauth_config_invalid":
 		return "OAuth 应用配置无效：请检查 client ID、密钥、HTTPS origin 和 Microsoft 账号类型"
+	case "oauth_bundle_unavailable":
+		return "无法读取 OAuth 应用部署文件：请使用仅所有者可读的普通文件（0400 或 0600），检查挂载路径和运行用户权限"
+	case "oauth_bundle_invalid":
+		return "OAuth 应用部署文件无效：请检查版本、服务商、客户端配置、密钥有效期及 HTTPS public_url；不要将文件内容写入日志"
+	case "oauth_bundle_apply_failed":
+		return "OAuth 应用部署配置未能原子保存；原配置保持不变，请检查数据库及配套主密钥"
+	case "oauth_bundle_export_failed":
+		return "OAuth 应用导出失败：请检查已配置应用、配套主密钥和可写目录；目标必须是尚不存在的文件，不能输出到终端"
 	case "oauth_account_limit":
 		return "已连接邮箱达到 10 个，请移除不再需要的连接后重新授权；待授权配置可以单独移除"
 	default:

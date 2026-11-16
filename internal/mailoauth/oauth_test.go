@@ -1,6 +1,7 @@
 package mailoauth
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -585,6 +586,191 @@ func TestOAuthEndToEndSimulated(t *testing.T) {
 				t.Fatal("session revoked during network request still bound")
 			}
 		})
+	}
+}
+
+func TestBindRejectsExplicitIMAPAuthorizationFailure(t *testing.T) {
+	for _, provider := range []string{"google", "microsoft"} {
+		for _, existing := range []bool{false, true} {
+			for _, code := range []string{"oauth_imap_denied", "oauth_scope_missing", "oauth_reauthorization_required"} {
+				name := provider + "/" + code
+				if existing {
+					name += "/reauthorize"
+				} else {
+					name += "/new"
+				}
+				t.Run(name, func(t *testing.T) {
+					manager, session := fixture(t, provider)
+					if existing {
+						bindFixture(t, manager, session, provider)
+					}
+					before, err := manager.Account("account")
+					if err != nil {
+						t.Fatal(err)
+					}
+					request, _ := authorize(t, manager, session, provider)
+					token := Token{Refresh: "replacement-refresh", Scope: Scope(provider)}
+					identity := Identity{Subject: "fixture-subject", Email: "fixture@example.test"}
+					if err = manager.Bind(context.Background(), request, token, identity, Failure(code)); Code(err) != code {
+						t.Fatalf("diagnostic failure was not preserved: %v", err)
+					}
+					after, err := manager.Account("account")
+					if err != nil {
+						t.Fatal(err)
+					}
+					if after.Status != before.Status || after.Subject != before.Subject || after.Generation != before.Generation || !bytes.Equal(after.Refresh, before.Refresh) {
+						t.Fatal("failed IMAP authorization changed stored account or credentials")
+					}
+					if !existing {
+						if _, err = manager.Credential(context.Background(), "account", "direct"); Code(err) != "oauth_pending" {
+							t.Fatalf("new account became usable after IMAP denial: %v", err)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestBindKeepsAuthorizationOnTemporaryDiagnosticFailure(t *testing.T) {
+	manager, session := fixture(t, "google")
+	request, _ := authorize(t, manager, session, "google")
+	token := Token{Refresh: "fixture-refresh", Scope: GoogleScope}
+	identity := Identity{Subject: "fixture-subject", Email: "fixture@example.test"}
+	if err := manager.Bind(context.Background(), request, token, identity, errors.New("temporary network failure")); err != nil {
+		t.Fatal(err)
+	}
+	account, err := manager.Account("account")
+	if err != nil || account.Status != "network_error" || account.ErrorCode != "oauth_network_failed" || len(account.Refresh) == 0 {
+		t.Fatal("temporary diagnostic failure lost authorization or reported the wrong status", err)
+	}
+}
+
+func TestNetworkChangeRejectsOAuthBindingAndRefresh(t *testing.T) {
+	for _, operation := range []string{"bind", "refresh", "refresh_denied"} {
+		t.Run(operation, func(t *testing.T) {
+			manager, session := fixture(t, "google")
+			manager.Network = network.New(manager.Store, manager.Vault)
+			defer manager.Network.CloseIdle()
+			if operation != "bind" {
+				bindFixture(t, manager, session, "google")
+			}
+			before, err := manager.Account("account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			changeRoute := func() error {
+				settings, err := manager.Network.Settings()
+				if err != nil {
+					return err
+				}
+				_, err = manager.Network.Save(network.Input{
+					Global:   network.Policy{Mode: "proxy", ProxyID: "fixture-proxy"},
+					Telegram: settings.Telegram,
+					Agent:    settings.Agent,
+					Profiles: []network.ProfileInput{{Profile: network.Profile{ID: "fixture-proxy", Name: "fixture", Protocol: "http", Host: "127.0.0.1", Port: 1}}},
+				})
+				return err
+			}
+			if operation == "bind" {
+				request, _ := authorize(t, manager, session, "google")
+				if err = changeRoute(); err != nil {
+					t.Fatal(err)
+				}
+				err = manager.Bind(context.Background(), request, Token{Refresh: "replacement-refresh", Scope: GoogleScope}, Identity{Subject: "fixture-subject"}, nil)
+			} else {
+				manager.transport = func(network.Route) http.RoundTripper {
+					return roundTrip(func(*http.Request) (*http.Response, error) {
+						if err := changeRoute(); err != nil {
+							t.Error(err)
+						}
+						if operation == "refresh_denied" {
+							return response(400, map[string]any{"error": "invalid_grant"}), nil
+						}
+						return response(200, map[string]any{"access_token": "fixture-access", "refresh_token": "replacement-refresh", "token_type": "Bearer", "expires_in": 3600, "scope": GoogleScope}), nil
+					})
+				}
+				_, err = manager.Credential(context.Background(), "account", "direct")
+			}
+			if Code(err) != "oauth_config_changed" {
+				t.Fatalf("changed route did not reject stale credentials: %v", err)
+			}
+			after, err := manager.Account("account")
+			if err != nil || after.Generation != before.Generation+1 || after.Status != before.Status || !bytes.Equal(after.Refresh, before.Refresh) {
+				t.Fatal("route change allowed stale authorization to be persisted", err)
+			}
+			manager.mu.Lock()
+			cachedToken := manager.cache["account"].token.Access
+			manager.mu.Unlock()
+			if cachedToken != "" {
+				t.Fatal("route change cached stale access token")
+			}
+		})
+	}
+}
+
+func TestSameRoutePolicyChangeInvalidatesOAuthWork(t *testing.T) {
+	for _, mutation := range []string{"global", "account"} {
+		for _, operation := range []string{"bind", "refresh", "refresh_denied"} {
+			t.Run(mutation+"/"+operation, func(t *testing.T) {
+				manager, session := fixture(t, "google")
+				manager.Network = network.New(manager.Store, manager.Vault)
+				defer manager.Network.CloseIdle()
+				if operation != "bind" {
+					bindFixture(t, manager, session, "google")
+				}
+				before, err := manager.Account("account")
+				if err != nil {
+					t.Fatal(err)
+				}
+				changePolicy := func() error {
+					if mutation == "global" {
+						settings, err := manager.Network.Settings()
+						if err != nil {
+							return err
+						}
+						_, err = manager.Network.Save(network.Input{Version: settings.Version, Global: settings.Global, Telegram: settings.Telegram, Agent: settings.Agent})
+						return err
+					}
+					tx, err := manager.Store.DB.Begin()
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+					if err = network.SetAccount(tx, "account", network.Policy{Mode: "direct"}); err != nil {
+						return err
+					}
+					return tx.Commit()
+				}
+				if operation == "bind" {
+					request, _ := authorize(t, manager, session, "google")
+					if err = changePolicy(); err != nil {
+						t.Fatal(err)
+					}
+					err = manager.Bind(context.Background(), request, Token{Refresh: "replacement-refresh", Scope: GoogleScope}, Identity{Subject: "fixture-subject"}, nil)
+				} else {
+					manager.transport = func(network.Route) http.RoundTripper {
+						return roundTrip(func(*http.Request) (*http.Response, error) {
+							if err := changePolicy(); err != nil {
+								t.Error(err)
+							}
+							if operation == "refresh_denied" {
+								return response(400, map[string]any{"error": "invalid_grant"}), nil
+							}
+							return response(200, map[string]any{"access_token": "fixture-access", "refresh_token": "replacement-refresh", "token_type": "Bearer", "expires_in": 3600, "scope": GoogleScope}), nil
+						})
+					}
+					_, err = manager.Credential(context.Background(), "account", "direct")
+				}
+				if Code(err) != "oauth_config_changed" {
+					t.Fatalf("same-route policy change accepted stale credentials: %v", err)
+				}
+				after, err := manager.Account("account")
+				if err != nil || after.Generation != before.Generation+1 || after.Status != before.Status || !bytes.Equal(after.Refresh, before.Refresh) {
+					t.Fatal("same-route policy change lost or replaced credentials", err)
+				}
+			})
+		}
 	}
 }
 

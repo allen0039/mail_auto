@@ -3,6 +3,8 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
@@ -13,6 +15,25 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMailOAuthDiagnosticDistinguishesGmailCapabilities(t *testing.T) {
+	for _, test := range []struct {
+		provider string
+		input    error
+		code     string
+	}{
+		{"google", fmt.Errorf("wrapped: %w", mail.ErrCapability), "oauth_gmail_capability_missing"},
+		{"google", mailoauth.Failure("oauth_imap_denied"), "oauth_imap_denied"},
+		{"google", errors.New("temporary network failure"), "oauth_network_failed"},
+	} {
+		if actual := mailoauth.Code(mailOAuthDiagnostic(test.provider, test.input)); actual != test.code {
+			t.Fatalf("diagnostic code = %q, want %q", actual, test.code)
+		}
+	}
+	if mailOAuthDiagnostic("google", nil) != nil {
+		t.Fatal("successful Gmail diagnostic became a failure")
+	}
+}
 
 func TestMailOAuthAPIBoundariesAndMCPIndependence(t *testing.T) {
 	auth, _, _ := newAuth(t)

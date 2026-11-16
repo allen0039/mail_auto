@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"mail-auto/internal/credentials"
+	"mail-auto/internal/mail"
 	"mail-auto/internal/mailoauth"
 	"net/http"
 	"net/url"
@@ -12,6 +14,13 @@ import (
 const mailOAuthCookie = "mail_auto_oauth_session"
 
 type probeCredential struct{ credential mailoauth.Credential }
+
+func mailOAuthDiagnostic(provider string, diagnostic error) error {
+	if provider == "google" && errors.Is(diagnostic, mail.ErrCapability) {
+		return mailoauth.Failure("oauth_gmail_capability_missing")
+	}
+	return diagnostic
+}
 
 func (source *probeCredential) Credential(context.Context, string, string) (mailoauth.Credential, error) {
 	return source.credential, nil
@@ -132,6 +141,11 @@ func (server *Server) mailOAuthCallback(writer http.ResponseWriter, request *htt
 	}
 	account.AuthSource = &probeCredential{credential: mailoauth.Credential{Mechanism: "XOAUTH2", Username: account.Username, Token: token.Access}}
 	_, diagnostic := server.Mail.Remote.Folders(request.Context(), account, "")
+	diagnostic = mailOAuthDiagnostic(account.Provider, diagnostic)
+	if diagnostic != nil && mailoauth.Code(diagnostic) == "oauth_gmail_capability_missing" {
+		result = mailoauth.Code(diagnostic)
+		return
+	}
 	if diagnostic != nil && account.Provider == "microsoft" {
 		result = mailoauth.Code(diagnostic)
 		return

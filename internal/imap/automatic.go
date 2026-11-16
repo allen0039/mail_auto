@@ -78,10 +78,9 @@ func (s *automaticSession) Refresh(ctx context.Context, folder string, previous 
 	if e := ctx.Err(); e != nil {
 		return out, e
 	}
-	s.conn.resetBudget()
-	status, e := s.conn.c.Select(folder, true)
+	status, e := readOnlyFolder(s.conn, folder, "打开文件夹")
 	if e != nil {
-		return out, remoteFailure(s.conn, "打开文件夹", e)
+		return out, e
 	}
 	if status.UidValidity == 0 {
 		return out, remoteProblem("打开文件夹", "服务器未返回有效 UIDVALIDITY")
@@ -232,10 +231,9 @@ func (s *automaticSession) Wait(ctx context.Context, folder string, d time.Durat
 			return false, nil
 		}
 	}
-	s.conn.resetBudget()
-	status, e := s.conn.c.Select(folder, true)
+	status, e := readOnlyFolder(s.conn, folder, "打开推送文件夹")
 	if e != nil {
-		return false, remoteFailure(s.conn, "打开推送文件夹", e)
+		return false, e
 	}
 	if known, ok := s.known[folder]; !ok || known.UIDValidity != status.UidValidity || known.Total != status.Messages {
 		return true, nil

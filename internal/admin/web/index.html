@@ -120,7 +120,7 @@
             <rect x="34" y="104" width="64" height="8" rx="4" class="story-mail-line"></rect>
           </svg>
         </div>
-        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.10.0</span></p>
+        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.10.2</span></p>
       </section>
 
       <section class="auth-form-area">
@@ -195,7 +195,7 @@
             <span class="wordmark-badge" aria-hidden="true"><svg class="icon-sm"><use href="#icon-accounts"></use></svg></span>
             <span>Mail Auto</span>
           </a>
-          <span class="workspace-label app-version-label">v0.10.0</span>
+          <span class="workspace-label app-version-label">v0.10.2</span>
         </div>
 
         <nav class="sidebar-nav-container" aria-label="主导航">
@@ -1050,7 +1050,7 @@
             </article>
 
             <article class="panel system-card">
-              <h2>Mail Auto <span class="app-version-label">v0.10.0</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.10.2</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1184,7 +1184,7 @@
     <dialog id="mail-oauth-dialog" aria-labelledby="mail-oauth-title">
       <form id="mail-oauth-form">
         <header class="dialog-head"><h2 id="mail-oauth-title">邮箱授权应用</h2><button type="button" class="icon-button" data-close="mail-oauth-dialog" aria-label="关闭邮箱授权应用">×</button></header>
-        <p class="muted small">由实例管理员在服务商控制台注册 Web 应用。密钥加密保存，留空保留；不会回显。授权独立于 MCP 开关。</p>
+        <p class="muted small">每个服务商注册一次 Web 应用，可供多个邮箱和自用实例复用；添加邮箱时分别登录授权。支持部署时自动载入已有应用配置，无需重新创建。新域名须在服务商登记精确回调。密钥加密保存，留空保留；不会回显。授权独立于 MCP 开关。</p>
         <label class="margin-t-12">服务商<select id="mail-oauth-provider" data-guard-ignore><option value="google">Google Gmail</option><option value="microsoft">Microsoft Outlook</option></select></label>
         <label class="margin-t-12">Client ID<input name="client_id" autocomplete="off" maxlength="512" required /></label>
         <label class="margin-t-12">Client secret<input name="client_secret" type="password" autocomplete="new-password" maxlength="8192" /><small>仅在新建或轮换密钥时填写；请勿发到聊天中。</small></label>

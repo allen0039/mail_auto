@@ -194,7 +194,12 @@ func dialRoute(ctx context.Context, a mail.Account, password string, route netwo
 	conn.authKey = accountAuthKey(a)
 	if a.Provider == "google" {
 		conn.gmail, e = c.Support("X-GM-EXT-1")
-		if e != nil || !conn.gmail {
+		if e != nil {
+			err := remoteFailure(conn, "查询 Gmail 服务器能力", e)
+			conn.close()
+			return nil, err
+		}
+		if !conn.gmail {
 			conn.close()
 			return nil, mail.ErrCapability
 		}
@@ -224,6 +229,10 @@ func (adapter Adapter) folders(ctx context.Context, a mail.Account, password str
 		return nil, e
 	}
 	defer conn.close()
+	return selectableFolders(conn)
+}
+
+func selectableFolders(conn *connection) ([]string, error) {
 	conn.resetBudget()
 	ch := make(chan *protocol.MailboxInfo, 16)
 	done := make(chan error, 1)
@@ -240,11 +249,34 @@ func (adapter Adapter) folders(ctx context.Context, a mail.Account, password str
 			folders = append(folders, f.Name)
 		}
 	}
-	if e = <-done; e != nil {
+	if e := <-done; e != nil {
 		return nil, remoteFailure(conn, "读取文件夹列表", e)
 	}
 	sort.Strings(folders)
 	return folders, nil
+}
+
+func readOnlyFolder(conn *connection, folder, operation string) (*protocol.MailboxStatus, error) {
+	conn.resetBudget()
+	status, err := conn.c.Select(folder, true)
+	if err == nil {
+		return status, nil
+	}
+	failure := remoteFailure(conn, operation, err)
+	var remote *remoteError
+	if !errors.As(failure, &remote) || remote.retryable || remote.reason != "服务器拒绝请求或返回无效响应" {
+		return nil, failure
+	}
+	folders, listErr := selectableFolders(conn)
+	if listErr != nil {
+		return nil, failure
+	}
+	for _, name := range folders {
+		if name == folder || (strings.EqualFold(name, "INBOX") && strings.EqualFold(folder, "INBOX")) {
+			return nil, failure
+		}
+	}
+	return nil, &remoteError{operation: operation, reason: "该文件夹不在此邮箱的 IMAP 可读取列表中；请确认测试目录已在同一邮箱保存，并在邮箱连接配置中填写完整 IMAP 路径（包含父目录）后重试；不会自动改为同步全部邮件", code: "folder_unavailable"}
 }
 
 func (adapter Adapter) DiagnoseRoute(ctx context.Context, account mail.Account, password string, route network.Route) ([]string, error) {
@@ -259,12 +291,10 @@ func (adapter Adapter) selectFolder(ctx context.Context, a mail.Account, passwor
 	if e != nil {
 		return nil, nil, e
 	}
-	conn.resetBudget()
-	status, e := conn.c.Select(folder, true)
+	status, e := readOnlyFolder(conn, folder, "打开文件夹")
 	if e != nil {
-		err := remoteFailure(conn, "打开文件夹", e)
 		conn.close()
-		return nil, nil, err
+		return nil, nil, e
 	}
 	if status.UidValidity == 0 {
 		conn.close()

@@ -116,7 +116,7 @@
       <strong>${result.ok ? "连接成功" : "连接失败"} · ${esc(result.route)}</strong>
       <p class="muted small">目标 ${esc(result.target)} · 未自动切换出口</p>
       <ul class="agent-status-list">${result.checks.map((check) => `<li><span class="${check.ok ? "ok" : "no"}">${check.ok ? "✔" : "✕"}</span><span>${esc(stages[check.stage] || check.stage)} · ${check.elapsed_ms} ms${check.ok ? "" : ` · ${esc(errors[check.code] || check.code)}`}</span></li>`).join("")}</ul>
-      ${result.folders ? `<p class="muted small">已读取 ${result.folders.length} 个文件夹</p>` : ""}
+      ${result.folders ? `<p class="muted small">已读取 ${result.folders.length} 个文件夹</p><details><summary>查看 IMAP 文件夹完整路径</summary><p class="muted small">请在同一邮箱中创建目录，并将下方完整路径逐行填入邮箱连接的允许文件夹；登录成功不表示指定目录存在。</p><ul>${result.folders.map((folder) => `<li>${esc(folder)}</li>`).join("")}</ul></details>` : ""}
     </article>`;
   }
 

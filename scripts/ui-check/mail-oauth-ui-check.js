@@ -42,6 +42,7 @@
     check("unconfigured app has guidance", $("#mail-oauth-error").textContent.includes("服务商控制台"));
     check("account draft survives app settings", accountForm.elements.username.value === draftAddress && $("#account-dialog").open);
     const form = $("#mail-oauth-form");
+    check("application reuse guidance visible", form.textContent.includes("部署时自动载入") && form.textContent.includes("新域名须在服务商登记"));
     form.elements.origin.value = "https://mail.test";
     form.elements.origin.dispatchEvent(new Event("input", {bubbles: true}));
     check("exact callback displayed", $("#mail-oauth-callback").textContent.includes("https://mail.test/api/mail-oauth/google/callback"));
@@ -89,10 +90,20 @@
     check("dialog fits viewport", $("#mail-oauth-dialog").getBoundingClientRect().width <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth);
     const base = {id: "oauth-fixture", name: "OAuth fixture", username: "fixture@example.test", provider: "google", authentication: "oauth2", host: "imap.gmail.com", port: 993, folders: [], synced_folders: [], oauth: {status: "pending"}};
     state.accounts = [base]; renderAccounts();
+    const diagnosis = $(".diagnosis", $("#account-list"));
+    const oauthApi = window.api;
+    window.api = async (url, options = {}) => url === "/api/network/check" ? {ok: true, route: "直连", target: "outlook.office365.com:993", checks: [], folders: ["Parent/MailAuto-QA", "<img src=x onerror=alert(1)>"]} : originalApi(url, options);
+    await window.diagnoseAccountNetwork(base.id, diagnosis);
+    check("diagnostic shows complete IMAP paths", diagnosis.textContent.includes("Parent/MailAuto-QA") && diagnosis.textContent.includes("同一邮箱") && diagnosis.textContent.includes("登录成功不表示指定目录存在"));
+    check("diagnostic folder names cannot inject HTML", !diagnosis.querySelector("img") && diagnosis.textContent.includes("<img src=x onerror=alert(1)>"));
+    diagnosis.querySelector("details").open = true;
+    check("expanded folder paths fit viewport", diagnosis.getBoundingClientRect().width <= window.innerWidth && document.documentElement.scrollWidth <= window.innerWidth);
+    window.api = oauthApi;
     check("account card exposes reauthorization", !!$('[data-action="oauth"]'));
     for (const [status, text] of [["pending", "待授权"], ["reauthorize", "需要重新授权"], ["network_error", "网络失败"]]) check(`account status ${status}`, getAccountStatus({...base, oauth: {status}}, null, false).label === text);
     for (const error_code of ["oauth_scope_missing", "oauth_imap_denied"]) check(`permission status ${error_code}`, getAccountStatus({...base, oauth: {status: "reauthorize", error_code}}, null, false).label === "权限受限");
     check("denied callback has actionable Chinese error", mailOAuthMessage("oauth_denied").includes("重新"));
+    check("Gmail capability failure is actionable", mailOAuthMessage("oauth_gmail_capability_missing").includes("X-GM-EXT-1"));
     check("account mismatch is explicit", mailOAuthMessage("oauth_identity_mismatch").includes("原账号"));
     markClean(form); $("#mail-oauth-dialog").close();
     const beforeAuthorization = location.href;
