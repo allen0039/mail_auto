@@ -216,7 +216,7 @@ Gmail 官方回调于 22:14:22(+08) 成功，G-PERSONAL-01 为 connected/generat
 
 代码候选增量至 0.10.3：分类先在目标标签视图按稳定 Gmail ID 定位，核对目标 UIDVALIDITY/可写状态，再移除源标签；新增目标已有、只读、UIDVALIDITY 变化和断线夹具。标记动作四项 completed，网页确认 QA 标记状态。Gmail 规则/分类整体验收仍未通过，因未知写入尚未安全结案；Trash/恢复、人工保留及规则 run 未执行。
 
-Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的官方网页仍有 TrustedTypePolicy 错误，不能算恢复后网页对照通过。完整门禁 race 639/0/0、independent 4/0/0、UI 1032/0/0、UI gate 27/0/0、release 46/0/0，其余检查和双架构构建均退出0。证据位于 `.planning/oauth-consent-followup/` 和 `gates/`。**Gmail 与 Outlook 真实整体验收仍未完成；等待主代理独立验收；尚未发布部署。**
+Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的官方网页仍有 TrustedTypePolicy 错误，不能算恢复后网页对照通过。完整门禁 race 639/0/0、independent 4/0/0、UI 1032/0/0、UI gate 27/0/0、release 46/0/0，其余检查和双架构构建均退出0。候选已固定为提交 `8f8ee807eb457f065be912d4052096a774901a5a`、tree `424d02806fb88ba53db0f526ebfee0c106bfc229`。证据位于 `.planning/oauth-consent-followup/` 和 `gates/`。**Gmail 与 Outlook 真实整体验收仍未完成；等待主代理独立验收；尚未发布部署。**
 
 ### 8.4 授权返回失败的独立核对与 Outlook 网页恢复
 

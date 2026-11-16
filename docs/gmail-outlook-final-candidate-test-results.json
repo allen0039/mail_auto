@@ -5,6 +5,9 @@
   "followup_0_10_3": {
     "version": "0.10.3",
     "schema": 15,
+    "candidate_commit": "8f8ee807eb457f065be912d4052096a774901a5a",
+    "candidate_tree": "424d02806fb88ba53db0f526ebfee0c106bfc229",
+    "workspace_tracked_status": "clean after commit; only pre-existing/untracked AGENTS, plan, audit and .planning evidence remain",
     "source_changes": [
       "Gmail ordinary-label move now locates the destination UID before removing the source X-GM-LABELS membership",
       "Gmail IMAP fixtures cover existing destination, read-only destination, UIDVALIDITY change, and disconnect during source removal",

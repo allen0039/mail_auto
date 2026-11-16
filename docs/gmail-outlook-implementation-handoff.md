@@ -575,7 +575,7 @@ Gmail 官方回调已于 22:14:22(+08) 成功，G-PERSONAL-01 为 connected/gene
 
 Gmail `G-FLAGS` 的未读、已读、加旗标、取消旗标四项均 completed；网页确认 G-STAR 保持星标、G-UNREAD 保持未读、G-FLAGS 已读且无星标。Outlook 新增未读/已读以及 Trash/恢复四项 completed；恢复后网页再次触发 TrustedTypePolicy 加载错误，未伪称网页恢复后态通过。QA 任务/策略及写入均关闭。
 
-源码候选增量版本为 `0.10.3`、schema15。完整门禁退出 0：race 639/0/0、independent 4/0/0、UI 1032/0/0（18 组合，1280/375/390，页面错误0）、UI gate 27/0/0、release 46/0/0，vet/staticcheck/govulncheck/Compose/构建/amd64/arm64/双架构 OCI 均通过。证据 `.planning/oauth-consent-followup/gates/`；真实和修复证据 `.planning/oauth-consent-followup/`。未提交、未推送、未发布、未部署，原失败和待核验记录保留；等待主代理独立验收。
+源码候选增量版本为 `0.10.3`、schema15，候选提交 `8f8ee807eb457f065be912d4052096a774901a5a`，tree `424d02806fb88ba53db0f526ebfee0c106bfc229`。完整门禁退出 0：race 639/0/0、independent 4/0/0、UI 1032/0/0（18 组合，1280/375/390，页面错误0）、UI gate 27/0/0、release 46/0/0，vet/staticcheck/govulncheck/Compose/构建/amd64/arm64/双架构 OCI 均通过。证据 `.planning/oauth-consent-followup/gates/`；真实和修复证据 `.planning/oauth-consent-followup/`。候选已在本地固定提交；未推送、未发布、未部署，原失败和待核验记录保留；等待主代理独立验收。
 
 ### 15.7 本人授权返回后的权限核查（2026-11-16 晚间补充）
 
