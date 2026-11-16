@@ -1,10 +1,10 @@
 # Gmail / Outlook 实施交接
 
-交接日期：2026-11-16。最新开发候选：0.10.3 / schema 15。第 13–14 节保留应用复用、目录诊断的历史交接；最终 Gmail 安全修复、门禁和固定候选见第 15.8 节。
+交接更新：2026-11-17。最新开发候选：0.10.4 / schema 15，检查点B的UX修复、固定源码及门禁见第16节。第13–15节保留应用复用、目录诊断及0.10.3 Gmail语义修复的历史交接，不覆盖其失败证据。
 
 **等待主代理独立验收；尚未发布部署。** 第 1–11 节保留初次实施及其失败前的自测记录，第 12 节保留 GO-IA-01～04 返工交接。返工候选 `574b047` 已经独立代码复验通过，原报告和失败证据均保持原样；该结论不覆盖新增 0.10.1/0.10.2 代码。旧章节的“当前”“未准备”等状态均为当时记录，以第 15 节及真实验收文档最新记录为准。模拟测试完成，真实账号整体验收待完成；当前不满足生产发布验收条件。
 
-最新本地候选为 **0.10.3/schema15**，源码提交 `8f8ee807eb457f065be912d4052096a774901a5a`，截至本次修正前的材料提交为 `0754de22b2f7bb0c90cd1475a8d8cbbe174c1395`。本轮仅在本机隔离 QA 验证，未推送、发布或部署；Gmail 未知写入保持待核验，真实账号整体验收仍须主代理独立复验。
+最新本地源码候选为 **0.10.4/schema15**，提交 `ac29317395f21cf12a9b006e2adc2f4eec3eea60`，tree `b9794faac18cf1fd55ab1ecd817ebb079a7387a7`。0.10.3真实QA记录继续保留；本轮B仅本地UX/模拟门禁，真实QA后端保持关闭，未推送、发布或部署；三个Gmail未知写入继续待核验，真实整体验收及本次B代码均须主代理独立复验。
 
 ## 1. 基线与候选
 
@@ -633,3 +633,76 @@ Gmail Chrome搜索结果与SVC2前缀/本地索引不一致，尚无逐动作官
 证据汇总为 `.planning/oauth-consent-followup/followup-results.json`，权限和 QA 截图只留在受限本地目录，不入 Git。首次打开 Outlook 默认收件箱时，网页自动渲染了私人邮件列表预览，随后立即进入 QA 目录；没有打开私人邮件或保存这些预览内容，不能将其描述成“未见任何私人正文片段”。没有修改私人邮件、发信、永久删除或访问生产。
 
 剩余最少本人步骤：在本机 Gmail 卡片发起的有效官方授权中选择约定账号，并在权限页明确勾选 Gmail 邮件访问项后继续；只同意 Google 登录不足以完成邮箱授权。请求过期时从原管理会话重新发起。随后才能执行 Gmail 的全部真实 IMAP、刷新、多标签、整理及保护验收。Outlook 的晚间同身份重新授权、其他动作逐项网页前后对照和安全真实人工保留夹具仍待补齐。组织账号仍未验证；等待主代理独立验收；尚未发布部署。
+
+## 16. 检查点B：0.10.4 OAuth提示与回调UX候选
+
+### 16.1 固定边界与实现
+
+本轮起点HEAD `893e78199e38c6ec96a0aca1595061dbf69069af`；真实QA使用0.10.3候选且保持停机。本轮源码候选 `ac29317395f21cf12a9b006e2adc2f4eec3eea60`、tree `b9794faac18cf1fd55ab1ecd817ebb079a7387a7`、0.10.4/schema15。17个源码/设置/文档路径于 `d6d837f` 固定，后续 `e78342c`、`4ee0a75` 调整CSS空行，`f2a8810` 使用已有 `--border-main` 样式变量，`ac29317`强化真实页面重载测试的文案/账号/URL断言；最终差异范围不新增迁移、认证协议或邮件写入能力。两次候选变化均已通知主代理，最终门禁另跑，不把较早候选日志混记成最终证据。本地及远端0.10.4标签占用检查为空，未创建发布tag。
+
+- `internal/admin/web/app.js`：白名单回调结果绑定当前真实OAuth账号及服务商，账号卡片持久提示、可关闭、官方重授权入口；URL参数立即清理，全部文案及账号名转义，未知/重复/不存在账号的查询不显示。失败提示明确是本次尝试，不能据此降低connected状态。
+- 仅当前标签页sessionStorage保存白名单结果枚举、账号ID/服务商与非敏感成功基线，不保存token、授权码、state、verifier、真实邮箱或原始错误。页面真实reload后恢复；dismiss、删除账号、退出会话清除；没有新数据库表。提示不是服务器审计证据，查询可被用户修改，不能替代当前账号状态。
+- 旧错误只在connected且OAuth generation正向增加，或成功同步/自动校对时间严格晚于基线及回调观察时间时清除。旧completed记录消失、watching转connecting等不构成成功；SyncJob使用实际started_at/updated_at结构，无虚构id依赖。账号刷新采用generation丢弃迟到响应，不影响表单草稿。
+- `internal/mailoauth/model.go` 与前端scope、IMAP拒绝、撤销/过期中文提示一致；个人Gmail明确同意IMAP邮件访问，组织账号才额外查管理员策略。Google/Microsoft scope、OIDC主体、PKCE、CAS及写入fence均未放宽。
+- 正式回归在 `granted_scope_test.go`、`messages_test.go`、默认 `mail-oauth-ui-check.js` 和 `run-checks.cjs` 中；后者实际导航带回调参数页面、等待启动加载账号、再reload/dismiss/reload，不只直接调用函数。原identity-only/readonly拒绝、正确IMAP scope接受断言保留，并新增已连接邮箱失败重授权凭据/代际不变断言。
+- 版本入口、管理页静态fallback、Compose、README、配置和接入说明同步0.10.4；MCP和运行时沿用共享版本入口，release schema检查增加0.10.4，不批量替换历史版本证据。
+
+### 16.2 测试来源与失败保留
+
+证据根目录 `.planning/oauth-ux-b/`。先增加两个可复现UI断言：旧代码在1280/375/390均失败，合计111通过/6失败，退出1，`ui-red.log/.exit`保留。首次新增Go消息测试调用了error接口没有的方法而编译失败，`targeted-go.jsonl/.exit`原样保留；修正为具体Error.PublicMessage后定向重跑通过，不删断言。此前UI第一次绿色仅61项/宽，主代理预审指出任意stamp差异会误清提示；已改正向时间/代际证据，最终定向为68项/宽，并补旧成功记录消失、旧时间、真实SyncJob及真实导航/reload。完整最终门禁结果另按16.4及最终JSON记录，不覆盖早期记录。
+
+### 16.3 剩余真实测试矩阵与最小下一步
+
+| 项目 | 当前可信状态 / 下一步最小动作 | 边界 |
+| --- | --- | --- |
+| Gmail应用、scope、refresh、IMAP及SVC2身份/成员 | A独立只读通过；缺scope为历史。主代理已看两个已读样本单封详情，会话标题聚合疑点已解释；其余逐封网页按需由主代理核对 | 不说六封网页全验过，不用会话标签当单封成员 |
+| 三个Gmail unknown | 源目标并存，只能说明部分动作可能发生；继续needs_verification。主代理决定后续可接受的人工安全路径 | 不Reconcile、不SQL结案、不去源标签、不重放或绕过busy |
+| Gmail归档 | 当前仅四QA标签，INBOX不在允许范围，真实归档未验 | 不擅自增加folders或全邮箱同步；需另行明确授权专用INBOX合成邮件及最小范围后再制定验收 |
+| Gmail人工保留 | 当前人工入口是“保留两份”，按稳定Gmail ID在服务端拒绝；没有可用的新增Gmail保留标签/保留两份结案入口 | 验收拒绝，不INSERT伪保护证据。跨标签读取既有保护是模拟回归，不等于真实新建保护通过 |
+| Gmail受限动作 | Trash/恢复/特殊目录移动、保留两份、不安全move/archive Undo均不开放 | 验收服务端拒绝，不列为真实成功 |
+| Gmail重启与同身份重授权 | 已有新Manager刷新证据，但完整重启验收链未补齐；需B独立通过后批准恢复隔离QA，再由本人官方登录原身份并同意 | 登录/同意不得代为完成，十分钟state过期重发，不向聊天索取凭据 |
+| Outlook网页动作对照 | IMAP/Service历史操作保留；TrustedTypePolicy错误后的逐动作网页对照缺项 | 待官方Refresh恢复；若登录失效由本人登录，不绕CSP/Trusted Types |
+| Outlook人工保留 | 既有完整原文核验保留两份入口可用，尚缺真实安全夹具 | 需批准后使用专用真实unknown及源目标完整证据，不伪造unknown/INSERT，不操作私人邮件 |
+| Outlook同身份重授权与重启 | 历史授权仍connected，完整本轮重授权/重启闭环待补 | B复验通过并批准隔离QA启动后，本人在官方页选择原绑定账号完成授权 |
+| Workspace / Microsoft365 | 未验证 | 不推广个人账号结论 |
+
+本轮B没有新的真实邮件写入或远端请求；没有擅自恢复QA、任务、原邮箱写入或自动同步。后续C须主代理另行批准；本报告和模拟门禁不能替代真实验收。**等待主代理独立验收；尚未发布部署。**
+
+### 16.4 门禁证据归属和暂存审查
+
+最终固定候选 `ac29317` 的完整命令、argv、环境覆盖、起止时间、实际退出码及通过/失败/跳过计数保存在 `.planning/oauth-ux-b/gates-final/checks.json`；工具版本与实际命令在同目录 `versions.json`。每项另有独立JSON/log，不覆盖较早 `.planning/oauth-ux-b/gates/` 的预跑证据。源文件摘要及候选边界见 `candidate-manifest.json`。
+
+首轮预跑开始于4ee0a75，期间仅CSS token和重载断言进一步固定，不能将其整套结果冒称最终候选全门禁。该轮race642/0/0、UI1125/0/0通过；UI gate于01:07:26–01:08:30执行时26/1，`run.sh: script exception exits non-zero`后的全机资源快照断言由before dirs1/procs2降至after dirs0/procs0，runner因此退出1。主代理也独立观察到同类并行全机计数失败；与并行临时实例结束相符，但没有逐进程归属追踪，不夸大为已完全证明根因。不修改原断言，保留原JSON/log/exit，最终候选门禁另行串行执行并报告实际结果。
+
+新增正式UI门禁包含真实URL导航、启动capture→账号加载、reload、关闭后reload，及所有三种宽度。642 Go叶子测试相对0.10.3的639增加3个（中文PublicMessage/前端一致性1、已连接Gmail部分授权失败保护2），不与历史619/628/639或多次重跑相加。UI1125相对1032增加93项，OAuth每宽68项（含真实启动/重载4项），不把多次运行累计计数。
+
+最终候选串行完整runner于01:19:33(+08)结束，实际退出0；19条命令均退出0，但全仓格式的**空输出断言仍为1**，单独列出，不能称所有工作区断言绿色。
+
+| 最终候选门禁 | 实际退出码 / 通过、失败、跳过 | 证据（根目录 `.planning/oauth-ux-b/`） |
+| --- | --- | --- |
+| `go test -race -count=1 -json ./...` | 0 / 642、0、0叶子；含父事件711 | `gates-final/race.json/.log` |
+| scope/消息/回调定向race | 0 / 26、0、0 | `targeted-go-final.jsonl/.exit`；完整argv见最终JSON |
+| 原四独立反例overlay race | 0 / 4、0、0 | `gates-final/independent.json/.log` |
+| 默认UI六脚本，1280/375/390 | 0 / 1125、0、0，18组合、pageErrors0 | `gates-final/ui.json/.log`；结束01:17:26.292 |
+| 默认UI gate（含端到端） | 0 / 27、0、0 | `gates-final/ui-gate.json/.log`；结束01:18:33.072，已告知主代理可隔离复跑 |
+| 发布核对fixture unittest | 0 / 46、0、0 | `gates-final/release.json/.log` |
+| vet、staticcheck、govulncheck | 各0 / 计数不适用 | 对应JSON/log；govulncheck可达漏洞0，另报2个导入包与1个模块的未调用漏洞，不隐藏该提示 |
+| `gofmt -l cmd internal scripts` | 命令及空输出断言0 | `gates-final/source-format.json/.log` |
+| `gofmt -l .` | 命令0，空输出断言1，4个既有临时Go文件 | `gates-final/format-all.json/.log`；没有修改它们 |
+| 两套Compose、本机构建/version、linux amd64及arm64编译 | 各0 / 计数不适用，version=0.10.4 | `gates-final/checks.json`及对应日志 |
+| buildx双架构本地OCI | 0；平台验证2、0、0，30个blob摘要验证 | `gates-final/multiarch.json/.log`、`image-verification.json` |
+| 累计差异及JS语法检查 | 各0 / 计数不适用 | `gates-final/diff.json`、`final-extra-validation.json` |
+
+最终OCI SHA256 `199e3600444eac34bde4a91ecf927ce05cd3f864d3364cb299ca077d61017054`；amd64 manifest `sha256:6a7c62a87b56fcdcf28edaaca7e583f08c93c08abc675c5aab646fa3a767e703`，arm64 manifest `sha256:0bc2e093acebbbb8f19c778386d0e6c61d9534c2e685c7a8d77e55377f0b6fb3`。这是本地导出摘要，不是已发布registry摘要。工具版本：Go1.27.4、Git2.39.5、Python3.9.6、Node24.22.3、Chrome157.0.8103.51、Docker29.8.2、Compose5.5.0、buildx0.37.2、staticcheck0.8.2、govulncheck1.9.0、puppeteer-core25.16.0，详见 `gates-final/versions.json`。
+
+真实QA只读边界证据 `qa-boundary.json`：与A后的11个业务表摘要一致，24completed/3unknown、queued/running0、两个账号写入关闭、两个任务停用、无18090监听/WAL。B没有访问服务商、造邮件或真实整理；A的真实refresh/IMAP与B的模拟测试分开记录，不能把642模拟结果当真实完成。提交前仅检查并纳入三份脱敏报告，私有证据/AGENTS/独立报告保持未跟踪；源码清单17路径与ac29317固定tree一致。
+
+只在本地导出OCI，镜像不push、不赋发布tag/latest；构建上下文由既有 `.dockerignore` 白名单限定cmd/internal等，不包含 `.planning/`、测试、私有部署、数据库、密钥或OAuth应用文件。新建的本地builder及OCI证据保留，未按发布流程清理任何项目资源。
+
+### 16.5 升级、回退与主代理复验
+
+0.10.3→0.10.4无schema或部署参数变化；本轮未替换真实QA程序。独立B验收通过且主代理明确批准C后，才可先重新确认配套数据库/主密钥备份、唯一候选Worker、空队列、任务/写入关闭，再恢复隔离QA验证；不能把本轮临时UI实例视为真实QA启动。正式发布还须完成矩阵中的真实缺项并由主代理独立通过。
+
+回退先停服务并保留配套快照；同schema仅可回到包含Gmail持久fence/安全撤销拒绝修复的候选，不混跑新旧worker，不自动重放三个unknown。新增sessionStorage结果只是非敏感界面提示，不是授权/业务记录；旧版忽略它，必要时在受保护管理页面关闭提示/退出。跨schema14回退仍恢复升级前数据库及配套主密钥，不修改user_version。
+
+主代理复验入口：审查893e781→ac29317的17路径差异与源码摘要，重跑scope/已连接失败重授权消息测试、默认UI/真实重载及正向成功清错负例、原四反例；读取最终门禁、镜像blob校验和真实QA只读边界证据。交接材料提交不扩大源码候选范围，不能由协作者自称独立通过。最终仍是**等待主代理独立验收；尚未发布部署。**

@@ -1,8 +1,8 @@
 # 个人 Gmail / Outlook 真实账号验收准备与记录
 
-2026-11-16。原始返工候选 `574b04742ef4b783cb7333de97d2f282ea722bcd` 的四项代码缺陷已独立复验，见 [复验报告](gmail-outlook-independent-reacceptance.md)。最新源码候选为 **`8f8ee807eb457f065be912d4052096a774901a5a`，0.10.3/schema15**；截至本次修正前的材料提交为 `27085dfe46f6892babcd5d984691bdef8438cd78`。历史 0.10.2 结果保留在第 8 节早期记录，最新真实状态以第 8.6 节为准。
+2026-11-17。原始返工候选 `574b04742ef4b783cb7333de97d2f282ea722bcd` 的四项代码缺陷已独立复验，见 [复验报告](gmail-outlook-independent-reacceptance.md)。0.10.3源码候选 `8f8ee807eb457f065be912d4052096a774901a5a` 的真实记录保留；当前0.10.4/schema15为检查点B本地UX候选，未启动真实QA。最新真实状态以第8.6.3节为准，B候选及门禁另见实施交接第16节。
 
-晚间最新结果以第 8.6 节为准：三条 Gmail 未知分类写入均保持 `needs_verification`，跨标签别名执行均被 `busy` 拒绝，未重放、取消或删除；新 SVC2 专用测试中两条 Service move 分别完成（G-MULTI 与目标原已存在的 G-EXISTING，见 `gmail-v2-actions.json`），受控规则 run `ZqhwkvGwcNlpUFwzCMie1oFPDPcPlGIt` 完成1条、保护汇总7、失败/unknown为0（见 `gmail-v2-rules.json`）。Outlook 已补专用 QA 操作，但恢复后的网页对照受官方 TrustedTypePolicy 错误阻塞。**真实账号整体验收仍未完成，不发布部署。** 以下早期“未准备”“写入0”等记录保留其当时时点，不代表最新结果。
+最新事实：缺IMAP scope是已恢复的历史授权问题；主代理在G-MULTI、G-EXISTING两个已读样本的单封官方详情确认SVC2主题，列表旧标题疑点已证实为Gmail会话聚合，不是SVC2不存在，不代表六封网页全验过。独立只读IMAP已核对六封SVC2身份及成员与索引/冻结计划一致。三条Gmail未知分类写入源目标仍并存，保持 `needs_verification`，未重放、取消或删除；此前两条SVC2 Service move及规则run成功证据保留。Outlook同身份重授权、网页故障后动作对照及真实人工保留等缺项仍阻塞。**真实账号整体验收仍未完成，不发布部署。** 以下历史时点的失败和疑点原文保留，不代表最新结论。
 
 19:30 更新：用户已确认在 MS-PERSONAL-01 准备测试数据，但真实 IMAP 暂未列出 QA 目录；不是已证实的“用户准备了另一个邮箱”问题。仅本机 QA 运行版本现为 **0.10.2/schema15**，包含本轮目录诊断修复和之前未独立验收的应用复用改动。它不是已通过验收的 574b047 固定代码，也未发布到远端。
 
@@ -260,6 +260,33 @@ Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的�
 主代理报告的官方网页现场仍与本地/历史证据矛盾：MailAuto-QA-Target显示4封旧 `[MA-QA-811ab7a]`，精确SVC2搜索曾返回旧SVC1邮件。本轮未导航或交互该主代理所属浏览器会话，未归因于缓存、身份、线程聚合或产品缺陷。历史 `oauth_scope_missing` 只证明当时授权返回缺少邮件scope；本检查点未读取当前OAuth响应、token或secret，不能宣称当前仍缺scope，也不降低 `https://mail.google.com/` 校验。
 
 三个unknown证据足以证明稳定身份和冻结计划存在，但没有本轮提供的服务商只读核验结果；因此均**证据不足以正式结案，继续保留 `needs_verification`**，未调用恢复接口、未手改SQL、未跨标签绕过busy。检查点A到此停止，等待主代理复核后再决定是否进入B/C。
+
+#### 8.6.3 检查点A远端只读补齐与会话聚合澄清（2026-11-17 00:39–00:40）
+
+纠正8.6.2边界：禁止启动后端/Worker不等于禁止独立只读IMAP诊断，8.6.2当时只完成A的本地部分，不能算完整检查点完成。主代理再次明确授权后，新增独立一次性 `remote_readonly.go`，不复用prepare/actions helper，不启动Worker、不调用Service.Sync或任何恢复/执行接口。先在既有私有QA目录完成SQLite及配套主密钥备份，确认schema15；store.Open沿用现有schema及维护路径，没有新增迁移。只允许现有OAuthManager按CAS刷新授权元数据，未输出token、认证报文或原始OAuth响应。
+
+00:39:36–00:40:28 实际执行新helper：新Manager真实refresh grant、既有Network策略下TLS/XOAUTH2成功；账号授权状态前后均connected，保存scope包含官方 `https://mail.google.com/`。先前缺IMAP scope截图是历史失败，不是本次仍存在的阻塞；本次没有放宽scope校验，也没有保存服务商原始scope响应或声称refresh token发生轮换。
+
+仅对QA-A、QA-B、QA-Target、QA-Other执行EXAMINE（检查ReadOnly），逐一用Subject+RFC Message-ID及X-GM-MSGID交叉SEARCH；FETCH仅UID、FLAGS、ENVELOPE、X-GM-MSGID/X-GM-LABELS，不取正文。9个已知合成稳定ID × 4目录共36次成员检查，23个命中成员的完整主题、RFC Message-ID及稳定ID均相符，所有双条件搜索与稳定ID搜索一致；未命中也保留。非QA标签只记录存在性，不输出名称或继续访问。X-GM-LABELS会省略当前选中标签，因此以下成员来自各目录只读SEARCH/FETCH，而非单靠标签集合推测。
+
+SVC2完整主题均为 `[MA-QA-8f8ee80-SVC2] ` 加表中后缀，RFC Message-ID为 `<后缀-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>`。目录UIDVALIDITY分别为A=30、B=31、Target=32、Other=33；表中UID仅在对应目录/UIDVALIDITY下有效。
+
+| 后缀 | 稳定ID SHA256前16位 | 当前远端QA成员及UID | flags / 本地与冻结证据 |
+| --- | --- | --- | --- |
+| G-EXISTING | aed7e635bb4a3f41 | Target:6、Other:6 | Seen；与索引及completed move冻结身份相符 |
+| G-FLAGS | bc66af942e25c7aa | A:19 | Seen；与索引相符 |
+| G-MULTI | b5a650bd5484f492 | B:9、Target:7、Other:5 | Seen；与索引及completed move冻结身份相符 |
+| G-RULE | 206b8cf1806954ff | B:10、Target:8 | Seen；与索引及completed规则冻结身份相符 |
+| G-STAR | 0b688f34f253e2b9 | A:18、B:12 | Seen+Flagged；与索引相符 |
+| G-UNREAD | 1e409ed5a21e5634 | A:17、B:11 | flags为空，仍未读；与索引相符 |
+
+三个unknown亦按冻结稳定ID只读核对：历史G-MULTI `4df4351006717085` 在A:1/B:1/Target:2/Other:1；历史G-EXISTING `34b023ae95dcdd22` 在A:2/Target:1/Other:2；SVC1 G-MULTI `522bc0ae66a7a9f3` 在A:8/B:5/Target:5/Other:3，均Seen且与索引一致。各自源A及目标Target同时存在，证明当前成员关系未达到原move完成后态，也不能判定完全未执行；**三条均证据不足以通过正式只读核验结案，继续needs_verification**。没有调用Reconcile：该接口除只读验证外还有本地状态发布及可能的FinishMove分支，本检查点未授权这些动作。未知写入不重放，busy不绕过；写入关闭与settings version变化的保护保留。
+
+主代理独立网页新证据：搜索框和URL正确，结果6个会话行，行内显示多封Mail Auto QA；展开已读G-MULTI合成会话中23:43单封“显示详细信息”，官方详情主题确为 `[MA-QA-8f8ee80-SVC2] G-MULTI`，而会话标题仍显示旧811ab7a。**已实证Gmail会话聚合导致旧会话标题，并非SVC2不存在**；这是主代理取得的网页证据，本协作者未同时操作浏览器。与本次独立IMAP稳定身份结果共同澄清此前列表矛盾，不删除8.6/8.6.1的历史观察。会话级标签仍不能代替单封标签；六封逐项网页身份核对由主代理继续，不再要求用户解决已解释的旧标题疑点。
+
+证据根目录 `.planning/service-qa-followup/`：`remote-readonly-result.json`含逐封完整合成主题/Message-ID、稳定ID摘要、UID/UIDVALIDITY/flags/时间及36项命中/未命中；`remote-readonly-before.json`记录备份及基线；`remote-readonly-after.json`记录与私有备份逐表比较、命令/退出码和证据摘要。实际 `go build -o .planning/service-qa-followup/remote-readonly .planning/service-qa-followup/remote_readonly.go` 退出0；运行 `.planning/service-qa-followup/remote-readonly` 退出0，build/run各自log和exit保留，不覆盖旧证据。未重复全量门禁，不将诊断编译当产品测试。
+
+连接退出、数据库关闭后无WAL sidecar、18090无监听；11个业务表（operations/plans/items、messages、folder_settings及automation tasks/policies/batches/claims/daily、gmail_run_claims）与配套私有备份摘要一致。queued/running=0，三条unknown及冻结摘要不变，两个账号写入关闭、两个任务停用。没有新增合成邮件或改flags/标签，OAuth刷新仅经现有CAS路径处理授权元数据。停在A等待主代理复核；B/C、发布和部署仍未授权。
 
 ### 8.4 授权返回失败的独立核对与 Outlook 网页恢复
 
