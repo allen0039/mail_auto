@@ -1,8 +1,8 @@
 # 个人 Gmail / Outlook 真实账号验收准备与记录
 
-2026-11-16。原始返工候选 `574b04742ef4b783cb7333de97d2f282ea722bcd` 的四项代码缺陷已独立复验，见 [复验报告](gmail-outlook-independent-reacceptance.md)。最新源码候选为 **`8f8ee807eb457f065be912d4052096a774901a5a`，0.10.3/schema15**；截至本次修正前的材料提交为 `0754de22b2f7bb0c90cd1475a8d8cbbe174c1395`。历史 0.10.2 结果保留在第 8 节早期记录，最新真实状态以第 8.5 节为准。
+2026-11-16。原始返工候选 `574b04742ef4b783cb7333de97d2f282ea722bcd` 的四项代码缺陷已独立复验，见 [复验报告](gmail-outlook-independent-reacceptance.md)。最新源码候选为 **`8f8ee807eb457f065be912d4052096a774901a5a`，0.10.3/schema15**；截至本次修正前的材料提交为 `27085dfe46f6892babcd5d984691bdef8438cd78`。历史 0.10.2 结果保留在第 8 节早期记录，最新真实状态以第 8.6 节为准。
 
-晚间最新结果以第 8.5 节为准：Gmail OAuth/IMAP/刷新/QA 同步和标记已通过，两个未知分类写入保持 `needs_verification` 且未重放；Outlook 已补专用 QA 操作，但恢复后的网页对照受官方 TrustedTypePolicy 错误阻塞。**真实账号整体验收仍未完成，不发布部署。** 以下早期“未准备”“写入0”等记录保留其当时时点，不代表最新结果。
+晚间最新结果以第 8.6 节为准：三条 Gmail 未知分类写入均保持 `needs_verification`，跨标签别名执行均被 `busy` 拒绝，未重放、取消或删除；新 SVC2 专用测试中两条 Service move 分别完成（G-MULTI 与目标原已存在的 G-EXISTING，见 `gmail-v2-actions.json`），受控规则 run `ZqhwkvGwcNlpUFwzCMie1oFPDPcPlGIt` 完成1条、保护汇总7、失败/unknown为0（见 `gmail-v2-rules.json`）。Outlook 已补专用 QA 操作，但恢复后的网页对照受官方 TrustedTypePolicy 错误阻塞。**真实账号整体验收仍未完成，不发布部署。** 以下早期“未准备”“写入0”等记录保留其当时时点，不代表最新结果。
 
 19:30 更新：用户已确认在 MS-PERSONAL-01 准备测试数据，但真实 IMAP 暂未列出 QA 目录；不是已证实的“用户准备了另一个邮箱”问题。仅本机 QA 运行版本现为 **0.10.2/schema15**，包含本轮目录诊断修复和之前未独立验收的应用复用改动。它不是已通过验收的 574b047 固定代码，也未发布到远端。
 
