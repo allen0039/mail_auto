@@ -1,7 +1,7 @@
 {
   "generated_at": "2026-11-16T21:44:41.036382+08:00",
   "timezone": "Asia/Shanghai",
-  "status": "implementation_self_test_only; waiting for independent reacceptance; real-account acceptance incomplete",
+  "status": "0.10.3 candidate fixed locally; real-account acceptance incomplete; waiting for independent reacceptance; not published or deployed",
   "followup_0_10_3": {
     "version": "0.10.3",
     "schema": 15,
@@ -64,9 +64,9 @@
   },
   "source_candidate": {
     "baseline": "fbc1054a2490ecf86bc05f39eaadc688dcccdfe7",
-    "commit": "811ab7a8c72c00c11f6b314841e8506c0bdddb58",
-    "tree": "97d459d270bc28a35df8946fb74a247534772fc5",
-    "version": "0.10.2",
+    "commit": "8f8ee807eb457f065be912d4052096a774901a5a",
+    "tree": "424d02806fb88ba53db0f526ebfee0c106bfc229",
+    "version": "0.10.3",
     "schema": 15,
     "files": [
       {
@@ -1737,7 +1737,7 @@
     "cwd": "temporary clean export of staged tree",
     "exit_code": 0,
     "empty_output_assertion_exit_code": 0,
-    "tree": "97d459d270bc28a35df8946fb74a247534772fc5"
+    "tree": "424d02806fb88ba53db0f526ebfee0c106bfc229"
   },
   "known_workspace_exception": "gofmt -l . exits 0 but empty-output assertion exits 1 for three pre-existing temporary Go files; candidate clean export and source formatting pass",
   "ui_count_basis": "(37+45+63+87+99+13)*3 = 1032 assertions; six scripts at each of 1280/375/390; page errors 0; no totals combined across reruns",
