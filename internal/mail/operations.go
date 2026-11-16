@@ -129,9 +129,27 @@ func reconcileSchedule(o Operation, now time.Time) (string, int64) {
 }
 
 func accountIdentity(a Account) string {
-	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, a.OAuth})
+	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, a.OAuth, a.Proxy})
 	h := sha256.Sum256(raw)
-	return hex.EncodeToString(h[:])
+	return "v2:" + hex.EncodeToString(h[:])
+}
+
+func recoveryIdentityMatches(a Account, frozen string) bool {
+	current := accountIdentity(a)
+	if frozen == current {
+		return true
+	}
+	previous, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, a.OAuth})
+	previousDigest := sha256.Sum256(previous)
+	if frozen == hex.EncodeToString(previousDigest[:]) {
+		return true
+	}
+	if a.OAuth != nil || (a.NetworkRevision != "" && a.NetworkRevision != "direct") {
+		return false
+	}
+	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders})
+	digest := sha256.Sum256(raw)
+	return frozen == hex.EncodeToString(digest[:])
 }
 func (s *Service) NewPlan(ctx context.Context, access Access, in PlanInput) (Plan, error) {
 	access, e := s.CheckAccess(access)
@@ -355,6 +373,11 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 	if p.Owner != a.Owner || p.Version != a.Version || p.Expires <= time.Now().Unix() {
 		return Operation{}, ErrConflict
 	}
+	for _, item := range p.Items {
+		if !strings.HasPrefix(item.Config, "v2:") {
+			return Operation{}, blocked("plan_identity_upgrade_required", "旧版本计划缺少完整配置证据，请重新预览；待核验操作仅允许只读核验或人工结案", ErrConflict)
+		}
+	}
 	var automationPolicy AutomationPolicy
 	if p.Automation != nil {
 		if len(p.Items) != 1 {
@@ -418,7 +441,7 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 			}
 		}
 		if p.Automation == nil {
-			if e = tx.QueryRow("SELECT count(*) FROM automation_claims WHERE account_id=? AND ref=? AND state IN ('claimed','planned') AND expires>? AND (plan_id='' OR plan_id NOT IN (SELECT plan_id FROM operations WHERE state IN ('completed','failed','partial','cancelled')))", item.Message.AccountID, item.Message.Ref, now).Scan(&n); e != nil {
+			if n, e = logicalClaims(tx, item.Message, now, ""); e != nil {
 				return Operation{}, e
 			}
 			if n > 0 {
@@ -710,7 +733,7 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 		return e
 	}
 	if accountIdentity(account) != item.Config {
-		return ErrConflict
+		return blocked("plan_identity_changed", "计划配置已变化或来自旧版本，请重新预览；未发送远端写入", ErrConflict)
 	}
 	settingsForProvider, err := s.FolderSettings(account.ID)
 	if err != nil {

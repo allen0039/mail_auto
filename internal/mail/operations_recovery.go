@@ -174,7 +174,7 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 		account, e := s.Account(item.Message.AccountID)
 		current, lookup := s.Message(item.Message.Ref)
 		unchanged := lookup == sql.ErrNoRows || (lookup == nil && ((current.Folder == item.Message.Folder && current.UID == item.Message.UID && current.UIDValidity == item.Message.UIDValidity) || (current.Folder == x.Result.Folder && current.UID == x.Result.UID && current.UIDValidity == x.Result.UIDValidity)))
-		if e == nil && unchanged && accountIdentity(account) == item.Config {
+		if e == nil && unchanged && recoveryIdentityMatches(account, item.Config) {
 			pw, err := s.password(account)
 			if err == nil {
 				if isFlagAction(p.Action) {
@@ -185,7 +185,10 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 				if x.Result.UID != 0 && x.Result.UIDValidity != 0 && x.Result.Folder != "" {
 					if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
 						s.invalidateAutomatic(item.Message.AccountID)
-						if err = s.publishRecoveredMove(id, x.Position, item, x.Result); err != nil {
+						if err = s.checkSnapshot(account); err == nil {
+							err = s.publishRecoveredMove(id, x.Position, item, x.Result)
+						}
+						if err != nil {
 							s.recordRecovery(id, x.Position, err)
 						}
 					} else {
@@ -200,6 +203,9 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 					}
 				} else if inspector, ok := s.Remote.(MoveReconciler); ok {
 					evidence, inspectErr := inspector.InspectMove(ctx, account, pw, item.Message, item.Destination)
+					if inspectErr == nil {
+						inspectErr = s.checkSnapshot(account)
+					}
 					if inspectErr != nil {
 						s.recordRecovery(id, x.Position, blocked("recovery_no_trusted_mapping", "没有保存服务器返回的目标 UID，且现有证据不足以确认结果；需人工核对", inspectErr))
 						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
@@ -227,7 +233,7 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 			} else {
 				s.recordRecovery(id, x.Position, err)
 			}
-		} else if e != nil || accountIdentity(account) != item.Config {
+		} else if e != nil || !recoveryIdentityMatches(account, item.Config) {
 			s.recordRecovery(id, x.Position, blocked("recovery_account_changed", "邮箱连接配置已变化，不能自动恢复", ErrConflict))
 		} else {
 			s.recordRecovery(id, x.Position, blocked("recovery_index_changed", "本地索引中的邮件位置已变化，需重新同步后核验", ErrConflict))
@@ -255,6 +261,9 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 }
 
 func (s *Service) finishRecoveredMove(ctx context.Context, access Access, operation Operation, plan Plan, item PlanItem, account Account, password string, result MoveResult) error {
+	if !strings.HasPrefix(item.Config, "v2:") {
+		return blocked("recovery_legacy_read_only", "旧版本计划缺少完整配置证据，仅允许只读核验或人工结案；未清理源邮件", ErrConflict)
+	}
 	if result.Folder != item.Destination {
 		return blocked("recovery_destination_mismatch", "保存的目标目录与计划不一致", ErrDenied)
 	}
@@ -325,6 +334,17 @@ func (s *Service) UndoPlan(ctx context.Context, a Access, id string) ([]Plan, er
 		return nil, e
 	}
 	out := []Plan{}
+	if isMoveAction(p.Action) {
+		for _, item := range p.Items {
+			account, err := s.Account(item.Message.AccountID)
+			if err != nil {
+				return nil, err
+			}
+			if account.Provider == "google" || item.Message.GmailMessageID != "" {
+				return nil, blocked("gmail_undo_unsupported", "Gmail 移动或归档未保存操作前完整标签证据，不能安全撤销；请在 Gmail 网页核对后手动恢复标签", ErrCapability)
+			}
+		}
+	}
 	for _, x := range o.Items {
 		if x.State != "completed" {
 			continue

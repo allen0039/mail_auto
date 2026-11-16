@@ -126,6 +126,20 @@ func (service *Service) evaluateMessageRules(message Message, rules []Rule, poli
 
 func logicalPending(query interface{ QueryRow(string, ...any) *sql.Row }, message Message) (int, error) {
 	var pending int
-	err := query.QueryRow(`SELECT count(*) FROM operation_items i WHERE i.state IN ('queued','running','needs_verification') AND (i.ref=? OR (?<>'' AND i.ref IN (SELECT ref FROM messages WHERE account_id=? AND gmail_message_id=?)))`, message.Ref, message.GmailMessageID, message.AccountID, message.GmailMessageID).Scan(&pending)
+	err := query.QueryRow(`SELECT count(*) FROM operation_items i JOIN operations o ON o.id=i.operation_id JOIN operation_plans p ON p.id=o.plan_id
+WHERE i.state IN ('queued','running','needs_verification') AND (i.ref=? OR (?<>'' AND EXISTS (
+ SELECT 1 FROM json_each(p.payload,'$.items') frozen WHERE CAST(frozen.key AS INTEGER)=i.position
+ AND json_extract(frozen.value,'$.message.account_id')=? AND json_extract(frozen.value,'$.message.gmail_message_id')=?)))`, message.Ref, message.GmailMessageID, message.AccountID, message.GmailMessageID).Scan(&pending)
+	return pending, err
+}
+
+func logicalClaims(query manualQuery, message Message, now int64, exceptRef string) (int, error) {
+	var pending int
+	err := query.QueryRow(`SELECT count(*) FROM automation_claims c JOIN automation_batches b ON b.id=c.batch_id
+WHERE c.account_id=? AND c.ref<>? AND (c.ref=? OR (?<>'' AND EXISTS (
+ SELECT 1 FROM json_each(b.payload,'$.items') frozen WHERE json_extract(frozen.value,'$.message.ref')=c.ref
+ AND json_extract(frozen.value,'$.message.account_id')=c.account_id AND json_extract(frozen.value,'$.message.gmail_message_id')=?)))
+AND ((c.state IN ('claimed','planned') AND c.expires>? AND (c.plan_id='' OR c.plan_id NOT IN (SELECT plan_id FROM operations WHERE state IN ('completed','failed','partial','cancelled'))))
+ OR c.plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))`, message.AccountID, exceptRef, message.Ref, message.GmailMessageID, message.GmailMessageID, now).Scan(&pending)
 	return pending, err
 }

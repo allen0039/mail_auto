@@ -65,6 +65,9 @@ func TestStreamableMCPPermissionsAndRevocation(t *testing.T) {
 		t.Fatal(listed, e)
 	}
 	for _, tool := range listed.Tools {
+		if tool.Name == "mail_undo" && !strings.Contains(tool.Description, "Gmail move/archive undo is refused") {
+			t.Fatal("Gmail unsafe undo restriction missing from MCP capability", tool.Description)
+		}
 		if strings.Contains(tool.Name, "label") {
 			t.Fatal("local classification tool exposed", tool.Name)
 		}

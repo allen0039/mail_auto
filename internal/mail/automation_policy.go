@@ -291,8 +291,8 @@ func (s *Service) RuleCapabilities(a Access, id string) (map[string]any, error) 
 		out["logical_identity"] = "account_id + X-GM-MSGID (string)"
 		out["count_basis"] = "folder_entries; unique count on account card"
 		out["supported_actions"] = []string{"move_between_regular_labels", "archive_from_INBOX", "mark_read", "mark_unread", "flag", "unflag"}
-		out["unsupported_actions"] = []string{"trash", "restore", "keep_both", "move_special_folders", "finish_unknown_label_write"}
-		out["restriction"] = "Gmail 标签视图并非独立副本；先按规则优先级及规则 ID，再按源目录名称确定唯一动作。其他视图受保护则全部跳过。未知结果仅只读核验。真实账号验收待完成。"
+		out["unsupported_actions"] = []string{"trash", "restore", "keep_both", "move_special_folders", "finish_unknown_label_write", "undo_move", "undo_archive"}
+		out["restriction"] = "Gmail 标签视图并非独立副本；移动/归档缺少操作前完整标签证据，不能安全撤销。先按规则优先级及规则 ID，再按源目录名称确定唯一动作。其他视图受保护则全部跳过。未知结果仅只读核验。真实账号验收待完成。"
 	}
 	return out, nil
 }

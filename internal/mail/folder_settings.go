@@ -110,7 +110,7 @@ func (s *Service) ProbeCapabilities(ctx context.Context, id string) (Capabilitie
 	if a.Provider == "google" {
 		caps.GmailLabels, caps.MoveMode = true, "gmail_labels"
 		caps.SupportedActions = []string{"move", "archive", "mark_read", "mark_unread", "flag", "unflag"}
-		caps.Restriction = "仅普通标签分类和 INBOX 归档；回收站、恢复、特殊目录移动、保留两份及自动完成未知标签写入未验证，服务端拒绝"
+		caps.Restriction = "仅普通标签分类和 INBOX 归档；移动/归档撤销缺少操作前标签证据，服务端拒绝；回收站、恢复、特殊目录移动、保留两份及自动完成未知标签写入未验证，服务端拒绝"
 	} else if caps.UIDPlus {
 		caps.MoveMode = "uidplus_copy"
 		if caps.Move {

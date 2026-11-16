@@ -175,7 +175,7 @@ func (s *Service) inspectManualKeep(ctx context.Context, op Operation, p Plan) (
 	if err != nil {
 		return out, source, target, err
 	}
-	if accountIdentity(account) != frozen.Config {
+	if !recoveryIdentityMatches(account, frozen.Config) {
 		return out, source, target, ErrConflict
 	}
 	pw, err := s.password(account)
@@ -261,6 +261,10 @@ func (s *Service) ResolveManualKeep(ctx context.Context, a Access, id string, in
 		return nil, err
 	}
 	defer release()
+	before, err := s.Account(p.Items[0].Message.AccountID)
+	if err != nil {
+		return nil, err
+	}
 	evidence, source, target, err := s.inspectManualKeep(ctx, op, p)
 	if err != nil {
 		return nil, err
@@ -285,7 +289,10 @@ func (s *Service) ResolveManualKeep(ctx context.Context, a Access, id string, in
 	if err != nil {
 		return nil, err
 	}
-	if accountIdentity(account) != p.Items[0].Config {
+	if err = s.accountNetworkIn(tx, &account); err != nil {
+		return nil, err
+	}
+	if accountIdentity(account) != accountIdentity(before) || !recoveryIdentityMatches(account, p.Items[0].Config) {
 		return nil, ErrConflict
 	}
 	// A second process may have resolved or changed the operation while this

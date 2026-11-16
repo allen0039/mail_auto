@@ -243,7 +243,7 @@ func New(s *mail.Service, a mail.Access) *mcp.Server {
 		o, e := s.Reconcile(ctx, a, in.ID)
 		return operationOutput(o, in.Offset), e
 	})
-	add(server, s, a, "mail_undo", "Preview compensating plans for confirmed completed items whose current state matches the original result. Never executes automatically. Each returned plan ID must be inspected using mail_plan and executed explicitly.", false, func(ctx context.Context, in OperationInput) (map[string]any, error) {
+	add(server, s, a, "mail_undo", "Preview compensating plans for confirmed completed items whose current state matches the original result. Gmail move/archive undo is refused: original label membership evidence is unavailable. Never executes automatically. Each returned plan ID must be inspected using mail_plan and executed explicitly.", false, func(ctx context.Context, in OperationInput) (map[string]any, error) {
 		plans, e := s.UndoPlan(ctx, a, in.ID)
 		out := []map[string]any{}
 		for _, p := range plans {

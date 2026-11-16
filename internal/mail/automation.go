@@ -163,9 +163,11 @@ func (s *Service) claimAvailable(accountID, ref, fingerprint string, now int64) 
 	if kept, err := manuallyKept(s.Store.DB, m); err != nil || kept {
 		return false, err
 	}
+	if pending, err := logicalPending(s.Store.DB, m); err != nil || pending > 0 {
+		return false, err
+	}
 	if m.GmailMessageID != "" {
-		var aliases int
-		err := s.Store.DB.QueryRow(`SELECT count(*) FROM automation_claims c JOIN messages m ON m.ref=c.ref WHERE m.account_id=? AND m.gmail_message_id=? AND c.ref<>? AND ((c.state IN ('claimed','planned') AND c.expires>?) OR c.plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))`, accountID, m.GmailMessageID, ref, now).Scan(&aliases)
+		aliases, err := logicalClaims(s.Store.DB, m, now, ref)
 		if err != nil || aliases > 0 {
 			return false, err
 		}
@@ -375,9 +377,9 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 			return b, ErrBusy
 		}
 		if item.Message.GmailMessageID != "" {
-			var aliases int
-			if e = tx.QueryRow(`SELECT count(*) FROM automation_claims c JOIN messages m ON m.ref=c.ref WHERE m.account_id=? AND m.gmail_message_id=? AND c.ref<>? AND ((c.state IN ('claimed','planned') AND c.expires>?) OR c.plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))`, b.AccountID, item.Message.GmailMessageID, item.Message.Ref, now).Scan(&aliases); e != nil {
-				return b, e
+			aliases, err := logicalClaims(tx, item.Message, now, item.Message.Ref)
+			if err != nil {
+				return b, err
 			}
 			if aliases > 0 {
 				return b, ErrBusy

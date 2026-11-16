@@ -22,6 +22,7 @@
     check("Gmail preset uses official host", $("#provider").value === "google" && $("#host").value === "imap.gmail.com");
     check("Gmail uses OAuth without password", !$("#account-oauth-note").hidden && $("#password-label").hidden && !accountForm.elements.password.required);
     check("Gmail restriction is explicit", $("#account-oauth-note").textContent.includes("回收站") && $("#account-oauth-note").textContent.includes("拒绝"));
+    check("Gmail unsafe undo is explicitly refused", $("#account-oauth-note").textContent.includes("撤销") && $("#account-oauth-note").textContent.includes("操作前标签证据"));
     for (const domain of ["outlook.com", "hotmail.com", "live.com"]) {
       accountForm.elements.username.value = `fixture@${domain}`;
       accountForm.elements.username.dispatchEvent(new Event("input", {bubbles: true}));

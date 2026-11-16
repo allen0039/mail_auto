@@ -664,6 +664,7 @@
                 <h2>整理任务与核验</h2>
                 <button id="refresh-operations" class="secondary" type="button">刷新任务</button>
               </div>
+              <p class="muted small">Gmail 移动/归档不支持撤销：缺少操作前完整标签证据，反向移动可能移除原有标签。请在 Gmail 网页核对后手动恢复；未知结果仍须核验，不要重复执行。</p>
               <div id="operations-list" class="margin-t-14"></div>
             </article>
 
@@ -1106,7 +1107,7 @@
 
         <div id="account-oauth-note" class="info-strip margin-t-12" hidden>
           <p>保存待授权邮箱后进入服务商官方登录。请授权此处填写的本人邮箱。OAuth 应用须先配置固定 HTTPS 回调地址。</p>
-          <p>Gmail 当前支持普通标签分类、INBOX 归档和标记；回收站、恢复及“保留两份”尚未验证，服务端拒绝。Google Workspace / Microsoft 365 未验证。</p>
+          <p>Gmail 当前支持普通标签分类、INBOX 归档和标记；移动/归档撤销缺少操作前标签证据，服务端拒绝。回收站、恢复及“保留两份”尚未验证，服务端拒绝。Google Workspace / Microsoft 365 未验证。</p>
           <button type="button" id="account-oauth-config" class="secondary">配置邮箱授权应用</button>
         </div>
 
