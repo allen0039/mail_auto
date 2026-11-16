@@ -239,6 +239,18 @@ Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的�
 
 **未完成**：Gmail网页搜索与SVC2前缀/索引不一致，逐动作官方网页对照未通过；三个unknown未结案、真实人工保留及完整归档/重启和同身份重授权验收未补齐。Outlook同身份重授权、TrustedTypePolicy故障后网页对照和真实人工保留待验；Workspace/M365未验证。请本人仅核对官方网页专用SVC2 QA邮件标签；主代理独立复验原始证据及关键测试，不能以Service/IMAP成功冒充整体验收。**等待主代理独立验收；尚未发布部署。**
 
+#### 8.6.1 主代理网页矛盾与只读身份复核（2026-11-17补充）
+
+主代理只读查看 Gmail `MailAuto-QA-Target` 时看到4封旧 `[MA-QA-811ab7a]` 邮件（G-RULE、G-EXISTING、G-MULTI、G-INCREMENT），未看到SVC2新主题；此前搜索SVC2 RFC Message-ID却返回旧SVC1 G-EXISTING。此为主代理现场反馈，本次未重新操作浏览器，不能归因于缓存、账号错误、搜索语义或Gmail线程合并，矛盾原因未确定。
+
+只读复核原helper源码 `gmail_service_v2.go`：APPEND使用主题 `[MA-QA-8f8ee80-SVC2] ` + suffix，RFC Message-ID为 `<SUFFIX-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>`；六个suffix为G-MULTI、G-EXISTING、G-RULE、G-UNREAD、G-STAR、G-FLAGS。APPEND后使用Message-ID及Subject双条件定位且要求恰好一个UID。`gmail-v2-prepare.json`记录准备成功和13成员/6逻辑邮件；actions前13/6、后12/6，rules后12/6。原快照只保存suffix、成员、标记及Gmail ID位数，没有逐行完整稳定ID，不能追溯补造原始协议证据。
+
+当前本地SQLite中六个SVC2完整主题及RFC Message-ID与上述模板一致。两条completed move和规则completed操作的冻结计划中，完整主题、RFC Message-ID、X-GM-MSGID与当前索引对应成员一致；稳定ID SHA256前16位分别为G-MULTI `b5a650bd5484f492`、G-EXISTING `aed7e635bb4a3f41`、G-RULE `206b8cf1806954ff`（仅供脱敏交叉核对，不用RFC Message-ID替代Gmail稳定身份）。当前12成员/6稳定ID及标记与原 `gmail-v2-rules.json` after_rules逐项相符；目标索引包含这三封SVC2，三个unknown仍在，queued/running=0。
+
+**证据边界**：源码、历史准备成功报告、当前索引和冻结计划内部相符，支持原报告所用SVC2身份，并不能证明此刻服务商网页或远端成员状态；更不能据此否定主代理看到的旧主题。本次未发起任何新的IMAP请求、APPEND或标签写入，未重放unknown。脱敏复核记录在 `.planning/service-qa-followup/svc2-readonly-identity-crosscheck.json`，原actions/rules证据未修改。官方网页矛盾仍阻塞真实整体验收。
+
+运行状态另有偏差：检查时发现QA后端PID32026仍监听18090，并非已关闭；确认其为本项目私有QA可执行文件后发送SIGTERM，随后无监听，未重启。关闭后普通只读SQLite因WAL侧文件打开失败，改用已停机数据库的 `mode=ro&immutable=1` 完成只读核对，没有创建侧文件或修改业务记录。保持QA后端关闭，不发布部署。
+
 ### 8.4 授权返回失败的独立核对与 Outlook 网页恢复
 
 2026-11-16 晚间收到 Gmail 权限错误截图后，核对 Google 官方请求确实含 `openid email https://mail.google.com/`、offline、PKCE S256 和本机精确回调。21:59:07 浏览器历史留下 `oauth_scope_missing`，G-PERSONAL-01 仍 pending/generation1，无主体和 refresh。Google 账号的关联应用详情仅显示 Mail Auto Personal QA 获准 Google 登录/个人资料，未列 Gmail 数据访问。这是当前缺邮件授权的直接官方页面证据；没有保存原始 token 响应，不能声称已知其精确 scope 字符串，也未复现 scope 规范化误判。
