@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mail-auto/internal/mail"
 	"mail-auto/internal/network"
 	"net"
 	"strings"
@@ -97,6 +98,9 @@ func retryRemote(ctx context.Context, operation func() error) error {
 		if err == nil {
 			return nil
 		}
+		if errors.Is(err, mail.ErrUncertain) {
+			return err
+		}
 		if e := ctx.Err(); e != nil {
 			return e
 		}
@@ -117,4 +121,20 @@ func retryRemote(ctx context.Context, operation func() error) error {
 		case <-timer.C:
 		}
 	}
+}
+
+func retryReconciledMove(ctx context.Context, operation func() error) error {
+	err := retryRemote(ctx, func() error {
+		failure := operation()
+		var transport *remoteError
+		if errors.Is(failure, mail.ErrUncertain) && errors.As(failure, &transport) && transport.retryable {
+			return transport
+		}
+		return failure
+	})
+	var transport *remoteError
+	if errors.As(err, &transport) {
+		return fmt.Errorf("%w: %w", mail.ErrUncertain, err)
+	}
+	return err
 }

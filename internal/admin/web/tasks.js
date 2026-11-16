@@ -64,6 +64,7 @@
     destination_not_allowed: (i) => `规则「${ruleName(i.target)}」的目标目录未在整理授权中允许`,
     archive_folder_missing: (i) => `规则「${ruleName(i.target)}」需要归档文件夹，但尚未配置`,
     trash_folder_missing: (i) => `规则「${ruleName(i.target)}」需要回收站，但尚未配置`,
+    gmail_action_unsupported: (i) => `规则「${ruleName(i.target)}」包含 Gmail 暂不支持的回收站、恢复或特殊目录操作；请改用普通标签分类、INBOX 归档或标记`,
     task_paused: () => "任务已暂停，启用后才会按计划运行",
   };
   const fixLabels = { policy: "打开整理授权", folders: "打开文件夹映射", account: "编辑邮箱", rules: "编辑任务", task: "编辑任务" };

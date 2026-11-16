@@ -285,5 +285,14 @@ func (s *Service) RuleCapabilities(a Access, id string) (map[string]any, error) 
 			visible = append(visible, b)
 		}
 	}
-	return map[string]any{"account_id": id, "provider": account.Provider, "folders": visible, "classification": "provider_folders", "native_labels": map[string]any{"read": false, "write": false, "status": "not_verified"}, "rule_fields": []string{"sender", "domain", "subject", "folder", "read_state", "received_days", "size", "flagged"}, "metadata_notice": "flags_known=false or received_at=0 means unknown; rules requiring missing data skip", "ai_trigger": "external_scheduled_task", "server_ai": false, "builtin_management_agent": "telegram_fixed_rules_and_tasks", "continuous_ai_classification": false, "server_organizer_schedule": true, "internal_schedule_requires_admin_grant": true, "trigger_modes": []string{"manual", "internal", "external"}, "max_batch": 50}, nil
+	out := map[string]any{"account_id": id, "provider": account.Provider, "folders": visible, "classification": "provider_folders", "native_labels": map[string]any{"read": false, "write": false, "status": "not_verified"}, "rule_fields": []string{"sender", "domain", "subject", "folder", "read_state", "received_days", "size", "flagged"}, "metadata_notice": "flags_known=false or received_at=0 means unknown; rules requiring missing data skip", "ai_trigger": "external_scheduled_task", "server_ai": false, "builtin_management_agent": "telegram_fixed_rules_and_tasks", "continuous_ai_classification": false, "server_organizer_schedule": true, "internal_schedule_requires_admin_grant": true, "trigger_modes": []string{"manual", "internal", "external"}, "max_batch": 50}
+	if account.Provider == "google" {
+		out["classification"] = "gmail_label_memberships"
+		out["logical_identity"] = "account_id + X-GM-MSGID (string)"
+		out["count_basis"] = "folder_entries; unique count on account card"
+		out["supported_actions"] = []string{"move_between_regular_labels", "archive_from_INBOX", "mark_read", "mark_unread", "flag", "unflag"}
+		out["unsupported_actions"] = []string{"trash", "restore", "keep_both", "move_special_folders", "finish_unknown_label_write"}
+		out["restriction"] = "Gmail 标签视图并非独立副本；先按规则优先级及规则 ID，再按源目录名称确定唯一动作。其他视图受保护则全部跳过。未知结果仅只读核验。真实账号验收待完成。"
+	}
+	return out, nil
 }

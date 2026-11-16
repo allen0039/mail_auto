@@ -2,26 +2,32 @@ package mail
 
 import (
 	"context"
+	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"time"
 )
 
 type Account struct {
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	Provider         string         `json:"provider"`
-	Username         string         `json:"username"`
-	Host             string         `json:"host"`
-	Port             int            `json:"port"`
-	Folders          []string       `json:"folders"`
-	SyncedFolders    []string       `json:"synced_folders"`
-	SecretFile       string         `json:"secret_file,omitempty"`
-	CredentialSource string         `json:"credential_source"`
-	CreatedAt        int64          `json:"created_at"`
-	Secret           []byte         `json:"-"`
-	Proxy            network.Policy `json:"proxy"`
-	NetworkRevision  string         `json:"network_revision"`
-	NetworkLabel     string         `json:"network_label"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	Username         string             `json:"username"`
+	Host             string             `json:"host"`
+	Port             int                `json:"port"`
+	Folders          []string           `json:"folders"`
+	SyncedFolders    []string           `json:"synced_folders"`
+	SecretFile       string             `json:"secret_file,omitempty"`
+	CredentialSource string             `json:"credential_source"`
+	CreatedAt        int64              `json:"created_at"`
+	Secret           []byte             `json:"-"`
+	Proxy            network.Policy     `json:"proxy"`
+	NetworkRevision  string             `json:"network_revision"`
+	NetworkLabel     string             `json:"network_label"`
+	Authentication   string             `json:"authentication"`
+	OAuth            *mailoauth.Account `json:"oauth,omitempty"`
+	AuthSource       mailoauth.Source   `json:"-"`
+	UniqueMessages   int                `json:"unique_messages"`
+	MessageEntries   int                `json:"message_entries"`
 }
 type Message struct {
 	Ref             string  `json:"ref"`
@@ -43,13 +49,14 @@ type Message struct {
 	Labels          []Label `json:"labels,omitempty"`
 	// Metadata version 2 fields. Older rows keep empty values until the
 	// automatic sync refreshes them; rules treat them as unknown until then.
-	Recipients    string `json:"recipients,omitempty"`
-	Cc            string `json:"cc,omitempty"`
-	MessageID     string `json:"message_id,omitempty"`
-	InReplyTo     string `json:"in_reply_to,omitempty"`
-	References    string `json:"references,omitempty"`
-	ListID        string `json:"list_id,omitempty"`
-	HasAttachment bool   `json:"has_attachment"`
+	Recipients     string `json:"recipients,omitempty"`
+	Cc             string `json:"cc,omitempty"`
+	MessageID      string `json:"message_id,omitempty"`
+	GmailMessageID string `json:"gmail_message_id,omitempty"`
+	InReplyTo      string `json:"in_reply_to,omitempty"`
+	References     string `json:"references,omitempty"`
+	ListID         string `json:"list_id,omitempty"`
+	HasAttachment  bool   `json:"has_attachment"`
 }
 
 // CurrentMetadataVersion is the newest metadata layout written by remote reads.
@@ -57,7 +64,7 @@ const CurrentMetadataVersion = 2
 
 // messageColumns lists the messages table in scanMessage order. Never use
 // SELECT * because migrations append columns.
-const messageColumns = "ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment"
+const messageColumns = "ref,account_id,folder,uidvalidity,uid,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment,gmail_message_id"
 
 type Label struct {
 	ID        string `json:"id"`

@@ -64,7 +64,7 @@ type manualQuery interface{ QueryRow(string, ...any) *sql.Row }
 
 func manuallyKept(q manualQuery, m Message) (bool, error) {
 	var n int
-	err := q.QueryRow(`SELECT count(*) FROM manual_keep_blocks WHERE account_id=? AND (ref=? OR (folder=? AND uidvalidity=? AND uid=?) OR (message_id<>'' AND message_id=?))`, m.AccountID, m.Ref, m.Folder, m.UIDValidity, m.UID, m.MessageID).Scan(&n)
+	err := q.QueryRow(`SELECT count(*) FROM manual_keep_blocks b WHERE account_id=? AND (ref=? OR (folder=? AND uidvalidity=? AND uid=?) OR (message_id<>'' AND message_id=?) OR (?<>'' AND EXISTS (SELECT 1 FROM messages sibling WHERE sibling.account_id=b.account_id AND sibling.gmail_message_id=? AND (sibling.ref=b.ref OR (sibling.folder=b.folder AND sibling.uidvalidity=b.uidvalidity AND sibling.uid=b.uid)))))`, m.AccountID, m.Ref, m.Folder, m.UIDValidity, m.UID, m.MessageID, m.GmailMessageID, m.GmailMessageID).Scan(&n)
 	return n > 0, err
 }
 
@@ -77,7 +77,7 @@ func (s *Service) evaluateIndexedRules(m Message, rules []Rule, p AutomationPoli
 	if kept {
 		return RuleEvaluation{Message: m, Signature: messageSignature(m), Status: "protected", Action: "keep", Reasons: []string{"人工核验保留，自动整理永久跳过"}}, nil
 	}
-	return evaluateRules(m, rules, p, now), nil
+	return s.evaluateMessageRules(m, rules, p, now)
 }
 
 func (s *Service) manualResolution(id string) (*ManualResolution, error) {
@@ -138,6 +138,9 @@ func (s *Service) inspectManualKeep(ctx context.Context, op Operation, p Plan) (
 	source, err := s.Message(op.Items[0].Ref)
 	if err != nil {
 		return out, source, Message{}, err
+	}
+	if source.GmailMessageID != "" {
+		return out, source, Message{}, blocked("gmail_keep_both_unsupported", "Gmail 多个标签视图属于同一逻辑邮件，不能按保留两份结案", ErrCapability)
 	}
 	frozen := p.Items[0]
 	if source.AccountID != frozen.Message.AccountID || source.Folder != frozen.Message.Folder || source.UID != frozen.Message.UID || source.UIDValidity != frozen.Message.UIDValidity || source.MessageID == "" || source.Size <= 0 || source.Subject != frozen.Message.Subject || source.Sender != frozen.Message.Sender || source.SentAt != frozen.Message.SentAt || source.Size != frozen.Message.Size {
@@ -278,7 +281,7 @@ func (s *Service) ResolveManualKeep(ctx context.Context, a Access, id string, in
 	if adminVersion != a.Version || restricted != 0 {
 		return nil, ErrDenied
 	}
-	account, err := scanAccount(tx.QueryRow("SELECT * FROM accounts WHERE id=?", source.AccountID))
+	account, err := scanAccount(tx.QueryRow("SELECT "+accountColumns+" FROM accounts WHERE id=?", source.AccountID))
 	if err != nil {
 		return nil, err
 	}

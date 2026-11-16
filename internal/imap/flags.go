@@ -7,9 +7,8 @@ import (
 	"mail-auto/internal/mail"
 )
 
-// SetFlags changes only \Seen and/or \Flagged on one exact UID. All steps are
-// either read-only or idempotent STOREs, so a dropped connection may safely
-// reconnect and repeat them. It never issues EXPUNGE.
+// SetFlags changes only \Seen and/or \Flagged on one exact UID.
+// It never issues EXPUNGE.
 func (a Adapter) SetFlags(ctx context.Context, account mail.Account, password string, m mail.Message, change mail.FlagChange, validate func(mail.Message) error) (mail.Message, error) {
 	if change.Empty() {
 		return mail.Message{}, mail.ErrInput
@@ -49,6 +48,11 @@ func (a Adapter) withWriteConnection(ctx context.Context, account mail.Account, 
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	conn := pool.conns[account.ID]
+	if conn != nil && (conn.authKey != accountAuthKey(account) || (account.NetworkRevision != "" && conn.networkKey != account.NetworkRevision)) {
+		conn.close()
+		conn = nil
+		delete(pool.conns, account.ID)
+	}
 	attempt := 0
 	err := retryRemote(ctx, func() error {
 		attempt++
@@ -132,7 +136,7 @@ func setFlagsOnConnection(conn *connection, accountID string, m mail.Message, ch
 		}
 		conn.resetBudget()
 		if err = conn.c.UidStore(set, protocol.FormatFlagsOp(op.mode, true), op.flags, nil); err != nil {
-			return mail.Message{}, remoteFailure(conn, "修改邮件标记", err)
+			return mail.Message{}, uncertainFailure(conn, "修改邮件标记", err)
 		}
 	}
 	// Confirm the server-side result instead of trusting the STORE response.
@@ -147,17 +151,20 @@ func setFlagsOnConnection(conn *connection, accountID string, m mail.Message, ch
 		}
 	}
 	if err = <-done; err != nil {
-		return mail.Message{}, remoteFailure(conn, "确认邮件标记", err)
+		return mail.Message{}, uncertainFailure(conn, "确认邮件标记", err)
 	}
 	if confirmed == nil || hasFlag(confirmed.Flags, protocol.DeletedFlag) {
-		return mail.Message{}, ErrStale
+		return mail.Message{}, mail.ErrUncertain
+	}
+	if _, known := confirmed.Items[protocol.FetchFlags]; !known {
+		return mail.Message{}, mail.ErrUncertain
 	}
 	out := m
 	out.Unread = isUnread(confirmed.Flags)
 	out.Flagged = hasFlag(confirmed.Flags, protocol.FlaggedFlag)
 	out.FlagsKnown = true
 	if !change.Satisfied(out) {
-		return mail.Message{}, remoteProblem("确认邮件标记", "服务器未应用请求的标记")
+		return mail.Message{}, uncertainProblem("确认邮件标记", "服务器未应用请求的标记")
 	}
 	return out, nil
 }

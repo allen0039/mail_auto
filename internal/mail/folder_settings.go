@@ -14,10 +14,13 @@ type FolderInfo struct {
 	Role  string `json:"role,omitempty"`
 }
 type Capabilities struct {
-	Folders  []FolderInfo `json:"folders"`
-	Move     bool         `json:"move"`
-	UIDPlus  bool         `json:"uid_plus"`
-	MoveMode string       `json:"move_mode"`
+	Folders          []FolderInfo `json:"folders"`
+	Move             bool         `json:"move"`
+	UIDPlus          bool         `json:"uid_plus"`
+	MoveMode         string       `json:"move_mode"`
+	GmailLabels      bool         `json:"gmail_labels"`
+	SupportedActions []string     `json:"supported_actions,omitempty"`
+	Restriction      string       `json:"restriction,omitempty"`
 }
 type MoveResult struct {
 	Folder      string `json:"folder"`
@@ -89,6 +92,9 @@ func (s *Service) ProbeCapabilities(ctx context.Context, id string) (Capabilitie
 	if e != nil {
 		return caps, e
 	}
+	if e = s.saveGmailFolderRoles(a, caps.Folders); e != nil {
+		return caps, e
+	}
 	filtered := []FolderInfo{}
 	for _, f := range caps.Folders {
 		if len(a.Folders) == 0 || slices.Contains(a.Folders, f.Name) {
@@ -101,7 +107,11 @@ func (s *Service) ProbeCapabilities(ctx context.Context, id string) (Capabilitie
 			return caps, err
 		}
 	}
-	if caps.UIDPlus {
+	if a.Provider == "google" {
+		caps.GmailLabels, caps.MoveMode = true, "gmail_labels"
+		caps.SupportedActions = []string{"move", "archive", "mark_read", "mark_unread", "flag", "unflag"}
+		caps.Restriction = "仅普通标签分类和 INBOX 归档；回收站、恢复、特殊目录移动、保留两份及自动完成未知标签写入未验证，服务端拒绝"
+	} else if caps.UIDPlus {
 		caps.MoveMode = "uidplus_copy"
 		if caps.Move {
 			caps.MoveMode = "uid_move"
@@ -142,6 +152,9 @@ func (s *Service) SaveFolderSettings(ctx context.Context, in FolderSettings) err
 		if e != nil {
 			return e
 		}
+		if e = s.saveGmailFolderRoles(a, caps.Folders); e != nil {
+			return e
+		}
 		for _, f := range []string{in.Archive, in.Trash} {
 			if f == "" {
 				continue
@@ -156,7 +169,7 @@ func (s *Service) SaveFolderSettings(ctx context.Context, in FolderSettings) err
 				return ErrInput
 			}
 		}
-		if in.WritesEnabled && !caps.UIDPlus {
+		if in.WritesEnabled && !caps.UIDPlus && a.Provider != "google" {
 			return ErrCapability
 		}
 	}

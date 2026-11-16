@@ -164,7 +164,7 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 			return o, e
 		}
 		access.automation = p.Automation != nil
-		if !access.Allows(item.Message.AccountID, item.Message.Folder, p.Action) || !access.Allows(item.Message.AccountID, x.Result.Folder, p.Action) {
+		if !access.Allows(item.Message.AccountID, item.Message.Folder, p.Action) || (!isFlagAction(p.Action) && !access.Allows(item.Message.AccountID, x.Result.Folder, p.Action)) {
 			return o, ErrDenied
 		}
 		release, e := s.acquireRecovery(item.Message.AccountID)
@@ -177,6 +177,11 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 		if e == nil && unchanged && accountIdentity(account) == item.Config {
 			pw, err := s.password(account)
 			if err == nil {
+				if isFlagAction(p.Action) {
+					s.recordRecovery(id, x.Position, s.verifyFlagsOnly(ctx, id, x.Position, account, pw, item))
+					release()
+					continue
+				}
 				if x.Result.UID != 0 && x.Result.UIDValidity != 0 && x.Result.Folder != "" {
 					if verifyErr := remote.VerifyMove(ctx, account, pw, item.Message, x.Result); verifyErr == nil {
 						s.invalidateAutomatic(item.Message.AccountID)
@@ -198,6 +203,15 @@ func (s *Service) reconcile(ctx context.Context, a Access, id string) (Operation
 					if inspectErr != nil {
 						s.recordRecovery(id, x.Position, blocked("recovery_no_trusted_mapping", "没有保存服务器返回的目标 UID，且现有证据不足以确认结果；需人工核对", inspectErr))
 						slog.Warn("邮件移动结果仍待核验", "operation_id", id, "position", x.Position, "reason", syncErrorMessage(inspectErr))
+					} else if account.Provider == "google" && !evidence.SourcePresent && evidence.DestinationPresent {
+						s.invalidateAutomatic(item.Message.AccountID)
+						_, saveErr := s.Store.DB.Exec("UPDATE operation_items SET destination_validity=?,destination_uid=? WHERE operation_id=? AND position=?", evidence.Destination.UIDValidity, evidence.Destination.UID, id, x.Position)
+						if saveErr == nil {
+							saveErr = s.publishRecoveredMove(id, x.Position, item, evidence.Destination)
+						}
+						if saveErr != nil {
+							s.recordRecovery(id, x.Position, saveErr)
+						}
 					} else if evidence.SourcePresent && !evidence.DestinationPresent {
 						_, _ = s.Store.DB.Exec(
 							"UPDATE operation_items SET state='failed',error_code='move_not_applied',recovery_code='',recovery_detail='',checked_at=? WHERE operation_id=? AND position=? AND state='needs_verification'",

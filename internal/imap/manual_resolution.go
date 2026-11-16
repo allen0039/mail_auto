@@ -16,6 +16,9 @@ import (
 // VerifyDuplicate never opens a read-write mailbox. It checks unique live
 // Message-ID matches, full raw bytes, and unchanged flags on the same session.
 func (a Adapter) VerifyDuplicate(ctx context.Context, account mail.Account, password string, source, target mail.Message) (mail.DuplicateEvidence, error) {
+	if account.Provider == "google" {
+		return mail.DuplicateEvidence{}, mail.ErrCapability
+	}
 	var out mail.DuplicateEvidence
 	if source.AccountID != target.AccountID || source.Folder == target.Folder || source.MessageID == "" || source.MessageID != target.MessageID || source.Size <= 0 || source.Size != target.Size || source.Size > mailmime.MaxRaw {
 		return out, mail.ErrConflict

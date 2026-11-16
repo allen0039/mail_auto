@@ -47,7 +47,7 @@ func (s *Service) automaticTx(ctx context.Context, a Account, epoch uint64) (*sq
 	if e != nil {
 		return nil, syncStep("开始更新自动同步索引", e)
 	}
-	current, e := scanAccount(tx.QueryRowContext(ctx, "SELECT * FROM accounts WHERE id=?", a.ID))
+	current, e := scanAccount(tx.QueryRowContext(ctx, "SELECT "+accountColumns+" FROM accounts WHERE id=?", a.ID))
 	if e == nil {
 		e = s.accountNetworkIn(tx, &current)
 	}

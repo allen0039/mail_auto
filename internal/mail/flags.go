@@ -150,6 +150,9 @@ func (s *Service) executeFlags(ctx context.Context, id string, pos int, p Plan, 
 	if e != nil {
 		return e
 	}
+	if e = s.checkSnapshot(account); e != nil {
+		return ErrUncertain
+	}
 	return s.publishFlags(m, fresh)
 }
 
@@ -205,6 +208,13 @@ func (s *Service) publishMovedFlags(id string, pos int, moved Message, fresh Mes
 }
 
 func (s *Service) publishFlags(m Message, fresh Message) error {
+	if m.GmailMessageID != "" {
+		_, err := s.Store.DB.Exec("UPDATE messages SET unread=?,flagged=?,flags_known=1,changed_at=? WHERE account_id=? AND gmail_message_id=?", fresh.Unread, fresh.Flagged, time.Now().Unix(), m.AccountID, m.GmailMessageID)
+		if err == nil {
+			s.revision.Add(1)
+		}
+		return err
+	}
 	_, e := s.Store.DB.Exec("UPDATE messages SET unread=?,flagged=?,flags_known=1,changed_at=? WHERE ref=? AND folder=? AND uidvalidity=? AND uid=?", fresh.Unread, fresh.Flagged, time.Now().Unix(), m.Ref, m.Folder, m.UIDValidity, m.UID)
 	if e != nil {
 		return e

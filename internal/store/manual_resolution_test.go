@@ -19,7 +19,7 @@ func TestManualResolutionMigrationAndRetention(t *testing.T) {
 	}
 	defer s.Close()
 	var schema int
-	if err = s.DB.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != 14 {
+	if err = s.DB.QueryRow("PRAGMA user_version").Scan(&schema); err != nil || schema != SchemaVersion {
 		t.Fatal(schema, err)
 	}
 	var fp string

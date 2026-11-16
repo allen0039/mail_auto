@@ -227,6 +227,14 @@ func (s *Service) TaskReadiness(a Access, account string) ([]TaskReadiness, erro
 				if !rule.Enabled || !taskRuleOverlap(t.SourceFolders, rule.SourceFolders) {
 					continue
 				}
+				if acc.Provider == "google" {
+					for _, source := range rule.SourceFolders {
+						if s.gmailFolderAction(acc, source, rule.Action, rule.Destination, fs) != nil {
+							add("gmail_action_unsupported", "rules", rule.ID, true)
+							break
+						}
+					}
+				}
 				if code := ruleWriteIssue(rule, p, fs); code != "" {
 					area := "policy"
 					if strings.HasSuffix(code, "_folder_missing") {

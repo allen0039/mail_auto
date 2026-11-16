@@ -163,6 +163,13 @@ func (s *Service) claimAvailable(accountID, ref, fingerprint string, now int64) 
 	if kept, err := manuallyKept(s.Store.DB, m); err != nil || kept {
 		return false, err
 	}
+	if m.GmailMessageID != "" {
+		var aliases int
+		err := s.Store.DB.QueryRow(`SELECT count(*) FROM automation_claims c JOIN messages m ON m.ref=c.ref WHERE m.account_id=? AND m.gmail_message_id=? AND c.ref<>? AND ((c.state IN ('claimed','planned') AND c.expires>?) OR c.plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))`, accountID, m.GmailMessageID, ref, now).Scan(&aliases)
+		if err != nil || aliases > 0 {
+			return false, err
+		}
+	}
 	var oldFingerprint, state, plan string
 	var expires int64
 	e := s.Store.DB.QueryRow("SELECT fingerprint,state,expires,plan_id FROM automation_claims WHERE account_id=? AND ref=?", accountID, ref).Scan(&oldFingerprint, &state, &expires, &plan)
@@ -298,6 +305,7 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 		b.Expires = r.Expires
 	}
 	cursor := in.Cursor
+	seenLogical := map[string]bool{}
 	for b.Scanned < 500 && len(b.Items) < limit {
 		messages, _, next, err := s.ruleCandidates(a, in.AccountID, p.SourceFolders, cursor, min(100, limit-len(b.Items), 500-b.Scanned))
 		if err != nil {
@@ -305,13 +313,21 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 		}
 		for _, m := range messages {
 			b.Scanned++
+			if seenLogical[logicalKey(m)] {
+				continue
+			}
+			seenLogical[logicalKey(m)] = true
 			if kept, err := manuallyKept(s.Store.DB, m); err != nil {
 				return b, err
 			} else if kept {
 				b.Protected++
 				continue
 			}
-			item := evaluateRules(m, rules, p, now)
+			item, err := s.evaluateMessageRules(m, rules, p, now)
+			if err != nil {
+				return b, err
+			}
+			m = item.Message
 			if item.Status != "matched" {
 				if item.Status == "protected" || item.Status == "unknown" {
 					b.Protected++
@@ -320,9 +336,9 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 				}
 				continue
 			}
-			var pending int
-			if e = s.Store.DB.QueryRow("SELECT count(*) FROM operation_items WHERE ref=? AND state IN ('queued','running','needs_verification')", m.Ref).Scan(&pending); e != nil {
-				return b, e
+			pending, err := logicalPending(s.Store.DB, m)
+			if err != nil {
+				return b, err
 			}
 			if pending > 0 {
 				continue
@@ -357,6 +373,21 @@ func (s *Service) ClaimAI(a Access, in AIClaimInput) (AIBatch, error) {
 			return b, err
 		} else if kept {
 			return b, ErrBusy
+		}
+		if item.Message.GmailMessageID != "" {
+			var aliases int
+			if e = tx.QueryRow(`SELECT count(*) FROM automation_claims c JOIN messages m ON m.ref=c.ref WHERE m.account_id=? AND m.gmail_message_id=? AND c.ref<>? AND ((c.state IN ('claimed','planned') AND c.expires>?) OR c.plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))`, b.AccountID, item.Message.GmailMessageID, item.Message.Ref, now).Scan(&aliases); e != nil {
+				return b, e
+			}
+			if aliases > 0 {
+				return b, ErrBusy
+			}
+			if aliases, e = logicalPending(tx, item.Message); e != nil {
+				return b, e
+			}
+			if aliases > 0 {
+				return b, ErrBusy
+			}
 		}
 		var n int
 		if e = tx.QueryRow("SELECT count(*) FROM automation_claims WHERE account_id=? AND ref=? AND ((state IN ('claimed','planned') AND expires>? AND (plan_id='' OR plan_id NOT IN (SELECT plan_id FROM operations WHERE state IN ('completed','failed','partial','cancelled')))) OR plan_id IN (SELECT plan_id FROM operations WHERE state IN ('queued','running','needs_verification')))", b.AccountID, item.Message.Ref, now).Scan(&n); e != nil {
@@ -503,7 +534,10 @@ func (s *Service) SubmitAI(ctx context.Context, a Access, in AISubmitInput) (AIB
 		if e = s.Store.DB.QueryRow("SELECT batch_id FROM automation_claims WHERE account_id=? AND ref=?", b.AccountID, d.Ref).Scan(&claimBatch); e != nil || claimBatch != b.ID {
 			return b, ErrConflict
 		}
-		evaluated := evaluateRules(m, rules, p, time.Now().Unix())
+		evaluated, err := s.evaluateMessageRules(m, rules, p, time.Now().Unix())
+		if err != nil {
+			return b, err
+		}
 		if evaluated.Status != "matched" || evaluated.RuleID != item.RuleID {
 			return b, ErrConflict
 		}
@@ -691,7 +725,10 @@ func (s *Service) validateAutomationPlan(a Access, p Plan, m Message) (Access, A
 	if !found || len(p.Items) != 1 {
 		return a, policy, ErrConflict
 	}
-	evaluated := evaluateRules(m, rules, policy, time.Now().Unix())
+	evaluated, err := s.evaluateMessageRules(m, rules, policy, time.Now().Unix())
+	if err != nil {
+		return a, policy, err
+	}
 	if evaluated.Status != "matched" || evaluated.RuleID != g.RuleID || evaluated.RuleVersion != g.RuleVersion {
 		return a, policy, ErrConflict
 	}

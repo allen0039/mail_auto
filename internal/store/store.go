@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the newest database layout this binary can open.
-const SchemaVersion = 14
+const SchemaVersion = 15
 
 type Store struct {
 	DB      *sql.DB
@@ -142,7 +142,10 @@ func (s *Store) migrate() error {
 	if e = migrateManualResolution(tx); e != nil {
 		return e
 	}
-	if _, e = tx.Exec("PRAGMA user_version=14"); e != nil {
+	if e = migrateMailOAuth(tx); e != nil {
+		return e
+	}
+	if _, e = tx.Exec("PRAGMA user_version=15"); e != nil {
 		return e
 	}
 	return tx.Commit()
@@ -178,6 +181,7 @@ func Audit(tx interface {
 }
 func (s *Store) Cleanup(ctx context.Context) {
 	now := time.Now().Unix()
+	_, _ = s.DB.ExecContext(ctx, "DELETE FROM mail_oauth_states WHERE expires<?", now)
 	cutoff := time.Now().AddDate(0, 0, -90).Unix()
 	_, _ = s.DB.ExecContext(ctx, "DELETE FROM oauth_requests WHERE expires<?", now)
 	_, _ = s.DB.ExecContext(ctx, "DELETE FROM oauth_codes WHERE expires<?", now)

@@ -129,7 +129,7 @@ func reconcileSchedule(o Operation, now time.Time) (string, int64) {
 }
 
 func accountIdentity(a Account) string {
-	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders})
+	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, a.OAuth})
 	h := sha256.Sum256(raw)
 	return hex.EncodeToString(h[:])
 }
@@ -206,9 +206,28 @@ func (s *Service) NewPlan(ctx context.Context, access Access, in PlanInput) (Pla
 		if e != nil {
 			return Plan{}, e
 		}
+		if kept, err := manuallyKept(s.Store.DB, m); err != nil {
+			return Plan{}, err
+		} else if kept {
+			return Plan{}, blocked("manual_keep_protected", "邮件已人工核验保留，不能再次整理", ErrDenied)
+		}
 		a, e := s.Account(m.AccountID)
 		if e != nil {
 			return Plan{}, e
+		}
+		if m.GmailMessageID != "" {
+			key := logicalKey(m)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
+		settings, err := s.FolderSettings(a.ID)
+		if err != nil {
+			return Plan{}, err
+		}
+		if err = s.gmailAction(a, m, in.Action, in.Destination, settings); err != nil {
+			return Plan{}, err
 		}
 		item := PlanItem{Message: m, Config: accountIdentity(a), Flags: flags}
 		if len(in.Also) > 0 && !access.Allows(a.ID, m.Folder, "flag") {
@@ -382,12 +401,21 @@ func (s *Service) ExecutePlan(a Access, id, key string) (Operation, error) {
 		} else if kept {
 			return Operation{}, blocked("manual_keep_protected", "邮件已人工核验保留，不能再次整理", ErrDenied)
 		}
-		var n int
-		if e = tx.QueryRow("SELECT count(*) FROM operation_items WHERE ref=? AND state IN ('queued','running','needs_verification')", item.Message.Ref).Scan(&n); e != nil {
-			return Operation{}, e
+		n, err := logicalPending(tx, item.Message)
+		if err != nil {
+			return Operation{}, err
 		}
 		if n > 0 {
 			return Operation{}, ErrBusy
+		}
+		if item.Message.GmailMessageID != "" && p.Automation != nil {
+			var runID string
+			if err = tx.QueryRow("SELECT COALESCE((SELECT run_id FROM task_run_batches WHERE batch_id=?),?)", p.Automation.BatchID, p.Automation.BatchID).Scan(&runID); err != nil {
+				return Operation{}, err
+			}
+			if _, err = tx.Exec("INSERT INTO gmail_run_claims(account_id,message_id,run_id) VALUES(?,?,?)", item.Message.AccountID, item.Message.GmailMessageID, runID); err != nil {
+				return Operation{}, ErrConflict
+			}
 		}
 		if p.Automation == nil {
 			if e = tx.QueryRow("SELECT count(*) FROM automation_claims WHERE account_id=? AND ref=? AND state IN ('claimed','planned') AND expires>? AND (plan_id='' OR plan_id NOT IN (SELECT plan_id FROM operations WHERE state IN ('completed','failed','partial','cancelled')))", item.Message.AccountID, item.Message.Ref, now).Scan(&n); e != nil {
@@ -684,6 +712,13 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	if accountIdentity(account) != item.Config {
 		return ErrConflict
 	}
+	settingsForProvider, err := s.FolderSettings(account.ID)
+	if err != nil {
+		return err
+	}
+	if err = s.gmailAction(account, m, p.Action, item.Destination, settingsForProvider); err != nil {
+		return err
+	}
 	if !strings.HasPrefix(p.Action, "label_") {
 		settings, e := s.FolderSettings(account.ID)
 		if e != nil {
@@ -754,6 +789,9 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 			if err != nil {
 				return err
 			}
+			if err = s.checkSnapshot(account); err != nil {
+				return ErrUncertain
+			}
 			if err = s.publishNormalMove(id, pos, m, item, result); err != nil {
 				return err
 			}
@@ -774,6 +812,9 @@ func (s *Service) executeItem(ctx context.Context, id string, pos int, p Plan, i
 	result, e := remote.Move(ctx, account, pw, m, item.Destination, record)
 	if e != nil {
 		return e
+	}
+	if e = s.checkSnapshot(account); e != nil {
+		return ErrUncertain
 	}
 	if e = s.publishNormalMove(id, pos, m, item, result); e != nil {
 		return e
@@ -814,7 +855,7 @@ func (s *Service) publishMoveWithWarning(id string, pos int, m Message, r MoveRe
 	if _, e = tx.Exec("DELETE FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=? AND ref<>?", m.AccountID, r.Folder, r.UIDValidity, r.UID, m.Ref); e != nil {
 		return ErrUncertain
 	}
-	_, e = tx.Exec(`INSERT INTO messages(`+messageColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET folder=excluded.folder,uidvalidity=excluded.uidvalidity,uid=excluded.uid,changed_at=excluded.changed_at`, m.Ref, m.AccountID, r.Folder, r.UIDValidity, r.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size, m.ReceivedAt, m.Flagged, m.FlagsKnown, time.Now().Unix(), m.MetadataVersion, m.Recipients, m.Cc, m.MessageID, m.InReplyTo, m.References, m.ListID, m.HasAttachment)
+	_, e = tx.Exec(`INSERT INTO messages(`+messageColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ref) DO UPDATE SET folder=excluded.folder,uidvalidity=excluded.uidvalidity,uid=excluded.uid,changed_at=excluded.changed_at`, m.Ref, m.AccountID, r.Folder, r.UIDValidity, r.UID, m.Subject, m.Sender, m.SentAt, m.Unread, m.Size, m.ReceivedAt, m.Flagged, m.FlagsKnown, time.Now().Unix(), m.MetadataVersion, m.Recipients, m.Cc, m.MessageID, m.InReplyTo, m.References, m.ListID, m.HasAttachment, m.GmailMessageID)
 	if e != nil {
 		return ErrUncertain
 	}

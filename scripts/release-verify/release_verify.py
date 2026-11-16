@@ -186,6 +186,8 @@ def schema_matches(version, before, after):
     # remains a mismatch; a 0.9.2 process must actually be on schema 14.
     if version == "0.9.2":
         return before in (13, 14) and after == 14
+    if version == "0.10.0":
+        return before in (14, 15) and after == 15
     return before == after
 
 

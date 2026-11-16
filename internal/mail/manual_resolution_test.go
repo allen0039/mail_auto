@@ -69,7 +69,7 @@ func manualKeepFixture(t *testing.T) (*Service, *duplicateRemote, Access, TaskRu
 	target.Folder = "Archive"
 	target.UIDValidity = 7
 	target.UID = 99
-	mustExec(t, s, "INSERT INTO messages("+messageColumns+") SELECT ?,account_id,?, ?,?,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment FROM messages WHERE ref=?", target.Ref, target.Folder, target.UIDValidity, target.UID, m.Ref)
+	mustExec(t, s, "INSERT INTO messages("+messageColumns+") SELECT ?,account_id,?, ?,?,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment,gmail_message_id FROM messages WHERE ref=?", target.Ref, target.Folder, target.UIDValidity, target.UID, m.Ref)
 	r := &duplicateRemote{automationRemote: remote, evidence: DuplicateEvidence{SHA256: strings.Repeat("a", 64), Bytes: int64(m.Size), SourceFlags: []string{"\\Seen"}, TargetFlags: []string{"\\Seen"}}}
 	s.Remote = r
 	return s, r, admin, run, op, m, target
@@ -199,7 +199,7 @@ func TestManualKeepRejectsChangedEvidenceAndPreservesUnknown(t *testing.T) {
 			case "wrong_target":
 				input.Evidence.Target.UID++
 			case "extra_target":
-				mustExec(t, s, "INSERT INTO messages("+messageColumns+") SELECT 'third-copy',account_id,folder,uidvalidity,100,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment FROM messages WHERE ref=?", target.Ref)
+				mustExec(t, s, "INSERT INTO messages("+messageColumns+") SELECT 'third-copy',account_id,folder,uidvalidity,100,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment,gmail_message_id FROM messages WHERE ref=?", target.Ref)
 			case "source_moved":
 				mustExec(t, s, "UPDATE messages SET folder='Other',uid=900 WHERE ref=?", source.Ref)
 			case "foreign_pending":

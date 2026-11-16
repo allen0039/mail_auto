@@ -1,5 +1,7 @@
 # 配置与邮箱接入
 
+0.10.0 候选新增独立于 MCP 的“邮箱授权应用”设置。Gmail / Outlook 使用 OAuth Code + PKCE、IMAPS XOAUTH2，client secret 和 refresh token 由既有 Vault 加密。应用注册、精确 HTTPS 回调、个人/组织账号区别、Gmail 受限操作、Google Testing 七天限制及升级/回退见 [接入说明](gmail-outlook-setup.md)。真实账号验收待完成，候选尚未发布部署。
+
 ## 网络与代理（0.6.0）
 
 在「网络与代理」保存代理配置和全局默认，再在邮箱编辑（高级设置）、Telegram、Agent 页面选择独立连接方式。支持 HTTP、HTTPS CONNECT 与 SOCKS5；默认全局直连，代理失败不自动直连。配置保存在 SQLite，密码用独立密钥卷加密；不增加 YAML 或环境变量。升级前使用 `HTTPS_PROXY` 的实例须在页面显式配置。完整设置、诊断及 VPS/NAS 示例见 [网络与代理](network-proxy.md)。

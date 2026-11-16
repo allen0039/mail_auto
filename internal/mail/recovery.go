@@ -97,7 +97,10 @@ func (s *Service) validateAutomationRecovery(a Access, p Plan, fresh Message) er
 	if messageSignature(fresh) != g.Signature {
 		return blocked("recovery_fingerprint_mismatch", "源邮件的元数据或已读/星标状态已变化，不能确认是同一封未改动的邮件", ErrConflict)
 	}
-	evaluated := evaluateRules(fresh, rules, policy, time.Now().Unix())
+	evaluated, err := s.evaluateMessageRules(fresh, rules, policy, time.Now().Unix())
+	if err != nil {
+		return err
+	}
 	if evaluated.Status == "protected" {
 		return blocked("recovery_protected", "邮件现在受保护："+firstReason(evaluated.Reasons), ErrDenied)
 	}

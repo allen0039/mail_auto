@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mail-auto/internal/credentials"
+	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 )
@@ -51,6 +52,8 @@ type Service struct {
 	epoch                 map[string]uint64
 	automatic             *automaticRunner
 	revision              atomic.Uint64
+	oauthOnce             sync.Once
+	oauth                 *mailoauth.Manager
 }
 type AccountInput struct {
 	Name       string          `json:"name"`
@@ -66,7 +69,10 @@ type AccountInput struct {
 
 var ErrLabelInput = errors.New("标签配置无效")
 
-var Providers = map[string][]string{"qq": {"imap.qq.com"}, "netease": {"imap.163.com", "imap.126.com", "imap.yeah.net"}, "icloud": {"imap.mail.me.com"}}
+var Providers = map[string][]string{"qq": {"imap.qq.com"}, "netease": {"imap.163.com", "imap.126.com", "imap.yeah.net"}, "icloud": {"imap.mail.me.com"}, "google": {"imap.gmail.com"}, "microsoft": {"outlook.office365.com"}}
+
+const accountColumns = "id,name,provider,username,host,port,folders,secret,secret_file,created_at"
+
 var ErrBusy = errors.New("邮箱正在处理其他请求，或已达到两个并行读取请求上限，请稍后重试")
 var ErrAccountInput = errors.New("邮箱配置无效")
 
@@ -183,7 +189,7 @@ func validateAccount(a *AccountInput, keepCredential bool) error {
 	}
 	hosts, ok := Providers[a.Provider]
 	if !ok {
-		return errors.New("首版支持 QQ、网易和 iCloud")
+		return errors.New("支持 QQ、网易、iCloud、Gmail 和 Outlook")
 	}
 	if a.Host == "" {
 		a.Host = hosts[0]
@@ -213,7 +219,11 @@ func validateAccount(a *AccountInput, keepCredential bool) error {
 		}
 		seen[f] = true
 	}
-	if (a.Password != "" && a.SecretFile != "") || (!keepCredential && a.Password == "" && a.SecretFile == "") {
+	if mailoauth.IsProvider(a.Provider) {
+		if a.Password != "" || a.SecretFile != "" || a.Port != 993 || strings.ContainsAny(a.Username, "\x01") || !strings.Contains(a.Username, "@") {
+			return errors.New("请使用 Gmail / Outlook 官方 OAuth 和 IMAPS 993；填写邮箱地址，不填写密码或 secret 文件")
+		}
+	} else if (a.Password != "" && a.SecretFile != "") || (!keepCredential && a.Password == "" && a.SecretFile == "") {
 		return errors.New("授权码和外部 secret 文件须且仅填写一项")
 	}
 	if len(a.Password) > 4096 {
@@ -239,7 +249,7 @@ func (s *Service) Create(a AccountInput) (Account, error) {
 		if _, e = credentials.ExternalSecret(s.SecretDir, a.SecretFile); e != nil {
 			return Account{}, e
 		}
-	} else {
+	} else if !mailoauth.IsProvider(a.Provider) {
 		cipher, e = s.Vault.Encrypt(a.Password, "account:"+id)
 		if e != nil {
 			return Account{}, e
@@ -253,14 +263,27 @@ func (s *Service) Create(a AccountInput) (Account, error) {
 	}
 	defer tx.Rollback()
 	var n int
-	if e = tx.QueryRow("SELECT count(*) FROM accounts").Scan(&n); e != nil {
+	if e = tx.QueryRow("SELECT count(*) FROM accounts a LEFT JOIN mail_oauth_accounts o ON o.account_id=a.id WHERE o.account_id IS NULL OR o.subject<>''").Scan(&n); e != nil {
 		return Account{}, e
 	}
-	if n >= 10 {
+	if n >= 10 && !mailoauth.IsProvider(a.Provider) {
 		return Account{}, errors.New("首版最多支持 10 个邮箱")
 	}
-	if _, e = tx.Exec("INSERT INTO accounts VALUES(?,?,?,?,?,?,?,?,?,?)", id, a.Name, a.Provider, a.Username, a.Host, a.Port, string(folders), cipher, a.SecretFile, now); e != nil {
+	if mailoauth.IsProvider(a.Provider) {
+		if e = tx.QueryRow("SELECT count(*) FROM mail_oauth_accounts WHERE subject=''").Scan(&n); e != nil {
+			return Account{}, e
+		}
+		if n >= 10 {
+			return Account{}, errors.New("待授权邮箱最多 10 个，请完成授权或移除不再需要的待授权邮箱")
+		}
+	}
+	if _, e = tx.Exec("INSERT INTO accounts("+accountColumns+") VALUES(?,?,?,?,?,?,?,?,?,?)", id, a.Name, a.Provider, a.Username, a.Host, a.Port, string(folders), cipher, a.SecretFile, now); e != nil {
 		return Account{}, e
+	}
+	if mailoauth.IsProvider(a.Provider) {
+		if _, e = tx.Exec("INSERT INTO mail_oauth_accounts(account_id,provider,login,config_version) VALUES(?,?,?,COALESCE((SELECT version FROM mail_oauth_apps WHERE provider=?),0))", id, a.Provider, a.Username, a.Provider); e != nil {
+			return Account{}, e
+		}
 	}
 	if a.Proxy != nil {
 		if e = network.SetAccount(tx, id, *a.Proxy); e != nil {
@@ -291,6 +314,9 @@ func (s *Service) Update(id string, in AccountInput) (Account, error) {
 	old, e := s.Account(id)
 	if e != nil {
 		return Account{}, e
+	}
+	if (mailoauth.IsProvider(old.Provider) || mailoauth.IsProvider(in.Provider)) && (old.Provider != in.Provider || old.Username != in.Username || old.Host != in.Host || old.Port != in.Port) {
+		return Account{}, fmt.Errorf("%w: OAuth 邮箱身份不能修改，请删除后重新添加；原账号可重新授权", ErrAccountInput)
 	}
 	cipher, secretFile := old.Secret, old.SecretFile
 	if in.Password != "" {
@@ -372,7 +398,7 @@ func scanAccount(row interface{ Scan(...any) error }) (Account, error) {
 	return a, nil
 }
 func (s *Service) Accounts() ([]Account, error) {
-	rows, e := s.Store.DB.Query("SELECT * FROM accounts ORDER BY created_at,id")
+	rows, e := s.Store.DB.Query("SELECT " + accountColumns + " FROM accounts ORDER BY created_at,id")
 	if e != nil {
 		return nil, e
 	}
@@ -393,6 +419,9 @@ func (s *Service) Accounts() ([]Account, error) {
 		if e = s.accountNetwork(&out[i]); e != nil {
 			return nil, e
 		}
+		if e = s.Store.DB.QueryRow("SELECT count(*),count(DISTINCT CASE WHEN gmail_message_id<>'' THEN 'gmail:'||gmail_message_id ELSE ref END) FROM messages WHERE account_id=?", out[i].ID).Scan(&out[i].MessageEntries, &out[i].UniqueMessages); e != nil {
+			return nil, e
+		}
 		boxes, e := s.Mailboxes(out[i].ID)
 		if e != nil {
 			return nil, e
@@ -405,13 +434,16 @@ func (s *Service) Accounts() ([]Account, error) {
 	return out, nil
 }
 func (s *Service) Account(id string) (Account, error) {
-	account, err := scanAccount(s.Store.DB.QueryRow("SELECT * FROM accounts WHERE id=?", id))
+	account, err := scanAccount(s.Store.DB.QueryRow("SELECT "+accountColumns+" FROM accounts WHERE id=?", id))
 	if err == nil {
 		err = s.accountNetwork(&account)
 	}
 	return account, err
 }
 func (s *Service) password(a Account) (string, error) {
+	if mailoauth.IsProvider(a.Provider) {
+		return "", nil
+	}
 	if a.SecretFile != "" {
 		return credentials.ExternalSecret(s.SecretDir, a.SecretFile)
 	}
@@ -440,6 +472,7 @@ func (s *Service) Delete(id string) error {
 		return e
 	}
 	if e = tx.Commit(); e == nil {
+		s.OAuthManager().Invalidate(id)
 		s.revision.Add(1)
 		s.Store.RequestReclaim()
 		s.wakeAutomatic()

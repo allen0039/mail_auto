@@ -19,6 +19,7 @@ import (
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/charset"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/mailoauth"
 	mailmime "mail-auto/internal/mime"
 	"mail-auto/internal/network"
 	"mail-auto/internal/version"
@@ -107,11 +108,34 @@ type connection struct {
 	stop       func() bool
 	once       sync.Once
 	networkKey string
+	authKey    string
+	gmail      bool
 }
 
 func dialRoute(ctx context.Context, a mail.Account, password string, route network.Route) (*connection, error) {
 	initCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	var credential mailoauth.Credential
+	if mailoauth.IsProvider(a.Provider) {
+		if a.AuthSource == nil {
+			return nil, mailoauth.Failure("oauth_pending")
+		}
+		var err error
+		credential, err = a.AuthSource.Credential(initCtx, a.ID, route.Key)
+		if err != nil {
+			return nil, err
+		}
+		if source, ok := a.AuthSource.(interface {
+			ValidateGeneration(string, int64, int64) error
+		}); ok && a.OAuth != nil {
+			if err = source.ValidateGeneration(a.ID, a.OAuth.Generation, a.OAuth.ConfigVersion); err != nil {
+				return nil, err
+			}
+		}
+		if credential.Mechanism != "XOAUTH2" {
+			return nil, mailoauth.Failure("oauth_imap_denied")
+		}
+	}
 	raw, e := route.DialTLS(initCtx, net.JoinHostPort(a.Host, strconv.Itoa(a.Port)), a.Host)
 	if e != nil {
 		cancel()
@@ -147,10 +171,33 @@ func dialRoute(ctx context.Context, a mail.Account, password string, route netwo
 		}
 	}
 	conn.resetBudget()
-	if e = c.Login(a.Username, password); e != nil {
+	if mailoauth.IsProvider(a.Provider) {
+		e = c.Authenticate(&xoauth2{username: credential.Username, token: credential.Token})
+	} else {
+		e = c.Login(a.Username, password)
+	}
+	if e != nil {
 		err := remoteFailure(conn, "邮箱登录", e)
 		conn.close()
+		if mailoauth.IsProvider(a.Provider) {
+			var transient *remoteError
+			if errors.As(err, &transient) && transient.retryable {
+				return nil, err
+			}
+			if source, ok := a.AuthSource.(interface{ AuthenticationFailed(string, string) }); ok {
+				source.AuthenticationFailed(a.ID, credential.Token)
+			}
+			return nil, mailoauth.Failure("oauth_imap_denied")
+		}
 		return nil, err
+	}
+	conn.authKey = accountAuthKey(a)
+	if a.Provider == "google" {
+		conn.gmail, e = c.Support("X-GM-EXT-1")
+		if e != nil || !conn.gmail {
+			conn.close()
+			return nil, mail.ErrCapability
+		}
 	}
 	return conn, nil
 }
@@ -315,8 +362,12 @@ func fetchMetadata(conn *connection, accountID, folder string, validity uint32, 
 	conn.resetBudget()
 	ch := make(chan *protocol.Message, 16)
 	done := make(chan error, 1)
+	items := []protocol.FetchItem{protocol.FetchUid, protocol.FetchEnvelope, protocol.FetchFlags, protocol.FetchRFC822Size, protocol.FetchInternalDate, protocol.FetchBodyStructure, metadataHeaderSection.FetchItem()}
+	if conn.gmail {
+		items = append(items, protocol.FetchItem("X-GM-MSGID"))
+	}
 	go func() {
-		done <- conn.c.UidFetch(set, []protocol.FetchItem{protocol.FetchUid, protocol.FetchEnvelope, protocol.FetchFlags, protocol.FetchRFC822Size, protocol.FetchInternalDate, protocol.FetchBodyStructure, metadataHeaderSection.FetchItem()}, ch)
+		done <- conn.c.UidFetch(set, items, ch)
 	}()
 	batch := mail.Snapshot{UIDValidity: validity, Messages: []mail.Message{}}
 	var decodeErr error
@@ -351,6 +402,13 @@ func fetchMetadata(conn *connection, accountID, folder string, validity uint32, 
 		}
 		_, flagsKnown := m.Items[protocol.FetchFlags]
 		out := mail.Message{ReceivedAt: received, Flagged: hasFlag(m.Flags, protocol.FlaggedFlag), FlagsKnown: flagsKnown, MetadataVersion: 1, AccountID: accountID, Folder: folder, UIDValidity: validity, UID: m.Uid, Subject: subject, Sender: from, SentAt: date.Unix(), Unread: unread, Size: m.Size}
+		if conn.gmail {
+			out.GmailMessageID = gmailID(m.Items[protocol.FetchItem("X-GM-MSGID")])
+			if out.GmailMessageID == "" {
+				decodeErr = mail.ErrCapability
+				continue
+			}
+		}
 		applyExtendedMetadata(&out, m)
 		batch.Messages = append(batch.Messages, out)
 	}

@@ -295,6 +295,9 @@ func (s *Service) scanFolder(ctx context.Context, a Account, pw, folder string, 
 	}
 	defer tx.Rollback()
 	var exists int
+	if e = s.checkSnapshotIn(tx, a); e != nil {
+		return count, e
+	}
 	if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM accounts WHERE id=?", a.ID).Scan(&exists); e != nil {
 		return count, syncStep("检查邮箱配置", e)
 	}

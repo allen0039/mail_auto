@@ -101,7 +101,7 @@ func (s *Service) wakeAutomatic() {
 	}
 }
 func (s *Service) automaticAccounts(ctx context.Context) ([]Account, error) {
-	rows, e := s.Store.DB.QueryContext(ctx, "SELECT * FROM accounts ORDER BY created_at,id")
+	rows, e := s.Store.DB.QueryContext(ctx, "SELECT "+accountColumns+" FROM accounts ORDER BY created_at,id")
 	if e != nil {
 		return nil, e
 	}
@@ -138,6 +138,9 @@ func (s *Service) superviseAutomatic(ctx context.Context, r *automaticRunner, re
 			}
 			wanted := map[string]Account{}
 			for _, a := range accounts {
+				if a.OAuth != nil && a.OAuth.Status != "connected" && a.OAuth.Status != "network_error" {
+					continue
+				}
 				wanted[a.ID] = a
 			}
 			for id, w := range r.workers {
@@ -152,6 +155,9 @@ func (s *Service) superviseAutomatic(ctx context.Context, r *automaticRunner, re
 				}
 			}
 			for _, a := range accounts {
+				if _, ok := wanted[a.ID]; !ok {
+					continue
+				}
 				if r.workers[a.ID] != nil {
 					continue
 				}

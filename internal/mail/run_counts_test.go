@@ -24,7 +24,7 @@ func TestRunCountsSeparateInFlightFromUnknown(t *testing.T) {
 	s, remote, admin, _, task, message := taskFixture(t, "execute", "manual", "rules")
 	// Four more messages matching the same rule: a batch of five.
 	for i := 2; i <= 5; i++ {
-		mustExec(t, s, "INSERT INTO messages("+messageColumns+") SELECT ?,account_id,folder,uidvalidity,?,subject,sender,sent_at-?,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment FROM messages WHERE ref=?", fmt.Sprintf("extra-%d", i), i, i, message.Ref)
+		mustExec(t, s, "INSERT INTO messages("+messageColumns+") SELECT ?,account_id,folder,uidvalidity,?,subject,sender,sent_at-?,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment,gmail_message_id FROM messages WHERE ref=?", fmt.Sprintf("extra-%d", i), i, i, message.Ref)
 		mustExec(t, s, "INSERT OR IGNORE INTO mail_entries(id,account_id,detached_at) VALUES(?,?,0)", fmt.Sprintf("extra-%d", i), message.AccountID)
 	}
 	slow := &slowRemote{automationRemote: remote, entered: make(chan struct{}, 1), release: make(chan struct{})}

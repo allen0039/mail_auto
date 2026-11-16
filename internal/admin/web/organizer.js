@@ -116,8 +116,8 @@
       const archive = $("#organizer-archive").value || out.folders.find(f => f.role === "archive")?.name;
       const trash = $("#organizer-trash").value || out.folders.find(f => f.role === "trash")?.name;
       renderFolders(id, archive, trash);
-      const mode = {uid_move: "支持原生移动", uidplus_copy: "支持兼容移动（UIDPLUS）", unsupported: "该邮箱暂不支持安全移动，整理开关需保持关闭"}[out.move_mode];
-      $("#capability-result").textContent = `${mode}；发现 ${out.folders.length} 个原邮箱文件夹。`;
+      const mode = {gmail_labels: "Gmail 标签分类 / INBOX 归档 / 标记", uid_move: "支持原生移动", uidplus_copy: "支持兼容移动（UIDPLUS）", unsupported: "该邮箱暂不支持安全移动，整理开关需保持关闭"}[out.move_mode];
+      $("#capability-result").textContent = `${mode}；发现 ${out.folders.length} 个原邮箱文件夹。${out.restriction || ""}`;
     });
   }));
   $("#folder-settings-form").addEventListener("submit", run(async e => {

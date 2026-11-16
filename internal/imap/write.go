@@ -44,6 +44,9 @@ func ruleStateOnConnection(conn *connection, accountID string, original mail.Mes
 	if len(batch.Messages) != 1 || batch.Messages[0].UID != original.UID {
 		return mail.Message{}, mail.ErrConflict
 	}
+	if conn.gmail && (original.GmailMessageID == "" || batch.Messages[0].GmailMessageID != original.GmailMessageID) {
+		return mail.Message{}, mail.ErrConflict
+	}
 	return batch.Messages[0], nil
 }
 
@@ -74,6 +77,8 @@ func (a Adapter) Capabilities(ctx context.Context, account mail.Account, passwor
 				selectable = false
 			case "\\archive":
 				role = "archive"
+			case "\\all":
+				role = "archive"
 			case "\\trash":
 				role = "trash"
 			case "\\junk":
@@ -82,6 +87,14 @@ func (a Adapter) Capabilities(ctx context.Context, account mail.Account, passwor
 				role = "drafts"
 			case "\\sent":
 				role = "sent"
+			case "\\flagged":
+				role = "flagged"
+			case "\\important":
+				role = "important"
+			default:
+				if account.Provider == "google" && role == "" && strings.HasPrefix(attr, "\\") && !strings.EqualFold(attr, "\\HasChildren") && !strings.EqualFold(attr, "\\HasNoChildren") && !strings.EqualFold(attr, "\\Subscribed") {
+					role = "special"
+				}
 			}
 		}
 		if selectable {
@@ -174,6 +187,9 @@ func movePreflightOnConnection(conn *connection, original mail.Message) (bool, e
 // the write command is issued, every transport failure remains uncertain and is
 // never replayed.
 func (a Adapter) Move(ctx context.Context, account mail.Account, password string, m mail.Message, dest string, record func(mail.MoveResult) error) (mail.MoveResult, error) {
+	if account.Provider == "google" {
+		return a.gmailMove(ctx, account, password, m, dest, nil, record)
+	}
 	var conn *connection
 	var native bool
 	err := retryRemote(ctx, func() error {
@@ -227,6 +243,9 @@ func (a Adapter) MoveWithRuleState(
 	validate func(mail.Message) error,
 	record func(mail.MoveResult) error,
 ) (mail.MoveResult, error) {
+	if account.Provider == "google" {
+		return a.gmailMove(ctx, account, password, m, dest, validate, record)
+	}
 	if a.pool != nil && a.pool.enabled(account.ID) {
 		return a.moveWithRuleStatePooled(ctx, account, password, m, dest, validate, record)
 	}
@@ -308,6 +327,11 @@ func (a Adapter) moveWithRuleStatePooled(
 		return a.moveWithRuleStateDirect(ctx, account, password, m, dest, validate, record)
 	}
 	conn := pool.conns[account.ID]
+	if conn != nil && conn.authKey != accountAuthKey(account) {
+		conn.close()
+		conn = nil
+		delete(pool.conns, account.ID)
+	}
 	var native bool
 	attempt := 0
 	err := retryRemote(ctx, func() error {
@@ -427,6 +451,16 @@ func (a Adapter) executeMove(conn *connection, native bool, m mail.Message, dest
 	return mapping, nil
 }
 func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password string, m mail.Message, result mail.MoveResult) error {
+	if account.Provider == "google" {
+		evidence, err := a.gmailInspect(ctx, account, password, m, result.Folder)
+		if err != nil {
+			return err
+		}
+		if evidence.SourcePresent || !evidence.DestinationPresent || evidence.Destination != result {
+			return mail.ErrUncertain
+		}
+		return nil
+	}
 	if result.UID == 0 || result.UIDValidity == 0 || result.Folder == "" {
 		return mail.ErrUncertain
 	}
@@ -445,6 +479,9 @@ func (a Adapter) VerifyMove(ctx context.Context, account mail.Account, password 
 // unique destination match proves the write was not applied. Ambiguous or
 // incomplete evidence stays unresolved so callers cannot replay MOVE.
 func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password string, m mail.Message, destination string) (mail.MoveEvidence, error) {
+	if account.Provider == "google" {
+		return a.gmailInspect(ctx, account, password, m, destination)
+	}
 	var out mail.MoveEvidence
 	if m.Folder == "" || m.UID == 0 || m.UIDValidity == 0 || destination == "" || strings.EqualFold(m.Folder, destination) {
 		return out, mail.ErrUncertain
@@ -553,12 +590,15 @@ func (a Adapter) InspectMove(ctx context.Context, account mail.Account, password
 // EXPUNGE, so the post-STORE re-read gives the same guarantee without
 // depending on a capability several providers lack.
 func (a Adapter) FinishMove(ctx context.Context, account mail.Account, password string, m mail.Message, result mail.MoveResult, validate func(mail.Message) error) error {
+	if account.Provider == "google" {
+		return mail.ErrCapability
+	}
 	if result.UID == 0 || result.UIDValidity == 0 || result.Folder == "" ||
 		m.Folder == "" || m.UID == 0 || m.UIDValidity == 0 ||
 		strings.EqualFold(m.Folder, result.Folder) || validate == nil {
 		return mail.ErrUncertain
 	}
-	return retryRemote(ctx, func() error {
+	return retryReconciledMove(ctx, func() error {
 		conn, err := a.open(ctx, account, password)
 		if err != nil {
 			return fmt.Errorf("%w: %w", mail.ErrUncertain, err)

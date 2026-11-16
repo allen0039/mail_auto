@@ -240,6 +240,17 @@ func (s *Service) saveRule(a Access, r Rule, m *Mutation) (Rule, error) {
 	if e != nil {
 		return Rule{}, e
 	}
+	if account.Provider == "google" {
+		settings, err := s.FolderSettings(account.ID)
+		if err != nil {
+			return Rule{}, err
+		}
+		for _, source := range r.SourceFolders {
+			if err = s.gmailFolderAction(account, source, r.Action, r.Destination, settings); err != nil {
+				return Rule{}, err
+			}
+		}
+	}
 	r.Name = strings.TrimSpace(r.Name)
 	total := 0
 	if r.Name == "" || len(r.Name) > 120 || r.Priority < 0 || r.Priority > 10000 || len(r.Instructions) > 2000 || len(r.SourceFolders) < 1 || len(r.SourceFolders) > 20 || !validateGroup(r.Match, 0, &total) || !(slices.Contains([]string{"move", "archive", "trash", "keep", "ai"}, r.Action) || isFlagAction(r.Action)) || !validAlso(r.Action, r.Also) {

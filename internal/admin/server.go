@@ -20,6 +20,7 @@ import (
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
+	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"mail-auto/internal/telegram"
 	"mail-auto/internal/version"
@@ -192,6 +193,10 @@ func (s *Server) Handler() http.Handler {
 			s.oauthPublic(w, r)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/mail-oauth/") {
+			s.mailOAuthCallback(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			s.api(w, r)
 			return
@@ -342,6 +347,9 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "请先修改初始用户名和密码")
 		return
 	}
+	if s.mailOAuthAPI(w, r, session) {
+		return
+	}
 	if s.networkAPI(w, r) {
 		return
 	}
@@ -436,13 +444,17 @@ func operationError(w http.ResponseWriter, e error) {
 		networkError(w, e)
 		return
 	}
-	status, message, _ := operationStatus(e)
-	fail(w, status, message)
+	status, message, code := operationStatus(e)
+	writeJSON(w, status, map[string]string{"error": message, "error_code": code})
 }
 
 // operationStatus maps a service error to its HTTP status, message and the
 // sentinel's stable code ("unknown" when none matches).
 func operationStatus(e error) (int, string, string) {
+	var oauthError *mailoauth.Error
+	if errors.As(e, &oauthError) {
+		return 422, oauthError.Error(), oauthError.Code
+	}
 	switch {
 	case errors.Is(e, mail.ErrDailyLimit):
 		return 429, "已达到今天的自动整理上限，请明天继续或由管理员调整额度", "daily_limit_reached"
@@ -453,6 +465,10 @@ func operationStatus(e error) (int, string, string) {
 	case errors.Is(e, mail.ErrConflict):
 		return 409, "邮件状态或计划已变化，请重新预览", "state_conflict"
 	case errors.Is(e, mail.ErrCapability):
+		var safe interface{ PublicMessage() string }
+		if errors.As(e, &safe) {
+			return 422, safe.PublicMessage(), "capability_unavailable"
+		}
 		return 422, "邮箱能力或归档/回收站映射不满足受控移动要求", "capability_unavailable"
 	case errors.Is(e, mail.ErrUncertain):
 		return 409, "原邮箱操作结果尚未确认，请先刷新原邮箱文件夹或核验任务；不要重复执行", "remote_state_unknown"
@@ -574,7 +590,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "搜索失败")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"messages": out, "total": total, "offset": q.Offset, "limit": q.Limit})
+	writeJSON(w, 200, map[string]any{"messages": out, "total": total, "offset": q.Offset, "limit": q.Limit, "count_basis": "folder_entries"})
 }
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	var accounts, messages, unread int
