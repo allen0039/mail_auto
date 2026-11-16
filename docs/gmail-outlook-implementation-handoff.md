@@ -1,8 +1,10 @@
 # Gmail / Outlook 实施交接
 
-交接日期：2026-11-16。目标：0.10.0 / schema 15。
+交接日期：2026-11-16。最新开发目标：0.10.2 / schema 15。第 13–14 节保留应用复用、目录诊断的历史交接；本轮 Gmail 安全修复、最终门禁和固定候选交接见第 15 节。
 
-**等待主代理独立复验；尚未发布部署。** 初次候选已被独立验收判为不通过；第 1–11 节保留初次实施与自测记录，不能作为返工候选的最终测试证据。本轮 GO-IA-01～04 修复、新候选和新证据以第 12 节为准；独立验收报告及原失败证据未修改。模拟测试完成，真实账号验收待完成；当前不满足生产发布验收条件。
+**等待主代理独立验收；尚未发布部署。** 第 1–11 节保留初次实施及其失败前的自测记录，第 12 节保留 GO-IA-01～04 返工交接。返工候选 `574b047` 已经独立代码复验通过，原报告和失败证据均保持原样；该结论不覆盖新增 0.10.1/0.10.2 代码。旧章节的“当前”“未准备”等状态均为当时记录，以第 15 节及真实验收文档最新记录为准。模拟测试完成，真实账号整体验收待完成；当前不满足生产发布验收条件。
+
+最新本地候选为 **0.10.2/schema15**。本轮仅在本机隔离 QA 验证，未推送、发布或部署；新增代码与真实证据仍须主代理独立复验。
 
 ## 1. 基线与候选
 
@@ -171,10 +173,10 @@ govulncheck 的可达符号结果为 0；同时报告 2 个导入包漏洞、1 �
 | 账号代号 | 类型 | OAuth应用/官方登录/专用数据 | 实际写入 | run / operation ID | 结论 |
 | --- | --- | --- | --- | --- | --- |
 | G-PERSONAL-01 | 拟用个人 Gmail，尚未登录 | 全部未提供 | 0 | 无 | 真实账号验收待完成 |
-| MS-PERSONAL-01 | 拟用个人 Outlook，尚未登录 | 全部未提供 | 0 | 无 | 真实账号验收待完成 |
+| MS-PERSONAL-01 | 个人 Outlook；官方授权、IMAP诊断及重启后刷新路径通过；QA邮件未准备 | 应用已保存，未做专用邮件整理 | 0 | 无 | 等待专用 QA 数据 |
 | Workspace / M365 | 无组织测试账号 | 未提供 | 0 | 无 | 未验证兼容扩展 |
 
-两个个人账号的官方登录/回调、IMAP诊断、目录、首次/后续同步、真实refresh、重启、重授权、专用邮件整理、规则任务和Gmail多标签网页对照均待完成。没有可提供的真实前后状态或 run/operation ID；模拟测试生成的 ID 没有冒充真实证据。
+Gmail 官方登录、IMAP、刷新、同步和整理均待完成。Outlook 已完成官方授权、IMAP诊断和重启后的真实 refresh 路径；专用目录同步、重授权恢复、专用邮件整理及规则任务仍待完成。两个账号均无真实写入或 run/operation ID；模拟测试生成的 ID 没有冒充真实证据。
 
 最少用户操作：
 
@@ -295,8 +297,270 @@ schema15 布局未改变，但旧未发布候选二进制不了解新摘要及�
 
 ### 12.5 未完成项及外部步骤
 
-G-PERSONAL-01、MS-PERSONAL-01 均无可用 OAuth 应用、本人官方登录及明确测试邮件；本轮真实写入为 0，没有真实 run/operation ID。Gmail / Outlook 仍是“模拟测试完成，真实账号验收待完成”；Workspace / Microsoft 365 仍为未验证兼容扩展。所需最少用户步骤与第 9 节一致：固定私有 HTTPS 实例 → 受保护设置填写应用配置及精确回调 → 本人在官方页同意 → 只对专用标签/文件夹和选定测试邮件完成真实 refresh、同步、重启、重授权、规则和网页状态对照。不要在聊天中提供密码、token 或 client secret。
+该节最初记录时两个个人邮箱的真实验收均未启动；后续 Outlook 官方授权、IMAP诊断和重启后刷新路径已完成，详见第 13.5–13.6 节。当前真实写入仍为 0，没有真实 run/operation ID。Gmail真实账号验收待完成，Outlook QA 邮件同步和整理待专用数据准备；Workspace / Microsoft 365 仍为未验证兼容扩展。不要在聊天中提供密码、token 或 client secret。
 
 当前 Gmail 移动/归档撤销为明确拒绝，若后续希望开放，须另行保存操作前完整成员关系、验证并发及用户后续修改、处理部分写入，再用专用真实测试数据验收。不得把反向 move 恢复为通用撤销。历史代理账号无网络证据的只读恢复限制也保留为需人工核对项。
 
 **等待主代理独立复验；尚未发布部署。** 主代理应独立审查新候选差异，原样重跑四反例及正式迁移/并发/人工结案回归，核对新测试与真实账号证据；本协作者没有替主代理宣布通过。
+
+## 13. OAuth 应用跨部署复用增量（0.10.1）
+
+### 13.1 基线、范围和候选
+
+用户要求 Google / Microsoft 都集成复用，避免每次部署重新创建应用。本轮从 `fbc1054a2490ecf86bc05f39eaadc688dcccdfe7` 继续，本地版本更新为 `0.10.1`，schema 仍为 `15`，没有新增或覆盖迁移、依赖、发布标签。`docs/gmail-outlook-independent-reacceptance.md` 已记录 `574b047` 的四项修复代码复验通过、整体部分通过、生产发布不通过；本次没有修改该报告或原失败证据。
+
+本轮新增改动尚未提交，候选提交为“无”。基线加工作区改动构成本轮待审候选；22 个实现/使用文档文件的逐文件 SHA-256 固定在 `docs/oauth-app-reuse-test-results.json` 的 `candidate_files`，交接报告和结果 JSON 不计入该实现快照。未暂存、提交、推送、发布镜像或访问 Oracle1/Oracle3，未部署或清理生产资源。保留原先未跟踪的方案、验收材料、`AGENTS.md` 和 `.planning/`；没有把这些混入本轮实现。
+
+| 文件 | 实现说明 |
+| --- | --- |
+| `internal/mailoauth/deployment.go`、`deployment_test.go` | 版本 1 私有 JSON 部署文件，最多两服务商/32 KiB；拒绝符号链接、非普通文件、组/其他用户可读文件、未知字段/服务商、额外 JSON 文档、过期/空密钥；两家应用在同一短事务内载入，目标 Vault 重新加密；安全导出不覆盖已有文件、0600，不导出邮箱 token |
+| `internal/mailoauth/manager.go`、`model.go` | 复用同一应用验证/更新函数；启动导入相同配置无副作用；密钥轮换保留 refresh，应用身份变化要求重授权；导入失败使用固定安全错误，不包含供应商或数据库敏感正文 |
+| `internal/config/config.go`、`config_test.go` | 新增 `mail_oauth_apps_file` / `--mail-oauth-apps-file`，要求 HTTPS public_url，保持 CLI 优先和 MCP 独立性 |
+| `cmd/mail-auto/main.go`、`main_test.go` | `mail-oauth export PATH` 管理命令；启动在同步、恢复 worker 和 HTTP 服务前导入；错误文件拒绝启动 |
+| `internal/admin/web/index.html`、`scripts/ui-check/mail-oauth-ui-check.js` | 提示应用注册一次、多邮箱分别官方登录、新域名需登记回调；新增断言进入默认三宽度门禁 |
+| 版本、Compose、配置示例、README、CHANGELOG、接入指南、发布核对脚本及其夹具 | 统一 0.10.1/schema15；不包含真实应用凭据；新增 `docs/oauth-app-reuse.md` 说明导出、挂载、轮换和回退 |
+
+同一个管理员注册的服务商客户端可在自用实例复用，不新增共享 secret 到公共源码/镜像，也不新增授权中转服务。每个邮箱仍分别完成官方同意；导入文件不携带邮箱身份、refresh/access token、主密钥或 origin。文件只作为启动配置来源，不作为整个数据库备份。用户管理自己的应用这一原方案边界保留；本轮补充安全迁移/自动配置能力，不把“可复用”说成“任意全新第三方安装都可零配置登录”。
+
+### 13.2 测试与构建证据
+
+原始证据根目录为 `.planning/oauth-app-reuse/`。每条命令的实际 argv、时间、耗时、退出码、计数和日志路径见 `docs/oauth-app-reuse-test-results.json`；下表非测试检查不虚构测试数量。既有全量测试后只补充证据汇总和本交接，未再修改生产源码。
+
+| 命令或检查 | 退出码 | 结果 | 证据（根目录内） |
+| --- | --- | --- | --- |
+| `go test -race -count=1 -json ./...` | 0 | 587 / 0 / 0 叶子测试 | `full-race.json`、`.log` |
+| 导入/导出、配置、CLI 定向 race（完整 `-run` 见 JSON） | 0 | 29 / 0 / 0；含跨 Vault、相同配置重启、secret/origin/client/authority/expiry 变化、两家原子失败回滚、未提供服务商保持不变及文件边界 | `targeted.json`、`.log` |
+| 原四个 independent overlay 反例 race | 0 | 4 / 0 / 0；未改原断言 | `original-counterexamples.json`、`.log` |
+| `go vet ./...`；固定版本 staticcheck；固定版本 govulncheck | 均 0 | 无静态诊断；可达符号漏洞 0，仍有未调用的 2 个包级、1 个模块级结果 | `vet`、`staticcheck`、`govulncheck` 的 `.json` / `.log` |
+| `gofmt -l cmd internal scripts` 的空输出断言 | 0 | 未格式化源码 0 | `source-format.json`、`.log` |
+| `gofmt -l .` 的空输出断言 | 1 | 仍有原有三个临时 Go 文件未格式化，未修改它们 | `workspace-format.json`、`.log` |
+| `python3 -m unittest discover -s scripts/release-verify -v` | 0 | 46 / 0 / 0 | `release-fixtures.json`、`.log` |
+| 默认及示例 override 的 `docker compose ... config --quiet` | 均 0 | 两份配置通过；可选 secret 示例未提供真实密钥 | `compose`、`compose-example` 的 `.json` / `.log` |
+| `make build`；`bin/mail-auto version` | 均 0 | 本机构建成功，版本 0.10.1 | `build.json`、`.log`；版本另于交接检查时实际输出 |
+| `scripts/ui-check/run.sh` | 0 | 1020 / 0 / 0 断言，六脚本×三宽度，页面错误 0；OAuth 33×3=99 | `ui.json`、`.log` |
+| UI gate 首次与默认 UI 并行；随后隔离重跑 | 1 → 0 | 首次 26 / 1 / 0；隔离 27 / 0 / 0 | `ui-gate`、`ui-gate-isolated` 的 `.json` / `.log` |
+| `CGO_ENABLED=0 GOOS=linux GOARCH=amd64/arm64 go build -trimpath ...` | 均 0 | 两架构编译通过 | `linux-amd64`、`linux-arm64` 的 `.json` / `.log` |
+| `docker buildx build --platform linux/amd64,linux/arm64 --output type=oci,... .` | 0 | 仅本地 OCI，两平台 manifest/config 和 32 个 blob 摘要通过，无 push | `multiarch-image.json`、`.log`、`image-verification.json` |
+| 创建/移除本轮临时 builder | 均 0 | 仅处理 `mail-auto-oauth-reuse-0101` | `builder-create`、`builder-cleanup` 的 `.json` / `.log` |
+| `git diff --check` | 0 | 无空白错误 | `diff-check.json`、`.log` |
+| 实际 Google 应用导出及临时新 Vault 实例启动、重启 | 0 | 两次就绪均 0.10.1/schema15，Google 应用版本均 1、密钥加密、邮箱账号 0 | `local-google-export.json`、`local-google-reuse-smoke.json` 及关联日志 |
+
+工具实际版本：Go 1.27.4 darwin/arm64；Node 24.22.3；Python 3.9.6；Git 2.39.5 Apple Git-154；Docker 29.8.2；Buildx 0.37.2；Compose 5.5.0；Chrome 157.0.8103.51；puppeteer-core 25.16.0、@puppeteer/browsers 3.2.6；staticcheck 2026.2.2 (0.8.2)；govulncheck 1.9.0，库更新 2026-11-11 02:51:11 UTC。版本记录在 `versions.json`，两项 Node 依赖由 `scripts/ui-check` 解析验证。未运行远端 CI。
+
+首次 UI gate 失败断言是 `missing pass exits non-zero` 的全局临时目录/进程计数：并行默认 UI 正好清理自己的实例，前后计数从 1/2 变成 0/0。隔离运行同一测试全部通过，没有改断言或跳过测试。原工作区格式异常仍为第 7 节列出的三个临时文件，不能称所有工作区门禁全绿。辅助汇总最初假定 UI JSON 使用 `results` 字段而失败，已按实际 `out/total` 格式核对 18 项并修正；另一次在仓库根查 Node 依赖版本失败，改从 `scripts/ui-check` 解析成功。这两次采集错误没有改变测试结果。
+
+本地 OCI SHA-256 为 `6a4b89e87a57c96daa6c166d7c571638a0f09d6f5f1c4aa5b027e70756fa9bf9`；amd64 manifest `sha256:fcc628b69c8f5b70a8543dc8b8f5ec15a10e99934ddb51bbcd24892092410036`，arm64 manifest `sha256:03ae0416359c516a910e4fac5d5481d91dfbc1b8f33b3e2d0be14658302b43be`。仅为本地构建证据，不是 registry/生产摘要。
+
+最终交接检查 `final-review.json` 退出 0：22 个实现文件哈希与测试快照一致，全部日志路径存在，源码格式和差异检查通过，构建版本 0.10.1。私钥、Google token/secret 字面量等有限模式扫描命中 0，并已人工审查差异；该模式检查不声称穷尽全部凭据格式。真实应用导出文件仍在仓库及构建上下文之外。
+
+### 13.3 实际配置、限制和最少外部步骤
+
+| 项目 | 当前状态 |
+| --- | --- |
+| Google 应用复用 | 本机 QA 中已配置的真实客户端完成私有导出，临时实例两次启动导入通过；文件保存在仓库外受保护的 MailAuto-QA 目录，未打印凭据 |
+| Microsoft 应用复用 | 用户已注册个人账号应用并配置受保护的本机 Vault；应用复用模拟见前述证据 |
+| Gmail / Outlook 真实邮箱 | Outlook 官方授权、IMAP诊断和重启后真实 refresh 路径已通过；Gmail未开始；两者同步、专用邮件写入和受控规则均未完成；真实写入 0，无真实 run/operation ID |
+| 组织账号 | Workspace / M365 均未验证 |
+| Gmail 功能边界 | 第 12 节的 Trash/恢复、特殊目录、保留两份、移动/归档撤销等拒绝策略不变 |
+| 发布与部署 | 新增 0.10.1 改动尚待独立代码审查；真实验收仍阻塞发布，没有发布部署 |
+
+最少用户步骤：在 Outlook 网页创建 `MailAuto-QA` 和 `MailAuto-QA-Target` 文件夹，在前者准备明确非私人测试邮件；然后通知实施者继续验收。Gmail本人仍需在官方页完成邮箱同意并准备专用标签和测试邮件。不要把密钥发到聊天。管理员可重新导出两家配置后，以只读文件载入后续自用实例。新域名在两家原应用补登记精确回调，地址见 `docs/oauth-app-reuse.md`；同域名重建且保留数据库/主密钥无需重新创建客户端。Google Testing 限制、Microsoft 凭据到期及组织策略继续适用；不能保证所有部署永不需要管理应用。
+
+私有文件 0400/0600、父目录建议 0700，容器读取用户 65532；不进入 Git、镜像、公开备份、截图或聊天。启动导入不发起供应商网络请求，既有 OAuth/token/IMAP 网络策略和端点白名单不变。相同文件重启不增加版本或清除 state；同客户端轮换密钥保留 refresh，client ID/origin/账号类型变化要求重授权。启用文件后在 UI 改配置，须同步重新导出或移除文件配置，避免下次启动恢复旧值。
+
+升级和回退：无新 schema，仍须先备份数据库及配套主密钥、私有文件。回退到含四项返工修复的 0.10.0 候选前停止进程、移除新参数/YAML 字段；不能回退至缺少 Gmail 排他/撤销等保护的初次候选。跨 schema14 回退继续恢复配套快照，不能手改 user_version。文件只能恢复应用配置，不能代替邮箱授权、任务和操作记录备份，也不能撤销远端已完成动作。
+
+**模拟测试完成，真实账号验收待完成。等待主代理独立验收；尚未发布部署。**
+
+### 13.4 Microsoft 实际应用配置补充
+
+第 13.3 节“Microsoft 尚待注册”为此前交接状态。其后用户完成 Azure 注册并确认创建个人账号应用及 24 个月密钥，现已保存到本机 QA 的加密配置，门户到期日 2028-11-15。Google/Microsoft 两家配置已一起私有导出，并在隔离新 Vault 实例及重启中验证自动导入成功、配置版本均保持 1，命令退出 0；证据为 `.planning/oauth-app-reuse/both-provider-export.json`、`both-provider-reuse-smoke.json` 及关联日志。
+
+应用配置导入验证本身没有完成邮箱同意或 IMAP/refresh；此后用户完成 Outlook 官方同意、动态 IMAP scope、真实连接和重启后刷新路径，详见 13.5–13.6。真实写入仍为 0。没有申请 Graph 邮件权限。后续部署采用私有只读文件自动载入，密钥不内置到公共源码、镜像或 Compose。未发布部署，原独立代码验收边界不变。
+
+### 13.5 个人 Outlook 授权与连接实测补充
+
+2026-11-16 16:34（Asia/Shanghai），MS-PERSONAL-01 在本机运行中的 0.10.0/schema15 实例完成本人官方同意、回调绑定及 IMAP 连接诊断，状态 connected，refresh 加密保存，实际 Outlook IMAP scope 存在。TCP/TLS/XOAUTH2 登录和 LIST 全部通过，共读取 11 个文件夹，直连且无回退。首次同意后曾保持 pending，重新官方登录确认成功；首次失败原因未确定，没有把失败改记为成功。
+
+同步范围为 MailAuto-QA、自动同步关闭；邮件索引 0、任务 0、真实写入 0。证据 `.planning/oauth-app-reuse/outlook-authorization-imap.json`、`outlook-imap-success.jpg`，详情见真实验收文档相应小节。新目录缺少 Exchange Online 静态列表没有阻止此次个人账号动态 IMAP scope 授权，未添加 Graph 邮件权限。尚未验证实际 refresh grant、同步、重启恢复和专用邮件操作，Gmail 真实链路仍待验；这不是 0.10.1 新增代码的独立验收或生产发布授权。尚未发布部署。
+
+### 13.6 个人 Outlook 重启后刷新与连接实测
+
+2026-11-16 18:53（Asia/Shanghai），在隔离本机 QA 的 0.10.0/schema15 实例停止并重启 Mail Auto，以清空进程内 OAuth access-token 缓存；重启后立即运行 Outlook 连接诊断。TCP、TLS、XOAUTH2 登录和 IMAP LIST 均通过，读取 11 个文件夹，直连且无自动同步。依据 `internal/mailoauth/manager.go` 的 credential 路径，缓存为空时会发起 refresh-token grant；连接诊断在重启后成功，因此确认此次真实 provider refresh 路径取得可用 access token。没有保留 provider 侧审计事件或原始 token 响应，也不声称 Microsoft 轮换了 refresh token。摘要见 `.planning/gmail-outlook-real-acceptance/outlook-refresh-after-restart.json`。
+
+本次索引 0、任务 0、真实写入 0。Outlook 网页当前没有 `MailAuto-QA` 或 `MailAuto-QA-Target` 文件夹及专用测试邮件，尚未执行同步或整理。下一步等待用户在个人 Outlook 中创建这两个文件夹并准备明确非私人测试邮件，再限制同步范围、执行受控操作并对照网页状态。Gmail真实验收仍未完成；个人Outlook真实验收仅完成官方授权、IMAP诊断及重启后刷新路径。**等待主代理独立复验；尚未发布部署。**
+
+### 13.7 Outlook QA 同步受阻
+
+2026-11-16 19:04（Asia/Shanghai），用户告知测试数据已准备后，隔离实例仅对配置的 `MailAuto-QA` 发起手动同步；0/1 文件夹完成，页面提示服务器拒绝打开文件夹或返回无效响应，原索引保留。当前 Outlook 网页登录的邮箱与隔离实例已授权邮箱不同，无法核对专用目录和邮件是否在目标账号；失败原因尚未确定，不能断言文件夹不存在。等待用户切换网页至已授权邮箱以确认。没有执行整理或写入，Gmail与 Outlook 完整真实验收仍未完成，尚未发布部署。
+
+## 14. Outlook QA 目录同步排查与诊断修复（0.10.2）
+
+### 14.1 基线、原因和改动
+
+本轮 HEAD 仍为 `fbc1054a2490ecf86bc05f39eaadc688dcccdfe7`，已有未提交 0.10.1 应用复用、真实验收文档等工作全部保留。本轮版本提升为未发布 0.10.2，schema15 无新迁移；运行时、管理界面、Compose及当前配置/接入文档版本一致。没有新标签或推送，新候选为工作区差异和测试快照哈希，见 `docs/outlook-folder-sync-test-results.json`。独立验收报告及原反例不修改。
+
+用户确认在 MS-PERSONAL-01 准备 QA 邮件后，19:18 使用该本地账号 Vault、原网络策略做真实只读 LIST/EXAMINE：11个目录中无 MailAuto QA 目录，EXAMINE 明确返回目录不存在。此前从网页另一个账号推断数据准备账号有误缺乏充分证据，本轮不沿用该推断。真实失败为“指定目录当前在 IMAP 不可见”，不是 OAuth/IMAP 认证失败；客户端目录是否在服务器、嵌套路径或服务商可见性仍待外部核对。没有自动创建目录或扩大范围来掩盖问题。
+
+| 文件 | 修复 |
+| --- | --- |
+| `internal/imap/client.go` | 提取同一连接的可选目录 LIST；只读 EXAMINE 普通拒绝后核对实际目录。缺失或 Noselect 返回安全错误码 `folder_unavailable` 和完整路径提示；存在、LIST失败保留原错误。成功路径无额外 LIST，网络失败不追加命令。 |
+| `internal/imap/automatic.go` | 手动、自动增量、IDLE共用上述只读核验；不影响写入及未知结果处理。 |
+| `internal/admin/web/network.js` | 诊断结果新增完整IMAP路径折叠区，目录名称全部转义显示。 |
+| `internal/imap/folder_sync_test.go` | 真实TCP协议覆盖三入口、缺失/嵌套/不可选/存在但拒绝/LIST失败、网络中断、INBOX大小写；SQLite持久任务失败保留旧索引、重启后目录恢复可重试；断言无写入、无扫描其他目录和无盲重试。 |
+| `scripts/ui-check/mail-oauth-ui-check.js` | 实际默认门禁新增完整路径/提示、HTML注入及展开后宽度断言。 |
+| 版本、Compose、发布核对脚本/夹具及文档 | 当前0.10.2/schema15；兼容发布核对原schema14→15，原版本分支和断言保留。 |
+
+### 14.2 本轮测试
+
+完整命令、工具版本、退出码、叶子测试计数、日志和源文件哈希在 `docs/outlook-folder-sync-test-results.json`。脱敏日志根为 `.planning/outlook-folder-sync/`，不得提交临时probe、私有备份、截图或本地镜像。
+
+| 命令 | 实际结果 / 证据 |
+| --- | --- |
+| `go test -race -count=1 -json ./...` | 退出0，604通过/0失败/0跳过；`race.log`。全量开始后新增的INBOX大小写单例随最终定向回归另行通过。 |
+| `go test -race -count=1 -json ./internal/imap -run '^TestSyncFolder'` | 最终退出0，18叶子通过/0失败/0跳过（含父测试计19）；`targeted-final.jsonl`。首次夹具缺少登录后的CAPABILITY，7叶子通过/10失败，退出1；修正夹具后17叶子通过，再新增INBOX单例后18通过，未弱化断言。原失败日志均保留。 |
+| 原四项 independent overlay，`-race -count=1 -json ./internal/mail -run '^TestIndependent'` | 退出0，4通过/0失败/0跳过；`independent.log`，原失败材料保持原样。 |
+| `go vet ./...`、staticcheck@v0.8.2、govulncheck@v1.9.0 | 全部退出0；可达符号未检出漏洞不等于依赖无漏洞，govulncheck另提示未调用包/模块存在漏洞。 |
+| `python3 -m unittest discover -s scripts/release-verify -v` | 退出0，46通过/0失败/0跳过；`release.log`。 |
+| 源码格式、`git diff --check`、`docker compose config --quiet`、`make build` | 全部退出0；本机构建版本0.10.2。全目录gofmt断言因三个既有 `.planning/`、`.claude/worktrees/` 临时文件失败，未改动它们。 |
+| 默认6脚本UI，1280/375/390 | 退出0，18组、1029断言全部通过，0页面错误；OAuth每宽度36断言含本次3项；`ui.log`。 |
+| UI gate、linux/amd64与linux/arm64编译 | 全部退出0；UI gate为27通过/0失败/0跳过，双架构编译成功；`ui-gate.log`、`linux-amd64.log`、`linux-arm64.log`。未推送镜像或二进制。 |
+| 双架构OCI本地镜像 | 构建退出0，32个blob摘要全部通过，完整摘要见 `image-verification.json`；任务专用构建器已删除，不影响其他资源。首次汇总脚本因Python3.9无hashlib.file_digest退出1，替换流式sha256后完整校验通过，不是镜像构建失败。 |
+
+### 14.3 真实结果、升级及剩余阻塞
+
+仓库外私有目录已配套备份原QA数据库、master.key及0.10.0旧程序；确认无活动/待核验操作后，仅本机隔离QA重启为0.10.2，自动同步/MCP继续关闭、原账号与允许目录保持不变。生产和Oracle1/Oracle3均未操作。带显式CA验证的readyz退出0，为ready/0.10.2/schema15。
+
+真实重试仍0/1目录、0封；页面已显示明确的目录不可见提示，诊断TCP/TLS/XOAUTH2/LIST再次全部通过、11目录但无QA。OAuth connected、索引0、operation0、真实邮件写入0。证据 `live-list-examine.json`、`live-candidate-result.json`、`qa-folder-error.png`；JSON摘要只用MS-PERSONAL-01代号，截图为本地私有诊断界面、不提交。没有保存token、原始服务商错误或私人邮件正文。此次没有run/operation ID可交付，不能把诊断修复或模拟回归称为真实同步/整理通过。
+
+最小外部步骤：本人在目标账号Outlook网页确认两个QA目录已保存到服务器；若是嵌套目录，提供目录的完整路径即可，不发邮件正文或凭据。之后仅按明确QA路径同步/整理；若网页已存在而IMAP继续不列出，继续排查目录可见性，不能推断为用户没准备。Gmail完整真实验收、Outlook真实邮件同步/整理/重授权及受控规则仍未完成，组织账号未验证。
+
+回退本机诊断修复：停止QA，换回私有备份旧程序后重启；无新schema，原OAuth/账号不变，不需要手工改数据库。若要恢复整个QA快照，必须停服并恢复配套数据库和主密钥；不能把备份密钥放进Git/镜像。回退旧程序会恢复笼统错误提示，不能消除服务端目录不可见阻塞，也不能退回缺少GO-IA修复的初次候选。
+
+**等待主代理独立验收；尚未发布部署。** 本轮仅本机QA用于验证；没有提交推送、版本标签、发布镜像、远端部署或生产清理。
+
+### 14.4 继续排查：专用服务端目录补齐及真实同步通过
+
+用户授权通过Chrome检查目标个人Outlook并修复至同步成功。19:37之后确认官方网页的邮箱根节点与已授权MS-PERSONAL-01一致，服务端目录树同样无MailAuto-QA，与之前IMAP LIST结果一致。在该账号根目录创建精确名称的专用目录后，19:39:08本机QA空目录手动同步完成（0封、1/1）；据此确认此次阻塞是配置目录未在服务端存在。之前失败证据不变，不再需要用户反复重新授权。
+
+为验证非空同步，仅向空的MailAuto-QA通过IMAP APPEND准备三封纯合成测试邮件：M-MOVE-01已读无旗标、M-UNREAD-01未读、M-STAR-01已读有旗标，正文仅测试说明，使用`.invalid`固定地址、不外发。19:41:03首次非空同步和19:41:39重复同步均为completed、3封、1/1目录、错误为空。Outlook网页对应三封、1未读；数据库只读核对11项全部通过，未读/旗标保留、无重复索引、operation0。同步记录按账号持久化，无独立run ID；未执行整理，不存在整理operation ID。
+
+| 命令或观察 | 实际结果与证据 |
+| --- | --- |
+| `go run .planning/outlook-folder-sync/seed_qa.go` | 退出0；仅APPEND三封专用合成邮件，外发0；`qa-preparation.json`。临时准备程序不提交、不进入产品或镜像。 |
+| Chrome 手动同步三次 | 空目录一次及三封夹具两次均完成；`qa-sync-success.png`、`live-sync-success.json`，保留原失败截图与JSON。 |
+| `python3 .planning/outlook-folder-sync/verify_live_sync.py` | 退出0，11通过/0失败/0跳过，Python3.9.6；证据`live-sync-success.json`，不读取或记录凭据/私人正文。 |
+| `go test -race -count=1 -json ./internal/imap -run '^TestSyncFolder'` | 退出0，18叶子通过/0失败/0跳过，Go1.27.4；`targeted-live-confirmation.json`及JSONL。第14.2节全量门禁仍对应当前产品源码，本次仅调整QA数据及材料。 |
+
+本次源目录创建1个、合成邮件APPEND3封、外发0、私人邮件打开/修改0、整理写入0；未修改产品源码、账号允许目录、网络策略、自动同步或MCP开关。版本保持0.10.2/schema15，HEAD仍fbc1054，未固定新提交；此前未提交变更全部保留。待验事项：目标QA目录准备及Outlook分类/归档/回收站/恢复/标记/规则保护/重新授权、Gmail完整真实验证、组织账号验证和新增增量独立复验。没有发布部署。**等待主代理独立验收；尚未发布部署。**
+
+## 15. 固定 0.10.2 候选、Gmail 安全修复及本轮真实验收交接
+
+本节是 2026-11-16 晚间的正式增量交接，取代第 13–14 节中描述当时状态的“未提交”“未注册”“未准备”等措辞。原独立验收、复验和 worker 后审计报告及原 overlay/反例/失败日志未修改。实施者只报告实现、自测和实际服务商结果，**不代替主代理宣布独立复验通过**。
+
+### 15.1 固定边界、版本与文件
+
+| 项目 | 本轮实际值 |
+| --- | --- |
+| 开始时 HEAD / 分支 | `fbc1054a2490ecf86bc05f39eaadc688dcccdfe7` / `main` |
+| 原始基线 / 原返工候选 | `15c7160827d1ae56d3e177f818c02c450c53697e` / `574b04742ef4b783cb7333de97d2f282ea722bcd`；四项返工已独立代码复验关闭 |
+| **本次源码候选** | **`811ab7a8c72c00c11f6b314841e8506c0bdddb58`**，仅本地提交，未推送 |
+| **源码候选 tree** | **`97d459d270bc28a35df8946fb74a247534772fc5`** |
+| 版本 / schema | **0.10.2 / 15**；0.10.1 应用复用与 0.10.2 目录/认证修复统一进入该候选 |
+| 迁移和依赖 | 本轮未新增或修改迁移，`SchemaVersion=15`；未改 go.mod/go.sum |
+| 版本占用 | 21:26:57–21:26:58 `git ls-remote --tags origin 'refs/tags/*0.10*'` 退出 0、输出空；未创建标签 |
+| 变更清单 | 33 个候选文件及每个 SHA-256 见 `docs/gmail-outlook-final-candidate-test-results.json` 的 `source_candidate.files` |
+| 后续材料 | 本报告、真实验收记录及最终测试 JSON 另作材料提交，不改变上述已测源码；独立复验同时审查源码候选及后续材料 |
+| 工作区保留 | 原有未跟踪 AGENTS、方案、协作者提示、三个独立报告及 `.planning/` 保留，未混入源码候选 |
+| CI 与发布边界 | `.github/workflows/ci.yml` 只有检查、`push:false` 双架构构建；本轮未推送、打标签、发布镜像、访问 Oracle1、部署或清理生产资源 |
+
+第 13 节的安全应用导入/导出和第 14 节的目录诊断均包含在这 33 个文件中。运行时、UI、MCP 共用版本来源，Compose、README、配置说明及发布核对夹具统一为 0.10.2；历史 0.10.1/0.10.0 记录保留其当时版本。用户明确要求保留的 Outlook 全目录范围 `[]`、自动同步关闭、网络策略、每批数量和保护未被还原为早期 QA 设置。
+
+### 15.2 本轮 Gmail / OAuth 修复与正式回归
+
+| 实现文件 | 行为及默认门禁中的回归 |
+| --- | --- |
+| `internal/mailoauth/manager.go`、`oauth_test.go` | `Bind` 遇明确 IMAP 拒绝、scope 缺失或需重授权直接失败，不保存本次 refresh、不覆盖旧授权；新账号仍待授权。`TestBindRejectsExplicitIMAPAuthorizationFailure` 覆盖两服务商、新/旧授权及三错误；临时网络故障保留原 `network_error` 恢复路径，另有专门测试。 |
+| `internal/imap/client.go`、`internal/admin/mail_oauth.go`、`mail_oauth_test.go`、`internal/mailoauth/model.go`、`internal/admin/web/app.js` | Gmail 缺少 X-GM-EXT-1 返回 `oauth_gmail_capability_missing` 并拒绝本次绑定；CAPABILITY 查询的传输失败仍归网络错误。新增包装错误/明确拒绝/临时网络/成功分类断言；OAuth 默认 UI 增加中文能力提示断言。 |
+| `internal/mailoauth/manager.go`、`internal/network/settings.go`、`oauth_test.go` | 绑定、刷新成功和永久失败写回，在短 SQLite 事务内重新核对路由并使用代际/配置/密文 CAS。全局设置或实际账号策略变化在同一事务递增 OAuth generation，即使最终出口相同也拒绝旧 worker；保留原 refresh。HTTP 请求仍在事务外，无 SQLite 长事务。两项正式测试覆盖 bind/refresh/invalid_grant、出口变化、同出口全局和账号策略变化、旧凭据/缓存保护。 |
+| `scripts/ui-check/mail-oauth-ui-check.js` | 应用复用说明、完整 IMAP 路径/转义、Gmail 能力提示都进入默认六脚本三宽度门禁；当前 OAuth 脚本每宽度 37 项。 |
+
+源码审查继续核对统一认证、连接诊断、后台/手动同步、任务、读取、移动/标记及恢复入口；未新增旁路认证或写入路径。Gmail Trash/恢复/特殊目录移动、保留两份、move/archive undo、未知标签写入自动补齐仍服务端拒绝。未知写入只核验，不取消记录或重放来获得通过。
+
+### 15.3 最终源码门禁及实际数量
+
+证据根目录 E 为 `.planning/oauth-final-handoff/`；下表时间全部为 **2026-11-16 Asia/Shanghai**。每条完整 argv、环境覆盖、起止时间、实际退出码、日志路径、工具版本和测试数量均在新的 `docs/gmail-outlook-final-candidate-test-results.json`；对应 `E/<名称>.json` / `.log` 保留原始证据。测试顺序执行，UI 与 gate 不并行。
+
+| 命令 | 起止时间 | 退出码 | 实际结果；E 中证据名称 |
+| --- | --- | --- | --- |
+| `go test -race -count=1 -json ./...` | 21:11:59–21:16:43 | 0 | **628 / 0 / 0 叶子测试**，含父级 694 个结果事件；`race` |
+| `go vet ./...` | 21:16:43–21:16:44 | 0 | 无诊断；`vet` |
+| `gofmt -l .` 及空输出断言 | 21:16:44 | 0 / **1** | 仍列出原有三个临时 Go 文件；`format-all`，未修改它们 |
+| `gofmt -l cmd internal scripts` | 21:16:44 | 0 | 输出空；`source-format`；21:26:58 最终复核同样通过 |
+| `go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...` | 21:16:44–21:16:46 | 0 | 无诊断；`staticcheck` |
+| `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...` | 21:16:46–21:16:53 | 0 | 可达符号漏洞 0；仍提示 2 个未调用包级、1 个模块级结果；`govulncheck` |
+| `python3 -m unittest discover -s scripts/release-verify -v` | 21:16:53–21:16:56 | 0 | **46 / 0 / 0**；`release` |
+| 默认及示例 override 的 `docker compose ... config --quiet` | 21:16:56 | 均 0 | 两份配置通过；`compose`、`compose-example` |
+| `make build`；`bin/mail-auto version` | 21:16:56 | 均 0 | 本机构建完成，输出 **0.10.2**；`build`、`binary-version` |
+| 原 independent overlay 的 `go test ... -race -count=1 -json ./internal/mail -run '^TestIndependent'` | 21:16:56–21:17:02 | 0 | **4 / 0 / 0**，原 overlay/反例不变；`independent` |
+| `scripts/ui-check/run.sh` | 21:17:02–21:18:04 | 0 | **1032 / 0 / 0** 断言，18 组，页面错误 0；`ui` |
+| `PUPPETEER=puppeteer-core node --test --test-reporter=tap scripts/ui-check/gate-test.cjs` | 21:18:04–21:19:10 | 0 | **27 / 0 / 0**；`ui-gate` |
+| `CGO_ENABLED=0 GOOS=linux GOARCH=amd64/arm64 go build -trimpath ... ./cmd/mail-auto` | 21:19:10–21:19:13 | 均 0 | 两架构编译；`linux-amd64`、`linux-arm64` |
+| 创建专用 docker-container builder / 两架构本地 OCI / 移除本轮 builder | 21:19:13–21:20:28 | 均 0 | 无 push；31 个 blob 摘要、两平台 manifest/config 全匹配；`builder-create`、`multiarch`、`image-verification.json`、`builder-cleanup` |
+| `git diff --check` | 21:20:28；21:26:58 | 均 0 | 无空白错误；`diff`、`diff-final` |
+| 定向认证/网络/目录/XOAUTH2 race，完整 `-run` 见 JSON | 21:32:20–21:32:41 | 0 | **42 / 0 / 0** 叶子测试；`auth-network-folder-regressions` |
+| 暂存差异、路径/实际凭据扫描、干净 tree 导出格式断言 | 21:28:24–21:28:27 后 | 均 0 | 33 文件；真实 QA app secret/refresh 仅内存比较，命中 0；干净候选 gofmt 空输出；`staged-credential-scan`、`staged-diff-check`、`precommit.json` |
+
+UI 数量按实际 `out` 重算：每个宽度为 **37 + 45 + 63 + 87 + 99 + 13 = 344**，三宽度共 **1032**。不沿用上一轮独立报告的 1029，也不修改独立报告原文。父/叶事件、重复执行和模拟/真实结果不相加作为覆盖率；真实阻塞不藏在单测 skip=0 中。工作区全目录格式例外不能表述成所有工作区门禁全绿；源码和干净固定候选格式另行通过。
+
+工具版本均实际执行、退出 0：Go 1.27.4 darwin/arm64，Git 2.39.5 Apple Git-154，Python 3.9.6，Node 24.22.3，Chrome 157.0.8103.51，puppeteer-core 25.16.0，@puppeteer/browsers 3.2.6，Docker 29.8.2，Buildx 0.37.2，Compose 5.5.0，staticcheck 2026.2.2 (0.8.2)，govulncheck 1.9.0。未运行远端 CI，未声称验证 CI 固定的 Chrome156/Node24.14。
+
+OCI SHA-256：`7dedf6120eee7489a88d16af4ab7624efa13e4a4e6bc372648bb4c83880aabd0`。amd64 manifest 为 `sha256:605f354fce514223e73164fe9a53d1f90a837097db1f26db83a3a1b8a181c461`，arm64 为 `sha256:034271d91a06ad1d943bcf21b61f414e6d0df7938aadfdaf52de7baf07d8f820`。仅本地构建，不是 registry 或生产运行摘要。
+
+### 15.4 历史失败、重跑与证据完整性
+
+- 0.10.1 首次 UI gate 与 UI 并行，26 通过/1 失败/0 跳过，退出 1；隔离原样重跑 27/0/0、退出 0。第 13 节及原日志均保留。
+- 0.10.2 目录夹具最初缺登录后的 CAPABILITY，7 叶子通过/10 失败、退出 1；修正夹具后最终 18/0/0、退出 0。没有删断言，见第 14 节和原结果 JSON。
+- Gmail 本轮较早源码全包 race 于 20:35:30 启动，618/1/0、退出 1；失败为 `TestSyncResumesAfter700WithRealProtocolAndSQLite` 等待超时。20:42:11 隔离重跑 619/0/0、退出 0；随后增加网络代际修复后，20:49:05 最终源码重跑 628/0/0、退出 0。首次日志未覆盖；资源竞争仅为可能原因，不当成已证实根因。本节 21:11:59 的完整重跑再次覆盖固定候选。
+- 本轮 Outlook prepare 首次因服务商未标注 archive role 安全停止，退出 1，未执行邮件写入。官方网页可见“存档”，IMAP LIST 也返回同一精确目录；采用现有管理员映射后重做准备、退出 0。保留 `outlook-prepare.json/.log` 和 `outlook-prepare-mapped.json/.log`，不把失败改记为通过。
+- 证据采集还遇到旧表名 `tasks` 不存在、未认领浏览器标签、表单精确 label 未匹配，以及 Outlook 网页 TrustedTypePolicy 错误。前几项调整采集方式，无产品断言变更；网页错误仍列为真实对照阻塞。原独立材料的六项 SHA-256 见最终 JSON，提交前/交接时再次一致。
+
+### 15.5 本机 QA 及真实账号分栏结果
+
+21:10 发现 QA 后端 `127.0.0.1:18090` 已停止，HTTPS 代理仍在。21:17:49 在仓库外 0700 私有目录做一致 SQLite、配套 master.key 和旧二进制备份，然后用本轮构建恢复同一启动参数；readyz 返回 0.10.2/schema15。没有关闭 TLS 校验、改变网络策略、开启自动同步或访问远端部署。此为隔离 QA 恢复，不是生产部署。
+
+| 能力 | G-PERSONAL-01 | MS-PERSONAL-01 |
+| --- | --- | --- |
+| 应用、scope、回调 | 现有 Google 应用已保存；控制台 External/Testing、既有测试用户和 openid/email/mail scope 已核对，无重复注册 | 现有 consumers 应用和加密密钥保留；2028-11-15 到期 |
+| 官方账号授权 | 已创建仅四 QA 标签的 pending 配置、打开官方账号选择页；**等待用户本人登录/同意** | 原官方授权保留 connected；本轮重新授权已打开 Microsoft 官方账号选择页，**等待本人选择同一身份** |
+| IMAP / refresh / 同步 | **未执行**，没有真实 grant/连接/消息 ID 证据 | 本轮新 Manager 实际取得 refresh grant 后凭据、XOAUTH2、LIST/UIDPLUS/MOVE；首次及重复 `Service.Sync` 均 13 目录/130 条。非修改本地过期时间模拟；未记录原始 token 响应 |
+| 分类 / 归档 / Trash / 恢复 / 标记 | **未执行**；受限能力仍拒绝 | 仅七封合成夹具，8 个动作完成；额外一次 Trash/恢复也完成。每项重新同步核对目录和 Seen/Flagged，未知结果 0 |
+| 规则 / 保护 | **未执行** | 严格 QA 源 + `[MA-QA-574b047] ` 与 `-02` 主题条件；1 次手动规则 run，完成 2、保护 3、失败/unknown 0 |
+| 网页前后对照、人工保留 | **待验** | 网页确认 QA 目录和合成主题；逐动作网页对照被反复出现的 TrustedTypePolicy 加载错误阻塞；人工保留的真实夹具未验。不能用 IMAP 结果代替这些要求 |
+| 整体结论 | **真实账号验收待完成** | **部分真实链路通过，整体验收待完成** |
+
+Outlook 先前 19:58 的用户授权已将同步范围改为全部可读取文件夹。本轮开始时为 11 目录/123 条、旧 QA 目录与三封索引均已无，删除原因未确定；没有把历史 126 条当作当前实测。新官方标签确认目标账号后，在专用范围重新创建 `MailAuto-QA` / `MailAuto-QA-Target`，仅通过 IMAP APPEND 加七封带完整 QA 前缀、`.invalid` 地址的合成数据，不使用 SMTP、不外发、不打开私人正文或修改私人邮件。全目录同步继续读取用户已授权的元数据，不能把“私人正文读取 0”误解为“未读取任何私人邮件元数据”。
+
+受控规则 run：**`lpZvlyYYqJVtZPdhmTM6d2r8P2rjYsgR`**；任务 `yVda22OFVtvE59e41R6J6WRq`。扫描 5、完成 2；未读 M-UNREAD-02、旗标 M-STAR-02 和刚变更仍在 180 秒稳定窗口内的 M-FLAGS-02 各保护 1。保持 MaxBatch=20、未读/旗标保护=true、StableSeconds=180、无每日额度，没有为通过减少保护。真实操作 ID 示例：
+
+| 动作 | operation ID |
+| --- | --- |
+| 分类 M-MOVE-02 | `kNnvETSRZKHrA-05oDdxJbw0NBaUQCe-` |
+| 归档 M-ARCHIVE-02 | `yyxvGVhr-3ouqI0whzNjMS7EQjPd-8f4` |
+| Trash / 恢复 M-TRASH-02 | `apxUo2OAkU3jfVAYJTpYzWadujJht5Sv` / `ATeBREQYXfBlDZtF5qCWyVq3V89thekv` |
+| 标未读 / 已读 M-FLAGS-02 | `pfL6EFsuwfi67QwQ_1Z7RinMMOFcPigp` / `mc2UWrXtzuLkIp_MYNctvRKl4ZZPh5uX` |
+| 加 / 取消旗标 M-FLAGS-02 | `wJmbdljJA60RWESoTOg5Ohn2h1Bqc8JQ` / `f4rWqtr3ZSxgXEVERhy5D71jfaQfIbrR` |
+
+本轮总共 12 个真实 operation 全部 completed；其余两个规则 move 和额外 Trash/恢复 ID 也在最终 JSON 中。未制造 unknown、未注入假人工保留记录、未重放未知写入。21:36:41 已停用本轮 QA task/policy，并关闭原邮箱写入；保留合成夹具及记录待主代理核验，不清理邮件证据。全目录范围、自动同步关闭和网络保持原样。真实脚本逐阶段退出码、helper 起止时间及脱敏记录见最终 JSON 和 E 下 `outlook-*.json/.log`；时间明确为 helper 启动后采集，不伪称另有精确编译/启动器时间。临时准备/扫描脚本不入 Git 或镜像。
+
+最后另在真实管理页点击 Outlook 卡片“同步邮件”，页面确认 **130 封、13/13 文件夹完成**。此前 helper 直接调用 `Service.Sync` 的结果不更新 UI 持久 sync_job；此次实际 UI StartSync 另行核对，证据 `E/final-live-state.json`。没有点击全账号同步来使待授权 Gmail 进入失败。
+
+### 15.6 仍待完成、升级与后续责任
+
+1. **Gmail**：本人在已打开的 Google 官方页选择约定测试账号并同意。一次性请求十分钟过期；若失效，从同一本机管理会话的该 Gmail 卡片重新发起。之后仅专用 QA 标签/主题验真实回调、XOAUTH2/LIST/X-GM-EXT-1、字符串 X-GM-MSGID、首次/重复/增量同步、重启后真实 refresh、同身份重新授权、多标签保留无关标签、指定合成 INBOX 邮件归档、标记及受控规则/保护；不全选 INBOX。
+2. **Outlook**：本人在已打开的 Microsoft 官方“选择帐户”页选择原已绑定账号完成重新授权；之后再次真实诊断。恢复官方网页正常加载后，仅按 QA 主题补逐动作前后对照；人工保留保护须安全真实夹具，不能伪造待核验操作或直接写保护表代替。
+3. **组织账号**：Workspace / M365 继续未验证。Gmail 的安全拒绝边界保持不变，不能借真实验收擅自扩大支持范围。
+4. **升级/回退**：0.10.1→0.10.2 无新迁移；仍保留配套数据库/主密钥/私有应用文件。导入文件只只读挂载到运行容器，UID 65532、0400/0600、父目录受限，新 origin 先登记精确回调；不内置 secret。回退需停服务，移除旧程序不认识的部署文件参数；只回到包含 GO-IA-01～04 修复的候选。跨 schema14 回退仍恢复配套快照，不手改 user_version、不自动重放远端动作。
+5. **主代理复验**：读取固定源码 SHA/tree、33 文件清单、最终测试 JSON 和原始证据，独立复跑关键测试，核对两家真实缺项。源码提交后的材料提交不扩大代码验收范围。只有主代理独立代码及真实账号验收均通过后，由主代理执行发布流程。
+
+**代码实现、自测及本地候选固定已完成；两家个人账号真实整体验收尚未完成。等待主代理独立验收；尚未发布部署。**
