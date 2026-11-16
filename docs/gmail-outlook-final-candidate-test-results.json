@@ -1,4 +1,105 @@
 {
+  "service_qa_followup": {
+    "evidence_review_date": "2026-11-17",
+    "source_candidate": "8f8ee807eb457f065be912d4052096a774901a5a",
+    "source_tree": "424d02806fb88ba53db0f526ebfee0c106bfc229",
+    "material_base": "90e51a7d7a854b2509ed5aba11610175400361e2",
+    "version": "0.10.3",
+    "schema": 15,
+    "source_changes": false,
+    "commit_scope": "Only the handoff, real-account acceptance and this JSON; no version change, migration, credentials or .planning evidence staged",
+    "evidence_root": ".planning/service-qa-followup/",
+    "historical_records_policy": "All older records below retained unchanged; this section updates progress without replacing prior failures or asserting independent acceptance",
+    "runtime_gate": {
+      "evidence": ".planning/service-qa-followup/runtime-gate.json",
+      "status": "passed",
+      "checked_at": "2026-11-16T23:47:15.307650+08:00",
+      "old_pid_81359_stopped": true,
+      "single_candidate_worker": true,
+      "readonly_inspector_excluded_from_worker_count": true,
+      "queued_running_before_actions": 0,
+      "unknown_preserved": 3,
+      "writes_and_tasks_disabled": true,
+      "matching_private_database_key_backup": true,
+      "deviation": "SVC2 synthetic APPEND preparation occurred after readyz but before the complete formal runtime gate; no SVC2 operation was queued before that gate. Pre-restart empty queue was observed separately, not recorded in the initial restart log."
+    },
+    "unknown_operations": [
+      {"id": "DgF8upu533oF1a1Dx6UC-ryD1_BWQoy9", "source": "historical G-MULTI", "state": "needs_verification", "alias_busy": true},
+      {"id": "SFIfWNVqhfFe14-BIv3whu2QuPhzv2S0", "source": "historical G-EXISTING", "state": "needs_verification", "alias_busy": true},
+      {"id": "mzbhsq_R92TMz16la0UKlw_ELQbiolkr", "source": "new SVC1 G-MULTI", "state": "needs_verification", "alias_busy": true}
+    ],
+    "unknown_audit": {
+      "evidence": ".planning/service-qa-followup/gmail-v2-audit-final.json",
+      "stable_ids_present": true,
+      "frozen_plans_unchanged": true,
+      "replayed_cancelled_or_deleted": false,
+      "earlier_failed_records_preserved": ["gmail-actions.json", "gmail-audit.json", "gmail-v2-audit.json"],
+      "interpretation": "Final Service alias busy checks passed; none of the unknown writes was resolved or replayed"
+    },
+    "gmail_service_actions": {
+      "evidence": ".planning/service-qa-followup/gmail-v2-actions.json",
+      "started_at": "2026-11-16T23:47:15+08:00",
+      "ended_at": "2026-11-16T23:47:53+08:00",
+      "new_synthetic_identity_prefix": "[MA-QA-8f8ee80-SVC2]",
+      "path": "Service NewPlan/ExecutePlan with the single candidate background Worker, not direct Adapter",
+      "operations": [
+        {"id": "Siazgff3sgG4RbiuzRXxkLEqhfv_vkOW", "suffix": "G-MULTI", "state": "completed", "undo_safely_rejected": true},
+        {"id": "8MnX60D-IlqRRZ-xxGyc4oXNzOT1f6zp", "suffix": "G-EXISTING", "state": "completed", "target_existed_before": true, "undo_safely_rejected": true}
+      ],
+      "unrelated_labels_preserved": true,
+      "private_message_mutations": 0,
+      "smtp_or_outbound": 0,
+      "writes_disabled_after": true
+    },
+    "gmail_rules": {
+      "evidence": ".planning/service-qa-followup/gmail-v2-rules.json",
+      "run_id": "ZqhwkvGwcNlpUFwzCMie1oFPDPcPlGIt",
+      "task_id": "ek4u5EDQODs3QTyitPIdgYDw",
+      "operation_id": "NiDo0OV9zjaJly738LVvCuhfDj5klM7u",
+      "operation_state": "completed",
+      "scanned_label_entries": 28,
+      "claimed_logical_messages": 1,
+      "completed": 1,
+      "protected_aggregate": 7,
+      "failed": 0,
+      "unknown": 0,
+      "ordered_rule_and_logical_dedup_verified": true,
+      "per_message_protection_reasons": "not persisted; do not infer a breakdown from the aggregate",
+      "task_policy_and_writes_disabled_after": true
+    },
+    "runner_failures": [
+      {"exit_code": 1, "log": ".planning/service-qa-followup/gates-run.log", "reason": "race completed, then relative evidence path relative_to absolute ROOT raised ValueError; recorder failure, not test assertion failure"},
+      {"exit_code": 1, "log": ".planning/service-qa-followup/gates-run-retry.log", "reason": "existing race.log rejected by no-overwrite guard; no evidence overwritten"}
+    ],
+    "remaining_runner": {"exit_code": 0, "evidence": ".planning/service-qa-followup/remaining-gates.json", "exit_evidence": ".planning/service-qa-followup/remaining-gates-run.exit", "details": "Authoritative per-command actual argv, environment, start/end time, exit code and counts; absolute evidence path used, full runner not rerun"},
+    "gates": [
+      {"name": "race", "argv": ["go", "test", "-race", "-count=1", "-json", "./..."], "exit_code": 0, "pass": 639, "fail": 0, "skip": 0, "all_test_events": 707, "evidence": ".planning/service-qa-followup/race.json"},
+      {"name": "second-race-log", "pass": 639, "fail": 0, "skip": 0, "all_test_events": 707, "package_failures": 0, "child_exit_code": null, "runner_exit_code": 1, "evidence": ".planning/service-qa-followup/gates/race.log", "note": "Completed JSONL independently recounted; recorder failed afterward, no standalone child exit file; not counted as successful runner"},
+      {"name": "targeted-gmail", "exit_code": 0, "pass": 18, "fail": 0, "skip": 0, "all_test_events": 20, "evidence": ".planning/service-qa-followup/targeted-gmail.jsonl", "exit_evidence": ".planning/service-qa-followup/targeted-gmail.exit", "top_level_tests": ["TestGmailPersistentPendingFence", "TestGmailPersistentAutomationClaim", "TestGmailClaimAIAfterSourceRemoved", "TestGmailMoveUndoFailsClosed", "TestGmailLogicalPlansAndConcurrency", "TestGmailRestrictedActionsAndFlags", "TestGmailFolderRolesAndStaleProbe", "TestGmailManualProtectionAcrossViewsWithoutRFCIdentity", "TestGmailMultiSourceRuleOrderAndProtection", "TestGmailUnknownWithoutMappingUsesStableIdentityEvidence"]},
+      {"name": "independent", "exit_code": 0, "pass": 4, "fail": 0, "skip": 0, "evidence": ".planning/service-qa-followup/gates/independent.json"},
+      {"name": "ui", "exit_code": 0, "pass": 1032, "fail": 0, "skip": 0, "combinations": 18, "widths": [1280, 375, 390], "page_errors": 0, "evidence": ".planning/service-qa-followup/gates/ui.json"},
+      {"name": "ui-gate", "exit_code": 0, "pass": 27, "fail": 0, "skip": 0, "evidence": ".planning/service-qa-followup/gates/ui-gate.json"},
+      {"name": "release", "exit_code": 0, "pass": 46, "fail": 0, "skip": 0, "evidence": ".planning/service-qa-followup/gates/release.json"},
+      {"names": ["vet", "source-format", "staticcheck", "govulncheck", "compose", "compose-example", "build", "binary-version", "linux-amd64", "linux-arm64", "diff"], "each_exit_code": 0, "counts": null, "evidence": ".planning/service-qa-followup/remaining-gates.json"},
+      {"name": "format-all", "command_exit_code": 0, "empty_output_assertion_exit_code": 1, "unformatted_existing_temporary_files": 4, "modified_those_files": false, "evidence": ".planning/service-qa-followup/format-all.json"},
+      {"name": "multiarch-oci", "rerun_in_this_followup": false, "inherited_exit_code": 0, "evidence": ".planning/oauth-consent-followup/gates/multiarch.json", "note": "Prior same-source candidate evidence only; current cross compilation is not an OCI build"}
+    ],
+    "count_basis": "Leaf Go tests only; parent tests not added. Current 639 is independently recounted, not a sum of runs. Older 618 pass/1 fail, isolated 619 and final 628 in .planning/gmail-audit-candidate/race*.log are historical 0.10.2 results retained below, not this candidate. Earlier 604 likewise belongs to its recorded candidate. Real acceptance pending items are not test skips.",
+    "tool_versions_evidence": ".planning/service-qa-followup/versions.json",
+    "tool_versions": {"go": "1.27.4", "node": "24.22.3", "python": "3.9.6", "git": "2.39.5 Apple Git-154", "chrome": "157.0.8103.51", "docker": "29.8.2", "compose": "5.5.0", "buildx": "0.37.2", "staticcheck": "0.8.2", "govulncheck": "1.9.0", "puppeteer_core": "25.16.0", "puppeteer_browsers": "3.2.6"},
+    "incomplete": [
+      "Gmail official web search disagreed with SVC2 prefix/local index; no per-action official web comparison passed",
+      "Three unknown writes remain needs_verification; no automatic replay or deletion",
+      "Gmail real manual-keep and complete archive/restart/same-identity reauthorization acceptance not completed in this followup",
+      "Outlook same-identity reauthorization, web comparisons after TrustedTypePolicy failure and real manual-keep remain incomplete",
+      "Google Workspace and Microsoft 365 unverified; existing unsupported Gmail actions remain rejected"
+    ],
+    "next_owner": "Main agent independently verifies source/material boundaries, original failures and final evidence, reruns counterexamples and key tests; user checks only dedicated SVC2 QA labels in official Gmail UI. Do not operate private mail or replay unknown writes.",
+    "status": "等待主代理独立验收；尚未发布部署",
+    "pushed": false,
+    "published": false,
+    "deployed": false
+  },
   "generated_at": "2026-11-16T21:44:41.036382+08:00",
   "timezone": "Asia/Shanghai",
   "status": "0.10.3 candidate fixed locally; real-account acceptance incomplete; waiting for independent reacceptance; not published or deployed",

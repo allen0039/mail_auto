@@ -218,6 +218,27 @@ Gmail 官方回调于 22:14:22(+08) 成功，G-PERSONAL-01 为 connected/generat
 
 Outlook 本轮补充未读/已读、Trash/恢复四项 completed；恢复后的官方网页仍有 TrustedTypePolicy 错误，不能算恢复后网页对照通过。完整门禁 race 639/0/0、independent 4/0/0、UI 1032/0/0、UI gate 27/0/0、release 46/0/0，其余检查和双架构构建均退出0。候选已固定为提交 `8f8ee807eb457f065be912d4052096a774901a5a`、tree `424d02806fb88ba53db0f526ebfee0c106bfc229`。证据位于 `.planning/oauth-consent-followup/` 和 `gates/`。**Gmail 与 Outlook 真实整体验收仍未完成；等待主代理独立验收；尚未发布部署。**
 
+### 8.6 Service QA 返工补证（2026-11-16夜至11-17）
+
+本节增量更新，不覆盖8.3–8.5的历史失败。源码仍为 `8f8ee807eb457f065be912d4052096a774901a5a`、0.10.3/schema15，仅材料变更。证据根目录 E=`.planning/service-qa-followup/`，全部门禁、版本和偏差见交接15.9及最终JSON `service_qa_followup`。
+
+23:47:15 `runtime-gate.json` 确认旧PID81359停止，配套数据库/密钥已私有一致备份，单一候选Worker、queued/running=0、unknown=3、写入/任务关闭。只读检查器不是第二个Worker。SVC2合成APPEND早于完整正式gate、晚于readyz，操作入队晚于完整gate；不隐藏准备时序偏差。
+
+| 专用真实操作 | operation / run ID | 结果 |
+| --- | --- | --- |
+| 历史G-MULTI unknown | `DgF8upu533oF1a1Dx6UC-ryD1_BWQoy9` | needs_verification，其他标签执行busy |
+| 历史G-EXISTING unknown | `SFIfWNVqhfFe14-BIv3whu2QuPhzv2S0` | needs_verification，其他标签执行busy |
+| 本轮SVC1 G-MULTI | `mzbhsq_R92TMz16la0UKlw_ELQbiolkr` | 新增needs_verification，其他标签执行busy |
+| 新身份SVC2 G-MULTI分类 | `Siazgff3sgG4RbiuzRXxkLEqhfv_vkOW` | Service路径completed；源QA-A移除，QA-B/Other及目标保留；撤销安全拒绝 |
+| 新身份SVC2 G-EXISTING分类 | `8MnX60D-IlqRRZ-xxGyc4oXNzOT1f6zp` | Service路径completed；原有目标及Other保留；撤销安全拒绝 |
+| 多源规则run / operation | `ZqhwkvGwcNlpUFwzCMie1oFPDPcPlGIt` / `NiDo0OV9zjaJly738LVvCuhfDj5klM7u` | completed；扫描28标签条目、领取完成1逻辑邮件、保护汇总7、失败/unknown0 |
+
+三条unknown不是全为新增；最终 `gmail-v2-audit-final.json` 三项alias_busy=true，稳定ID及冻结计划保持，不取消、不清除、不重放。早期audit失败记录保留，最终审计通过不代表结案。规则保护7无逐封原因持久证据，不臆造未读/星标/人工保留明细。阶段后writes_enabled=false，task/policy关闭，最终queued/running=0、三unknown保留；仅四个专用QA标签/合成邮件写入，私人邮件修改0、外发0。
+
+本轮门禁：race639/0/0、Gmail定向18/0/0、原overlay4/0/0、UI1032/0/0（18组合三宽度）、UI gate27/0/0、release46/0/0，其余静态检查/源码格式/Compose/构建/双架构编译/diff退出0。首次runner在race后记录路径异常退出1，原样重跑因已有证据退出1，余下门禁另行执行退出0；不把记录器失败隐藏。全仓格式命令0但空输出断言1，4个既有临时文件未格式化。639为当前候选叶子统计，旧619/628等来自更早候选日志，不累加、不覆盖。本轮未重跑OCI构建，引用15.8既有候选证据。
+
+**未完成**：Gmail网页搜索与SVC2前缀/索引不一致，逐动作官方网页对照未通过；三个unknown未结案、真实人工保留及完整归档/重启和同身份重授权验收未补齐。Outlook同身份重授权、TrustedTypePolicy故障后网页对照和真实人工保留待验；Workspace/M365未验证。请本人仅核对官方网页专用SVC2 QA邮件标签；主代理独立复验原始证据及关键测试，不能以Service/IMAP成功冒充整体验收。**等待主代理独立验收；尚未发布部署。**
+
 ### 8.4 授权返回失败的独立核对与 Outlook 网页恢复
 
 2026-11-16 晚间收到 Gmail 权限错误截图后，核对 Google 官方请求确实含 `openid email https://mail.google.com/`、offline、PKCE S256 和本机精确回调。21:59:07 浏览器历史留下 `oauth_scope_missing`，G-PERSONAL-01 仍 pending/generation1，无主体和 refresh。Google 账号的关联应用详情仅显示 Mail Auto Personal QA 获准 Google 登录/个人资料，未列 Gmail 数据访问。这是当前缺邮件授权的直接官方页面证据；没有保存原始 token 响应，不能声称已知其精确 scope 字符串，也未复现 scope 规范化误判。

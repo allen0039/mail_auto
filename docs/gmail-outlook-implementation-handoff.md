@@ -577,6 +577,50 @@ Gmail `G-FLAGS` 的未读、已读、加旗标、取消旗标四项均 completed
 
 源码候选增量版本为 `0.10.3`、schema15，候选提交 `8f8ee807eb457f065be912d4052096a774901a5a`，tree `424d02806fb88ba53db0f526ebfee0c106bfc229`。完整门禁退出 0：race 639/0/0、independent 4/0/0、UI 1032/0/0（18 组合，1280/375/390，页面错误0）、UI gate 27/0/0、release 46/0/0，vet/staticcheck/govulncheck/Compose/构建/amd64/arm64/双架构 OCI 均通过。证据 `.planning/oauth-consent-followup/gates/`；真实和修复证据 `.planning/oauth-consent-followup/`。候选已在本地固定提交；未推送、未发布、未部署，原失败和待核验记录保留；等待主代理独立验收。
 
+### 15.9 Service QA 返工补证（2026-11-16 夜至 11-17）
+
+本节更新进度，不删除15.5–15.8的历史失败。此前只回答默认同步问题，没有完成八项返工，不计为执行完成。本轮没有产品源码变更，源码候选仍为 `8f8ee807eb457f065be912d4052096a774901a5a`、tree `424d02806fb88ba53db0f526ebfee0c106bfc229`、0.10.3/schema15；材料基线 HEAD 为 `90e51a7d7a854b2509ed5aba11610175400361e2`。仅提交本报告、真实验收报告和最终测试JSON，不升版本、不新增迁移，不纳入未跟踪文件或独立验收报告。
+
+证据根目录 E=`.planning/service-qa-followup/`。23:47:15 `runtime-gate.json` 通过：旧PID81359停止，数据库及配套密钥一致私有备份；候选二进制摘要匹配构建结果，构建revision为材料HEAD；readyz=0.10.3/schema15，单一候选Worker，queued/running=0，unknown=3，任务和写入关闭。lsof第二个PID是只读检查器，不是另一Worker。**时序偏差**：SVC2合成APPEND准备在readyz之后、完整正式gate之前；操作入队在正式gate之后。重启前队列为空有独立只读检查，但初始重启日志未记录该字段，不补造证明。
+
+| 未知操作来源 | operation ID | 最终状态 / 其他标签别名执行 |
+| --- | --- | --- |
+| 历史G-MULTI | `DgF8upu533oF1a1Dx6UC-ryD1_BWQoy9` | needs_verification / busy |
+| 历史G-EXISTING | `SFIfWNVqhfFe14-BIv3whu2QuPhzv2S0` | needs_verification / busy |
+| 本轮SVC1 G-MULTI | `mzbhsq_R92TMz16la0UKlw_ELQbiolkr` | needs_verification / busy |
+
+三条unknown不是全部本轮新增。SVC1首次Service分类仍失败/待核验（`gmail-actions.json`），没有掩盖。早期 `gmail-audit.json`、`gmail-v2-audit.json` 的failed_or_blocked记录保留；最终 `gmail-v2-audit-final.json` 三项稳定ID存在、alias_busy=true、冻结计划摘要不变。最终审计使用Service计划/执行别名检查；通过不等于未知操作已结案。不取消、不清除、不重放未知写入。
+
+SVC2使用全新合成身份，23:47:15–23:47:53 经NewPlan/ExecutePlan和唯一后台Worker完成两项分类：G-MULTI operation `Siazgff3sgG4RbiuzRXxkLEqhfv_vkOW`、原目标标签已存在的G-EXISTING operation `8MnX60D-IlqRRZ-xxGyc4oXNzOT1f6zp` 均completed；源QA-A移除，目标及无关标签保留，UndoPlan均安全拒绝。见 `gmail-v2-actions.json`；这是Service路径，不是历史G-INCREMENT直接Adapter路径。
+
+23:48:10–23:48:38 多源规则run `ZqhwkvGwcNlpUFwzCMie1oFPDPcPlGIt`、task `ek4u5EDQODs3QTyitPIdgYDw`：扫描28标签条目、领取并完成1逻辑邮件、保护汇总7、failed/unknown=0；operation `NiDo0OV9zjaJly738LVvCuhfDj5klM7u` completed，QA-B及无关标签保留，规则顺序和逻辑去重检查通过。没有逐封保护原因持久记录，不能分摊保护7为未读/星标/人工保留各几封。见 `gmail-v2-rules.json`。阶段后writes_enabled=false，task/policy停用，queued/running=0，三个unknown保留。写入仅专用合成邮件，私人邮件修改及SMTP/外发0。
+
+#### 15.9.1 门禁结果与记录器故障
+
+首次gate runner在race测试完成后，以相对路径调用 `relative_to(绝对ROOT)` 抛ValueError，runner退出1；原样重跑因race.log已存在被防覆盖检查拒绝，runner再次退出1。两次都不是产品测试断言失败，也不是完整门禁通过。保留 `gates-run.log/.exit`、`gates-run-retry.log/.exit`。随后 `run_remaining_gates.py` 使用绝对evidence路径执行余下检查，退出0；逐命令argv、环境、起止时间、退出码、计数见 `remaining-gates.json`。
+
+| 实际门禁 | 退出码；通过/失败/跳过 | 本轮证据 |
+| --- | --- | --- |
+| `go test -race -count=1 -json ./...` | 0；639/0/0叶子测试（含父事件707，不累加） | `race.json`、`race.log` |
+| 第二次全量race | 日志639/0/0，无包失败；完成后记录器退出1，无独立子进程退出码文件 | `gates/race.log`；不冒称runner成功 |
+| Gmail定向race | 0；18/0/0（含父事件20） | `targeted-gmail.jsonl`、`targeted-gmail.exit`；实际Test集合见final JSON |
+| 原independent overlay race | 0；4/0/0 | `gates/independent.json/.log` |
+| UI六脚本、1280/375/390 | 0；1032/0/0，18组合、page error0 | `gates/ui.json/.log` |
+| Node UI默认门禁 | 0；27/0/0 | `gates/ui-gate.json/.log` |
+| release fixture unittest | 0；46/0/0 | `gates/release.json/.log` |
+| vet/staticcheck/govulncheck、源码格式、两套Compose、make build/version、linux amd64/arm64编译、diff | 各0，计数不适用 | `remaining-gates.json`及`gates/*.json/.log` |
+| `gofmt -l .` | 命令0，空输出断言1；4个既有临时文件未格式化，未擅改 | `format-all.json/.log`；cmd/internal/scripts源码格式空输出通过 |
+
+工具版本 `versions.json`：Go1.27.4、Node24.22.3、Python3.9.6、Git2.39.5、Chrome157.0.8103.51、Docker29.8.2、Compose5.5.0、buildx0.37.2、staticcheck0.8.2、govulncheck1.9.0、puppeteer-core25.16.0。本轮没有重跑双架构OCI构建，仅引用15.8节 `.planning/oauth-consent-followup/gates/multiarch.json` 的既有源码候选结果，不将交叉编译冒充镜像构建。
+
+639为0.10.3本轮独立叶子统计，与15.8一致；旧final JSON的618通过/1失败、619通过隔离重跑、628通过最终重跑来自较早0.10.2的 `.planning/gmail-audit-candidate/race*.log`，不是当前候选结果，不累加。更早604等同样按各自候选和日志解读。所有历史统计和失败保留，本轮另列 `service_qa_followup`。
+
+#### 15.9.2 未完成项与主代理下一步
+
+Gmail Chrome搜索结果与SVC2前缀/本地索引不一致，尚无逐动作官方网页对照，不能以Service/IMAP completed替代。三个unknown未结案；真实人工保留、完整归档/重启及同身份重授权验收尚未补齐。Gmail Trash/恢复等不支持边界不变。Outlook同身份重授权、TrustedTypePolicy故障后的网页动作对照、真实人工保留仍待验；组织账号未验证。
+
+主代理应核对源码SHA/tree和仅材料差异，读取原失败与最终证据，独立复跑原反例、Gmail定向与关键门禁，只读核对三个unknown及跨标签互斥，禁止重复写入。请本人仅在官方网页按完整SVC2 QA前缀核对专用邮件标签，不操作私人邮件、不提供凭据。真实缺项及独立复验完成前不进入发布流程。**等待主代理独立验收；尚未发布部署。**
+
 ### 15.7 本人授权返回后的权限核查（2026-11-16 晚间补充）
 
 收到用户“两个账号已授权”及 Gmail 缺少 IMAP 权限截图后，重新只读核对真实绑定状态、官方请求、回调结果和 Google 已关联应用权限，没有将口头确认替代成功绑定：
