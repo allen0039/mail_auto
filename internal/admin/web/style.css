@@ -951,7 +951,6 @@ input[type="checkbox"]:focus-visible {
   gap: 10px;
   overflow-wrap: anywhere;
 }
-
 .automatic-status {
   background-color: rgba(255, 255, 255, 0.7);
   border: 1px solid var(--border-main);
