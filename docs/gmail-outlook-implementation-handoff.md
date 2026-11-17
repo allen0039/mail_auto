@@ -779,3 +779,79 @@ Google Workspace/Microsoft365组织账号仍未验证。两服务商历史成功
 **USER-ACTION-REQUIRED**：本人仅需在其正在使用的Chrome打开Outlook官方页面、进入原绑定账号现有 `MailAuto-QA` 目录；如需登录自行完成。不要在聊天发送密码/token/secret，不要求再次盲目重新授权。AppleScript JS关闭不擅改；网页证据无法补齐时由主代理决定后续最小协作方式，不能无限重试或用独立profile绕开用户要求。
 
 主代理复验：核对docs-only材料与源码候选分离、机器索引实际日志/hash；重跑定向正式回归及隔离拒绝overlay；独立读取实时库核对六个允许诊断时间单元格以外所有业务列/旧unknown/冻结hash和唯一QA实例；必要时另用新Manager只读诊断。随后补本人现有Chrome网页QA对照、剩余真实矩阵及人工保留决策。仍是**等待主代理独立验收；尚未发布部署**，不得以本轮只读/模拟补证宣布整体通过。
+
+## 18. FR-06正式TCP/后台Worker组合回归返工（2026-11-17）
+
+### 18.1 固定候选及运行时边界
+
+主代理部分接受94c1325补证后，明确退回“只有设计、未实现组合夹具”的FR-06。本轮基线 `94c13253b88d1d42aa9738c36a136f95dbd8b300`；正式测试候选 `5fbbd81b70e32c5e46778f6c375fcebe24c467ee`，仅新增 `internal/imap/manual_resolution_e2e_test.go` 并在CHANGELOG既有0.10.4段补充测试说明。相对运行时产品候选 `ac29317395f21cf12a9b006e2adc2f4eec3eea60`，cmd/internal/scripts/go.mod/go.sum差异仅此 `_test.go`；逐文件另验证所有非测试运行时文件与ac29317相同。
+
+**版本仍为0.10.4/schema15**：这是默认门禁测试新增，不改变二进制运行能力、UI、OAuth、迁移或网络策略，不虚构新补丁版本。按本次明确要求保留版本一致并更新CHANGELOG；若后来涉及运行时代码，必须另固定候选、同步版本与完整门禁，不能沿用本轮test-only结论。
+
+### 18.2 真实组合了哪些组件
+
+- 每个夹具全新 `t.TempDir()` 的SQLite/Vault与纯合成普通IMAP账号；不复制真实数据/凭据，不访问现有QA数据库、三条旧unknown、真实供应商或浏览器。测试账号走非Gmail共用人工保留链路，不是个人Outlook OAuth或供应商真实测试。
+- `127.0.0.1:0` 真TCP监听及状态服务器；复用Adapter既有connect测试缝，仅将拨号/认证接到本地合成服务器，不伪造 `DuplicateEvidence` 或替换Service逻辑。测试传输为隔离loopback明文，不声称验证了生产TLS/OAuth。生产 `Scan`/`Move`/`VerifyDuplicate`/元数据和PEEK解析全部实际执行。
+- 正式 `Service.Create/Sync/SaveFolderSettings/NewPlan/ExecutePlan/StartOperations`：唯一后台Worker实际发出一次UID COPY，服务器保留源并确定性省略COPYUID或接受COPY后断开最终确认；操作经真实协议错误变为 `needs_verification/remote_state_unknown`。不直接调用runOperation，不SQL造unknown；第二次StartOperations明确必须ErrBusy。
+- 原Worker正常停止后用新的Service实例正式Sync索引目标，避免测试期间后台自动核验与受控确认竞态。正式 `PreviewManualKeep/ResolveManualKeep` 在真实适配器内EXAMINE、UID SEARCH、完整BODY.PEEK[]、冻结身份/flags/UIDVALIDITY复核。成功路径强断言预览和确认各读取两份完整原文、源/目标SHA与大小正确，没有SELECT写目录或额外COPY/MOVE/STORE/EXPUNGE。
+
+默认 `go test` 可发现5个顶层、12个叶子场景，无build tag、环境变量或私有overlay依赖：
+
+| 正式测试 | 强断言 |
+| --- | --- |
+| `TestManualKeepTCPWorkerDurableProtection`（缺映射/确认丢失） | 实际COPY仅1次、missing COPYUID保持0；manual_kept、两条永久保护及一条审计/完整原unknown证据原子落库；冻结计划SHA不变；预备move计划执行被拒绝，重复确认不发任何远端请求。真正关闭/重开DB与Vault后，模拟服务器改变两目录UIDVALIDITY/UID，正式Sync生成新ref，原保护仍拒绝整理；两个任务预览及再次ClaimAI均保护两份。 |
+| `TestManualKeepTCPRejectsChangedEvidence`（7项） | 相同长度内容变化、flags变化、UIDVALIDITY变化、两份完整PEEK后再变flags、预览过期、同直连出口下网络策略快照变化均ErrConflict；事务在已写两保护后由临时测试trigger确定性失败，确认无保护/结案/审计残留；原unknown和计划不变。 |
+| `TestManualKeepTCPConcurrentConfirm` | 两个独立Service共享临时DB，通过真实BODY.PEEK TCP屏障保证两者都已进入远端读取后才释放；并发确认都成功，但仅一个结案/审计、两个保护，没有重放。 |
+| `TestManualKeepTCPQueuedDuringConfirm` | 确认已进入完整PEEK时，另一个Service执行预备计划排队；最终提交必须ErrBusy、原unknown及零结案/保护不变；该额外队列无Worker执行，COPY仍只有初始1次。 |
+| `TestManualKeepTCPCrossTaskClaimConflict` | 外部任务正式领取确切目标；第二个同账号任务RunTask必须busy；存在外国领取时人工保留必须busy。正式CancelTaskRun释放该领取后才能结案；随后另一个任务的正式run/claim无法重新领取两份。 |
+
+### 18.3 红色有效性证明、失败保留及最终门禁
+
+不是仅编写“永远通过”的模拟断言。三个私有临时mutation overlay仅用于证明新正式测试能杀死具体回归；真实产品文件未改：
+
+1. 绕过完整原文SHA比较，元数据/大小保持相同的content负例实际失败：`changed protocol evidence or failed atomic commit accepted content`。
+2. 绕过UIDVALIDITY一致检查，epoch负例实际失败：`... accepted epoch`。
+3. 绕过持久人工保留检查，预备计划实际错误进入队列，测试失败：`prepared write bypassed permanent block <nil>`。
+
+三次退出码均1且各1叶子失败，无编译错误；不能把它们记为普通通过或隐藏。正式原实现测试保持全部断言；固定候选上再次重跑红色证明后再跑绿色/全量。overlay不进入Git，正式 `_test.go` 默认执行。
+
+初次夹具为9通过/1失败，原因是错误假定可同时创建第二个同账号run，实际被现有账号互斥返回busy。保留 `targeted-first`；改为明确断言该拒绝，再证明释放领取/人工保留后另一任务仍被永久保护。其后11/0/0绿测；增加网络快照及更严格原error/映射/四次完整PEEK断言后12/0/0。这些开发运行不与最终候选计数相加，未删除或弱化安全断言。
+
+最终固定测试候选的实际命令、退出码、工具版本、计数和证据SHA256见 `docs/gmail-outlook-fr06-e2e-test-results.json`；原日志在 `.planning/fr06-e2e/`。所有全量/静态结果必须来自5fbbd81固定候选，不引用ac29317旧门禁冒称新结果。没有运行时/UI/发布配置变更，故不重复UI/Compose/镜像门禁，也不把旧记录包装成本轮执行。此前全仓临时文件格式断言失败仍保留；本轮只检查适用源码目录及新文件。
+
+固定候选 runner 于12:22:41–12:29:07(+08)实际执行，汇总退出0；全量race于12:28:45退出0。各次测试不累加为独立场景总数：
+
+| 本协作者实际命令 | 退出码 / 实际计数 | 脱敏证据 |
+| --- | --- | --- |
+| `go test -list '^TestManualKeepTCP' ./internal/imap` | 0；默认发现5个顶层测试 | `candidate-discovery.log` |
+| `go test -json -race -count=1 ./internal/imap -run '^TestManualKeepTCP'` | 0；12通过、0失败、0跳过 | `candidate-targeted.jsonl` |
+| `go test -json -race -count=5 ./internal/imap -run '^TestManualKeepTCP(ConcurrentConfirm\|QueuedDuringConfirm)$'` | 0；2场景×5次＝10次通过事件、0失败/跳过，不是10个独立场景 | `candidate-concurrency-repeat.jsonl` |
+| `go test -json -race -count=1 ./...` | 0；654叶子通过、0失败、0跳过，包含新增12叶子 | `candidate-race.jsonl` |
+| 原独立验收overlay的 `go test -json -race -count=1 ./internal/mail -run '^TestIndependent'` | 0；4通过、0失败、0跳过；精确overlay参数见JSON | `candidate-independent.jsonl` |
+| content / epoch / block三条mutation overlay命令 | 各1；各0通过、1真实断言失败、0跳过；符合预期红色证明，不记为绿色测试 | `candidate-red-*.jsonl/.stderr` |
+| `go vet ./...`、`gofmt -l cmd internal scripts`及空输出断言、`go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...` | 各0；测试计数不适用 | 对应 `candidate-*.log/.exit` |
+| `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`、`go build ./...`、`git diff HEAD^ HEAD --check` | 各0；计数不适用。govulncheck：调用代码受影响0，另有2条导入包/1条依赖模块未调用告警，非“全部依赖无漏洞” | 对应 `candidate-*.log/.exit` |
+
+工具实测：Go1.27.4 darwin/arm64、Git2.39.5(Apple Git-154)、Python3.9.6、staticcheck2026.2.2(0.8.2)、govulncheck1.9.0；漏洞数据库更新时间2026-11-11T02:51:11Z。135个非测试运行时文件与ac29317逐字相同，manifest SHA256为 `cab64c15b041cb040b44a1d2a1b76bba029f168a60b85f406727c77f0c139274`；测试文件SHA256为 `11d7bb515e4094d8d7c4db37e5c5155dff9b2730d419a8438221bcab29c04492`。
+
+**主代理独立预检，单独归属**：主代理已执行 `go test -race -count=3 -json ./internal/imap -run '^TestManualKeepTCP'`，12独立叶子场景×3轮＝36次通过事件、0失败/跳过，并独立确认三个mutation各退出1且是预期断言失败。证据在 `.planning/root-final-remediation/`；不计为协作者自测，也不把36次事件说成36独立场景。这不替代主代理最后材料审计和独立验收结论。
+
+### 18.3.1 最终实时只读复核发现外部授权变化，未伪装通过
+
+门禁结束后另以mode=ro/query_only读取现有QA，仅用于终态安全对照；隔离测试从未使用现有QA库。严格 `safety.py` 实际退出1，原因是原11:23配套备份中Google generation=3，当前为4，scope字符串顺序也变化（scope集合一致）。保留 `final-safety.log/.exit`，不放宽旧断言重跑成绿，不推定该授权变化由谁引起，也不认作离线测试结果。
+
+12:35:53(+08)另行只读采样 `safety-followup.py` 退出0表示**采样成功而非原不变性门禁通过**，状态明确为 `requires_main_agent_review`。唯一QA PID85404及二进制SHA保持原值，ready为0.10.4/schema15；24 completed/3 needs_verification，queued/running=0；写入、任务、策略、自动同步、MCP关闭。三条unknown业务字段、稳定身份及冻结计划SHA完全不变；账号主体/tenant摘要、文件夹、应用版本、connected状态及scope集合相同。
+
+63表结构/主键审计中59表原样，差异限于：audits新增1行；mail_oauth_accounts的generation/refresh/scope列；既有Worker的operations.updated_at与operation_items.checked_at。完整差异仅记录列名、行键摘要和计数，不输出凭据。**新增授权代际及审计来源待主代理核对**，不声称全库或授权未变；原三条unknown不取消、不删除、不重放、不结案。证据 `final-safety-followup.json/.log/.exit` 与首次失败一并列入材料JSON。本协作者未写活动库、调用供应商或新增活动Worker。
+
+主代理随后报告12:36:11独立mode=ro事务快照：Google为gen4/config2/connected，provider+subject+tenant摘要未变，scope集合仍Gmail IMAP+openid+userinfo.email；Microsoft gen5/config1、原身份/scope不变。12:18:20存在 `mail.oauth.authorized/connected` 审计，与一次成功重授权及代际变化一致，**不能由此确认发起者，也不归因离线测试**。主代理另核对24completed/3unknown与关闭的写入/任务；此独立当前快照与历史不变门禁分栏保留，不将scope排序当权限变化，不声称generation未变。无需为了恢复旧断言回滚或重新授权；最后材料审计仍待主代理执行。
+
+材料生成 `python3 .planning/fr06-e2e/collect.py` 退出0；材料预校验 `python3 .planning/fr06-e2e/validate.py --preflight` 退出0，按Package+Test重新统计实际叶子/重复事件，核对全部证据SHA、红色断言、135个运行时文件、主代理独立日志及保留的实时不变性失败；日志 `collect.log/.exit`、`validation-preflight.log/.exit`。校验脚本SHA256为 `4d2f5651f737af67c8060b25c0d6987a4eb74022a1f8dd09291d3ceafee433e6`。暂存后同脚本无preflight模式核验退出0，确认仅三份脱敏材料、暂存内容与工作区一致及新增行凭据模式/差异检查，证据 `validation-staged.log/.exit`。结果与本地材料提交SHA另在最终交接给出，不预称独立验收通过。
+
+### 18.4 未完成项与独立复验
+
+本轮补齐的是**可默认执行的组合模拟回归**；个人Outlook真实unknown人工保留、现有Chrome网页对照、Gmail剩余网页逐动作证据及三条旧unknown可信结案仍未完成，组织账号仍未验证。没有真实邮件写入/同步/任务或更换运行实例；只有18.3.1明确区分的QA只读安全采样，没有要求本人重新登录或打开新浏览器。Google授权代际变化另列待主代理追溯，不以离线门禁通过掩盖。
+
+**网页人工替代路径，不必开启全局Apple事件JavaScript**：本人在现有Chrome进入原账号现有Outlook `MailAuto-QA` 目录，提供裁剪至专用QA目录的文件夹名称/数量截图；仅选择已读合成测试邮件，展开单封详情或邮件源，核对精确测试主题、Message-ID及所在目录，以截图/脱敏摘要交主代理。Gmail也只核对已读QA单封详情/原始头和单封标签，不以会话标题/标签并集替代；未读保护样本不打开，保留IMAP只读证据。截图遮盖账号地址、私人列表、正文及任何授权参数，不上传完整原始邮件或凭据。只补当前状态不冒称历史动作前后对照，缺历史证据保留待验；需要新增动作时另行授权专用夹具。用户自行操作即可，不改浏览器设置，不启动新实例或profile；需要登录时由本人完成。
+
+独立复验入口：审查699行正式测试的协议服务器、真实Worker路径、两个TCP屏障和非恒真断言；在默认 `go test -race -count=1 ./internal/imap -run '^TestManualKeepTCP'` 重跑12场景；检查三类mutation是断言失败而非工具/编译失败；核对5fbbd81仅test+CHANGELOG、运行时文件manifest不变与全量race/静态日志。脱敏材料另本地提交，不推送。**等待主代理独立验收；尚未发布部署。**
