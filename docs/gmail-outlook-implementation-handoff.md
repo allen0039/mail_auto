@@ -855,3 +855,43 @@ Google Workspace/Microsoft365组织账号仍未验证。两服务商历史成功
 **网页人工替代路径，不必开启全局Apple事件JavaScript**：本人在现有Chrome进入原账号现有Outlook `MailAuto-QA` 目录，提供裁剪至专用QA目录的文件夹名称/数量截图；仅选择已读合成测试邮件，展开单封详情或邮件源，核对精确测试主题、Message-ID及所在目录，以截图/脱敏摘要交主代理。Gmail也只核对已读QA单封详情/原始头和单封标签，不以会话标题/标签并集替代；未读保护样本不打开，保留IMAP只读证据。截图遮盖账号地址、私人列表、正文及任何授权参数，不上传完整原始邮件或凭据。只补当前状态不冒称历史动作前后对照，缺历史证据保留待验；需要新增动作时另行授权专用夹具。用户自行操作即可，不改浏览器设置，不启动新实例或profile；需要登录时由本人完成。
 
 独立复验入口：审查699行正式测试的协议服务器、真实Worker路径、两个TCP屏障和非恒真断言；在默认 `go test -race -count=1 ./internal/imap -run '^TestManualKeepTCP'` 重跑12场景；检查三类mutation是断言失败而非工具/编译失败；核对5fbbd81仅test+CHANGELOG、运行时文件manifest不变与全量race/静态日志。脱敏材料另本地提交，不推送。**等待主代理独立验收；尚未发布部署。**
+
+## 19. 现有Chrome官方网页只读补证（2026-11-17）
+
+### 19.1 固定基线与工具边界
+
+本轮基线HEAD `5956ea5d44cc24bb90dc302f4aa5b86b8c9c513e`，产品源码仍为 `ac29317395f21cf12a9b006e2adc2f4eec3eea60` / 0.10.4 / schema15，测试候选仍为 `5fbbd81b70e32c5e46778f6c375fcebe24c467ee`；没有产品代码、迁移或版本改动。只使用用户正在使用的Chrome `Default` profile 和本机 `DevToolsActivePort`，没有启动新浏览器/独立profile，没有开启Apple事件JavaScript、关闭CSP/Trusted Types或修改任何浏览器安全设置。只读脚本和脱敏机器索引见 `docs/gmail-outlook-browser-readonly-evidence.json` 与 `.planning/final-remediation/`。
+
+第一轮CDP读取成功；后续每次新建短连接时Chrome弹出“要允许远程调试吗？”安全确认，某次拒绝返回HTTP 403。该提示是Chrome对新的外部DevTools连接的会话级确认，不是Mail Auto/OAuth故障；没有绕过。无需开启全局Apple事件JavaScript。剩余Gmail三个已读夹具的网页详情因此标为待补，不用会话标题或IMAP结果冒称网页详情。
+
+### 19.2 Outlook官方页面与逐封只读回读
+
+12:49–12:55(+08)在用户已打开的既有Chrome中，Outlook标签标题为 `MailAuto-QA - Davies Allen - Outlook`，页面位于 `MailAuto-QA` 文件夹。页面显示该文件夹 `3 个项(0 个未读)`；三行均为 `Mail Auto QA`、纯合成主题和 `Dedicated synthetic QA fixture ... No private email. No SMTP delivery.`：
+
+| 夹具 | 网页行 | 网页当前可读状态 | 远端只读flags |
+| --- | --- | --- | --- |
+| M-STAR-02 | 存在 | 已读（行按钮为“标记为未读”） | `Flagged=true`、`Unread=false` |
+| M-UNREAD-02 | 存在 | 已读；打开前已用Remote确认 | `Unread=false`（本地索引仍为unread，见下） |
+| M-FLAGS-02 | 存在 | 已读；详情点击未完成 | `Unread=false`、`Flagged=false` |
+
+Outlook `RuleState` 于12:54:07–12:54:15仅以EXAMINE/UID FETCH元数据读取上述三封，返回精确合成RFC Message-ID、UIDVALIDITY 1492、UID 4/7/6，均身份匹配、`flags_known=true`，没有读取正文、写入flags、Sync或启动Worker。页面打开M-UNREAD-02发生在远端确认其为已读之后，因此没有把未读样本变成Seen。**重要差异**：本地索引仍把M-UNREAD-02记为unread，远端已是read；这符合自动同步关闭下本地索引可滞后的历史观察，本轮不执行Sync、不以网页操作回写索引，留给主代理判断。
+
+网页没有暴露可靠的逐行Flagged文本；M-STAR-02的网页行只显示可执行的“标记此邮件”控件，不能据此反推当前flag。因此Flagged结论采用远端只读flags，不把控件文字当状态。截图仅覆盖QA文件夹和合成邮件，不含私人邮件。
+
+### 19.3 Gmail网页与逐封只读回读
+
+既有Gmail标签使用精确 `rfc822msgid:` 搜索。Gmail仍把同一会话的旧811ab7a标题作为会话标题，但 `G-MULTI` 的单封“显示详细信息”在13:00左右明确显示：
+
+- 主题：`[MA-QA-8f8ee80-SVC2] G-MULTI`
+- 发件人：`Mail Auto QA <qa@example.invalid>`
+- 日期：2026-11-16 23:43
+
+这再次证明旧标题是Gmail会话聚合，不是SVC2不存在。`G-UNREAD` 的精确搜索只做了结果页观察，会话行仍显示旧 `[MA-QA-811ab7a] G-UNREAD` 和会话级QA标签并集；**没有打开该会话/单封**，避免隐含Seen。`G-EXISTING`、`G-FLAGS`、`G-STAR` 的网页单封详情未在权限提示后继续，标记为网页部分待补；它们的远端身份和flags已完成。
+
+13:01:08–13:01:50 使用生产 `Adapter.RuleState` 对六个SVC2逻辑邮件、四个QA标签中的12个成员做只读EXAMINE/UID FETCH元数据回读：全部RFC Message-ID、稳定ID和索引身份匹配，`G-UNREAD` 在A/B均 `Unread=true`，`G-STAR` 在A/B均 `Flagged=true`，其余已读无星标；12项均 `flags_known=true`，没有Sync、正文读取、flags写入或本地索引更新。四标签范围未扩大，INBOX未触碰。
+
+### 19.4 最终只读安全快照
+
+12:53:59先以SQLite backup API制作本轮配套数据库/主密钥私有备份；13:02:05再次只读核对，唯一QA PID85404、二进制摘要和readyz 0.10.4/schema15稳定。24 completed、3 needs_verification，queued/running=0；写入、任务、策略、自动同步、MCP均关闭。两份快照的账号身份/代际/config/status/scope、三条旧unknown、保护表均相同；差异只有既有Worker对三条unknown的 `operations.updated_at` 和 `operation_items.checked_at` 诊断时间，无插入/删除，messages/flags/mailboxes/folder_settings/保护表未变。没有新操作、没有新真实写入、没有new Worker，旧unknown未重放/取消/删除/结案。
+
+本轮新增机器索引 `docs/gmail-outlook-browser-readonly-evidence.json`；原始私有截图、CDP输出、metadata JSON、数据库中配套备份在 `.planning/final-remediation/`，不提交、不进入镜像。Outlook网页QA、Gmail G-MULTI单封详情和全部12成员远端只读回读通过；Gmail另三封网页详情、真实Outlook unknown人工保留、旧unknown可信处置、Gmail范围外INBOX归档和组织账号仍未完成。**等待主代理独立验收；尚未发布部署。**

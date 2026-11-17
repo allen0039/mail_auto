@@ -382,3 +382,14 @@ FR-01继续保守拒绝：三份v2计划只在重建generation2/config2时匹配
 **USER-ACTION-REQUIRED（不必开启全局Apple事件JavaScript）**：在本人现有Chrome进入Outlook原账号QA目录，提供仅QA文件夹/数量截图和一封已读合成测试邮件的单封主题、Message-ID、所在目录详情；Gmail剩余项按同样方式核对已读QA原始头/单封标签，不打开受保护未读样本。遮盖私人列表、账号地址、正文及授权参数，不提交完整原始邮件或凭据；当前截图不能补造历史动作前后状态，缺项仍待验。需要登录由本人完成，不新开浏览器/profile、不更改设置、不为截图自行发起邮件写入。
 
 因此FR-06“默认正式组合夹具未实现”的返工项已实现并待主代理独立检查，但**个人Outlook真实unknown人工保留仍未实测**。用户现有Chrome网页最小动作、其余网页对照、三条旧unknown可信结案和组织账号验证仍按8.8保留；不宣称完整真实验收通过。**等待主代理独立验收；尚未发布部署。**
+
+### 8.10 既有Chrome网页只读补证（2026-11-17）
+
+用户明确只使用其当前Chrome，并已打开个人Outlook `MailAuto-QA`。本轮在12:49–13:02(+08)仅通过本机DevTools只读读取：
+
+- Outlook页面标题 `MailAuto-QA - Davies Allen - Outlook`，文件夹显示3个合成项、0未读；三封为 `M-STAR-02`、`M-UNREAD-02`、`M-FLAGS-02`，发件人和正文均匹配纯合成QA夹具。生产Adapter只读EXAMINE/FETCH在打开前确认三封均已读、M-STAR仍Flagged；M-UNREAD本地索引与远端不一致（本地unread、远端read），因自动同步关闭且本轮禁止Sync，未回写。M-FLAGS网页详情因权限提示未完成，不能把文件夹0未读当逐封flags证据。
+- Gmail在既有标签中继续用精确RFC Message-ID搜索。G-MULTI会话标题仍为旧811ab7a，但单封“显示详细信息”显示 `[MA-QA-8f8ee80-SVC2] G-MULTI`、合成发件人和23:43日期；G-UNREAD只观察搜索结果、未打开，远端A/B仍未读；G-EXISTING、G-FLAGS、G-STAR网页单封详情因Chrome远程调试确认提示未补齐，但12个QA成员的远端身份/flags已用生产Adapter只读回读通过与索引一致。
+
+Chrome提示“要允许远程调试吗？”是每次新DevTools连接的外部应用安全确认，不是Mail Auto授权失败。没有开启全局Apple事件JavaScript、关闭CSP/Trusted Types、创建新浏览器/profile或绕过限制。剩余网页详情需要一个最小的“允许一次”会话，或者由本人提供仅QA的脱敏截图/单封详情；不要求重复OAuth授权。
+
+前后只读快照均为24 completed/3 needs_verification、空队列、写入/任务/自动同步/MCP关闭；唯一PID85404、0.10.4/schema15；旧unknown和保护业务表不变，差异仅既有Worker的诊断时间列。没有新增真实写入、没有运行任务、没有结案旧unknown、没有修改主代理独立报告。完整脱敏索引 `docs/gmail-outlook-browser-readonly-evidence.json`；**等待主代理独立验收；尚未发布部署。**

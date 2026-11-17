@@ -1,0 +1,767 @@
+{
+  "task": "Gmail/Outlook real-account official-web read-only supplement after FR-06",
+  "observed_at": "2026-11-17T13:04:25.728907+08:00",
+  "baseline_head": "5956ea5d44cc24bb90dc302f4aa5b86b8c9c513e",
+  "product_source_candidate": "ac29317395f21cf12a9b006e2adc2f4eec3eea60",
+  "test_candidate": "5fbbd81b70e32c5e46778f6c375fcebe24c467ee",
+  "version": "0.10.4",
+  "schema": 15,
+  "product_source_changed": false,
+  "migration_added": false,
+  "browser": {
+    "existing_chrome_only": true,
+    "profile": "user's existing Default Chrome profile",
+    "devtools_connection": "local DevToolsActivePort websocket",
+    "new_browser_or_profile": false,
+    "apple_events_javascript_enabled_or_changed": false,
+    "global_javascript_setting_changed": false,
+    "csp_or_trusted_types_bypass": false,
+    "tool": {
+      "path": ".planning/final-remediation/cdp_readonly.py",
+      "sha256": "c3d25f4d7ff38b0f05328467118d029333df9297615fcb9b94cad7c7226e0afc"
+    },
+    "connection_attempts": [
+      {
+        "stage": "initial",
+        "result": "success",
+        "evidence": {
+          "path": ".planning/final-remediation/cdp-targets.json",
+          "sha256": "e78ab48a81e382f8ed96e03bb90d07dd928f5e14dc0ef004bff2ce43423b3f69"
+        }
+      },
+      {
+        "stage": "repeated_connections",
+        "result": "Chrome displayed remote-debugging permission prompt on a new connection; one later connection returned HTTP 403",
+        "user_prompt_screenshot": {
+          "path": ".planning/final-remediation/chrome-remote-debug-prompt.png",
+          "sha256": "0f1b14939d245f7819a4a3241c844050d355397b8d75c81c0e65895e33f08449"
+        },
+        "bypass_attempted": false,
+        "settings_changed": false
+      },
+      {
+        "stage": "M-FLAGS-02 first open",
+        "result": "websocket handshake timed out before page action",
+        "evidence": {
+          "path": ".planning/final-remediation/outlook-select-M-FLAGS-02.stderr",
+          "sha256": "1ad08457eb2a849903e9f27f8a65aa370be6f6a2656f27c63490502f3279fafe"
+        }
+      }
+    ]
+  },
+  "outlook_web": {
+    "target_title": "MailAuto-QA - Davies Allen - Outlook",
+    "origin": "outlook.live.com",
+    "path_kind": "/mail/<mailbox-id>/<folder-id>",
+    "qa_folder": "MailAuto-QA",
+    "folder_title": "MailAuto-QA - 3 个项(0 个未读)",
+    "listed_fixtures": [
+      {
+        "subject": "Mail Auto QA [MA-QA-574b047] M-STAR-02",
+        "selected": "true",
+        "current_read_state": "标记为未读 action present => message is read"
+      },
+      {
+        "subject": "Mail Auto QA [MA-QA-574b047] M-UNREAD-02",
+        "selected": "false",
+        "current_read_state": "标记为未读 action present => message is read"
+      },
+      {
+        "subject": "Mail Auto QA [MA-QA-574b047] M-FLAGS-02",
+        "selected": "false",
+        "current_read_state": "标记为未读 action present => message is read"
+      }
+    ],
+    "messages": [
+      {
+        "fixture": "M-STAR-02",
+        "selected_heading": "[MA-QA-574b047] M-STAR-02",
+        "sender": "Mail Auto QA <mailauto-qa@example.invalid>",
+        "detail_timestamp": "周一 2026/11/16 21:23"
+      },
+      {
+        "fixture": "M-UNREAD-02",
+        "selected_heading": "[MA-QA-574b047] M-UNREAD-02",
+        "sender": "Mail Auto QA <mailauto-qa@example.invalid>",
+        "detail_timestamp": "周一 2026/11/16 21:23",
+        "opened_only_after_remote_read_confirmed": true
+      },
+      {
+        "fixture": "M-FLAGS-02",
+        "selected_heading": "row present; detail click not completed after remote read check",
+        "sender": "Mail Auto QA <mailauto-qa@example.invalid>"
+      }
+    ],
+    "screenshots": [
+      {
+        "path": ".planning/final-remediation/outlook-qa-folder.png",
+        "sha256": "748902e29b66a58b0e7e980fb3d26d8c6c59c598e1d1c1074d5f77562745c41d"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-M-STAR-02.png",
+        "sha256": "02f9147925eeda15398f9d81078ce261b5fd3dc1694afc7b4cbc7020a6f4fa44"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-M-UNREAD-02.png",
+        "sha256": "756c7c51c7bda73be671df4ba2c119220fd2cc74b31e6e1e1bc1aae80e26fc17"
+      }
+    ],
+    "evidence": [
+      {
+        "path": ".planning/final-remediation/outlook-inspect.json",
+        "sha256": "4ab7ee96b73f585e79ad930c88207840b93b6d3f6f6fe672295b31451de17291"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-flags-inspect.json",
+        "sha256": "4fbce89e0dc1fc68496d04842a7e212db3a719cc8a1c99292382029661033a1e"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-select-M-STAR-02.json",
+        "sha256": "07690b6aafd4eceb3bafb4ceb1d17b3ac81108839958d1ca2aef53d91e9e5367"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-select-M-UNREAD-02.json",
+        "sha256": "5f345a968fdb17170655952c83f0d0374d19a85ee5fc8cba8b688cb2415f143f"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-metadata-live.json",
+        "sha256": "4e0425eccc8abe0573ba4c6def3e23ee0095aee590afc09e5380dfcd3c86db3b"
+      }
+    ],
+    "limitations": "0 unread folder count is not used as per-message Seen evidence; per-message RuleState was read before opening. Outlook row exposes read/flag actions but not a reliable per-row flag state; remote IMAP flags are authoritative."
+  },
+  "outlook_remote_readonly": {
+    "account_alias": "MS-PERSONAL-01",
+    "generation": 5,
+    "config_version": 1,
+    "status": "passed",
+    "scope": "https://outlook.office.com/IMAP.AccessAsUser.All",
+    "stable_subject_tenant_sha256": "2d4a885ee7b664b377d3b8abf5cbb964f8d71f90fbf5b7e36558a714c09c3c4a",
+    "messages": [
+      {
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "message_id_sha256": "3a52df691d1fb510e6f4aabb6d43c42d0663b5207f37980997d1fac87e2475b3",
+        "observed_at": "2026-11-17T12:54:10+08:00",
+        "rfc_message_id": "<M-FLAGS-02-20261116-final@mailauto-qa.example.invalid>",
+        "subject": "[MA-QA-574b047] M-FLAGS-02",
+        "uid": 4,
+        "uidvalidity": 1492,
+        "unread": false
+      },
+      {
+        "flagged": true,
+        "flags_known": true,
+        "folder": "MailAuto-QA",
+        "identity_matches": true,
+        "indexed_flagged": true,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "message_id_sha256": "294c0e42a6542fa843233c2ab3b905d728e705b134c2f7d94b69d0c7b05eea4c",
+        "observed_at": "2026-11-17T12:54:13+08:00",
+        "rfc_message_id": "<M-STAR-02-20261116-final@mailauto-qa.example.invalid>",
+        "subject": "[MA-QA-574b047] M-STAR-02",
+        "uid": 7,
+        "uidvalidity": 1492,
+        "unread": false
+      },
+      {
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": false,
+        "indexed_unread": true,
+        "message_id_sha256": "d90632e534a19e220ec7b693236c58fde1befb4aa3f25f04362ed1c4c5af4206",
+        "observed_at": "2026-11-17T12:54:15+08:00",
+        "rfc_message_id": "<M-UNREAD-02-20261116-final@mailauto-qa.example.invalid>",
+        "subject": "[MA-QA-574b047] M-UNREAD-02",
+        "uid": 6,
+        "uidvalidity": 1492,
+        "unread": false
+      }
+    ],
+    "mail_writes": 0,
+    "sync_executed": false,
+    "private_body_reads": 0,
+    "local_index_updated": false,
+    "evidence": [
+      {
+        "path": ".planning/final-remediation/outlook-metadata-live.json",
+        "sha256": "4e0425eccc8abe0573ba4c6def3e23ee0095aee590afc09e5380dfcd3c86db3b"
+      },
+      {
+        "path": ".planning/final-remediation/outlook-metadata-run.exit",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      }
+    ],
+    "observation": "All three QA messages were already read before any detail opening; M-STAR-02 remains flagged. M-UNREAD-02 local index said unread but remote was already read, so no flags change was caused by this browser read."
+  },
+  "gmail_web": {
+    "account_alias": "G-PERSONAL-01",
+    "exact_message_id_search": "Using the existing Chrome Gmail tab. Gmail grouped exact-Message-ID hits into conversations with an old 811ab7a conversation title.",
+    "G-MULTI": {
+      "conversation_title": "conversation title remained [MA-QA-811ab7a] G-MULTI",
+      "single_message_details": [
+        "全部展开 全部打印 在新窗口中查看 [MA-QA-811ab7a] G-MULTI MailAuto-QA-A 搜索所有带“MailAuto-QA-A”标签的邮件 从此会话中移除“MailAuto-QA-A”标签 MailAuto-QA-B 搜索所有带“MailAuto-QA-B”标签的邮件 从此会话中移除“MailAuto-QA-B”标签 MailAuto-QA-Other 搜索所有带“MailAuto-QA-Other”标签的邮件 从此会话中移除“MailAuto-QA-Other”标签 MailAuto-QA-Target 搜索所有带“MailAuto-QA-Target”标签的邮件 从此会话中移除“MailAuto-QA-Target”标签 Mail Auto QA 2026年11月16日 22:21 (14小时前) Dedicated synthetic Gmail QA fixture G-MULTI. No delivery. Mail Auto QA <qa@example.invalid> 2026年11月16日 23:39 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail 此邮件似乎是用英语撰写的 翻译成中文 Mail Auto QA <qa@example.invalid> 2026年11月16日 23:43 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail 发件人: Mail Auto QA <qa@example.invalid> 收件人: Mail Auto QA <qa@example.invalid> 日期: 2026年11月16日 23:43 主题: [MA-QA-8f8ee80-SVC2] G-MULTI 邮送域: example.invalid 此邮件似乎是用英语撰写的 翻译成中文 回复 回复全部 转发 您无法使用表情符号回应这封邮件",
+        "Mail Auto QA 2026年11月16日 22:21 (14小时前) Dedicated synthetic Gmail QA fixture G-MULTI. No delivery. Mail Auto QA <qa@example.invalid> 2026年11月16日 23:39 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail 此邮件似乎是用英语撰写的 翻译成中文 Mail Auto QA <qa@example.invalid> 2026年11月16日 23:43 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail 发件人: Mail Auto QA <qa@example.invalid> 收件人: Mail Auto QA <qa@example.invalid> 日期: 2026年11月16日 23:43 主题: [MA-QA-8f8ee80-SVC2] G-MULTI 邮送域: example.invalid 此邮件似乎是用英语撰写的 翻译成中文",
+        "Mail Auto QA <qa@example.invalid> 2026年11月16日 23:39 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail 此邮件似乎是用英语撰写的 翻译成中文",
+        "Mail Auto QA <qa@example.invalid> 2026年11月16日 23:39 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail",
+        "发送至 Mail",
+        "Mail Auto QA <qa@example.invalid> 2026年11月16日 23:43 (13小时前) 您无法使用表情符号回应这封邮件 回复 更多 发送至 Mail 发件人: Mail Auto QA <qa@example.invalid> 收件人: Mail Auto QA <qa@example.invalid> 日期: 2026年11月16日 23:43 主题: [MA-QA-8f8ee80-SVC2] G-MULTI 邮送域: example.invalid 此邮件似乎是用英语撰写的 翻译成中文"
+      ],
+      "detail_subject": "[MA-QA-8f8ee80-SVC2] G-MULTI",
+      "detail_sender": "Mail Auto QA <qa@example.invalid>",
+      "detail_timestamp": "2026年11月16日 23:43",
+      "evidence": {
+        "path": ".planning/final-remediation/gmail-show-details.json",
+        "sha256": "0677db5bc86e651d74addd30a7d37f2bea00f270e7de3ae3cbc0424308bd4e00"
+      },
+      "screenshot": {
+        "path": ".planning/final-remediation/gmail-multi-current.png",
+        "sha256": "202860db22edda329864357f8a41a3e04ae86977bb794abc54d8ea99543cc6da"
+      }
+    },
+    "G-UNREAD": {
+      "search_result_title": "搜索结果 - zjl052909@gmail.com - Gmail",
+      "conversation_subject_observed": "[MA-QA-811ab7a] G-UNREAD",
+      "opened": false,
+      "reason": "protected unread fixture; search result only",
+      "evidence": {
+        "path": ".planning/final-remediation/gmail-open-G-UNREAD.json",
+        "sha256": "9ebcfbaded487413bc9be249bbdc98cc10d8ba819b7a7232ae35ad7763c374f5"
+      },
+      "screenshot": {
+        "path": ".planning/final-remediation/gmail-search-unread.png",
+        "sha256": "cd9262ba7b64438092fafe02d47fd8de3963cd10510c426b0c2e194ac88cfc0a"
+      }
+    },
+    "G-EXISTING": {
+      "web_detail_status": "not captured after Chrome remote-debugging permission prompt",
+      "remote_metadata": [
+        {
+          "fixture": "G-EXISTING",
+          "flagged": false,
+          "flags_known": true,
+          "folder": "MailAuto-QA-Other",
+          "identity_matches": true,
+          "indexed_flagged": false,
+          "indexed_flags_match_remote": true,
+          "indexed_unread": false,
+          "observed_at": "2026-11-17T13:01:11+08:00",
+          "rfc_message_id": "<G-EXISTING-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+          "stable_id_sha256": "aed7e635bb4a3f4111a5f93f581b5511180d2c374b3bb1b6a3cfc27838d5ce60",
+          "uid": 6,
+          "uidvalidity": 33,
+          "unread": false
+        },
+        {
+          "fixture": "G-EXISTING",
+          "flagged": false,
+          "flags_known": true,
+          "folder": "MailAuto-QA-Target",
+          "identity_matches": true,
+          "indexed_flagged": false,
+          "indexed_flags_match_remote": true,
+          "indexed_unread": false,
+          "observed_at": "2026-11-17T13:01:13+08:00",
+          "rfc_message_id": "<G-EXISTING-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+          "stable_id_sha256": "aed7e635bb4a3f4111a5f93f581b5511180d2c374b3bb1b6a3cfc27838d5ce60",
+          "uid": 6,
+          "uidvalidity": 32,
+          "unread": false
+        }
+      ]
+    },
+    "G-FLAGS": {
+      "web_detail_status": "not captured after Chrome remote-debugging permission prompt",
+      "remote_metadata": [
+        {
+          "fixture": "G-FLAGS",
+          "flagged": false,
+          "flags_known": true,
+          "folder": "MailAuto-QA-A",
+          "identity_matches": true,
+          "indexed_flagged": false,
+          "indexed_flags_match_remote": true,
+          "indexed_unread": false,
+          "observed_at": "2026-11-17T13:01:14+08:00",
+          "rfc_message_id": "<G-FLAGS-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+          "stable_id_sha256": "bc66af942e25c7aa49633ad8ab84da599d590d8ddf157b426f5c6974e9ef30ca",
+          "uid": 19,
+          "uidvalidity": 30,
+          "unread": false
+        }
+      ]
+    },
+    "G-STAR": {
+      "web_detail_status": "not captured after Chrome remote-debugging permission prompt",
+      "remote_metadata": [
+        {
+          "fixture": "G-STAR",
+          "flagged": true,
+          "flags_known": true,
+          "folder": "MailAuto-QA-A",
+          "identity_matches": true,
+          "indexed_flagged": true,
+          "indexed_flags_match_remote": true,
+          "indexed_unread": false,
+          "observed_at": "2026-11-17T13:01:44+08:00",
+          "rfc_message_id": "<G-STAR-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+          "stable_id_sha256": "0b688f34f253e2b9709956dd58faf493fdaad329c5361fff83eed516cb1cf651",
+          "uid": 18,
+          "uidvalidity": 30,
+          "unread": false
+        },
+        {
+          "fixture": "G-STAR",
+          "flagged": true,
+          "flags_known": true,
+          "folder": "MailAuto-QA-B",
+          "identity_matches": true,
+          "indexed_flagged": true,
+          "indexed_flags_match_remote": true,
+          "indexed_unread": false,
+          "observed_at": "2026-11-17T13:01:46+08:00",
+          "rfc_message_id": "<G-STAR-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+          "stable_id_sha256": "0b688f34f253e2b9709956dd58faf493fdaad329c5361fff83eed516cb1cf651",
+          "uid": 12,
+          "uidvalidity": 31,
+          "unread": false
+        }
+      ]
+    },
+    "limitations": "Conversation title/label union is not single-message state. G-UNREAD was deliberately not opened. Current per-message membership and flags come from read-only IMAP RuleState, not from conversation-level web labels."
+  },
+  "gmail_remote_readonly": {
+    "account_alias": "G-PERSONAL-01",
+    "generation": 4,
+    "config_version": 2,
+    "status": "passed",
+    "scope": "https://www.googleapis.com/auth/userinfo.email openid https://mail.google.com/",
+    "stable_subject_tenant_sha256": "45d3222cd08b31f77fbf25dd5208702e258fa53ca9276349a7196f91a42f3d41",
+    "only_qa_folders": [
+      "MailAuto-QA-A",
+      "MailAuto-QA-B",
+      "MailAuto-QA-Target",
+      "MailAuto-QA-Other"
+    ],
+    "messages": [
+      {
+        "fixture": "G-EXISTING",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-Other",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:11+08:00",
+        "rfc_message_id": "<G-EXISTING-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "aed7e635bb4a3f4111a5f93f581b5511180d2c374b3bb1b6a3cfc27838d5ce60",
+        "uid": 6,
+        "uidvalidity": 33,
+        "unread": false
+      },
+      {
+        "fixture": "G-EXISTING",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-Target",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:13+08:00",
+        "rfc_message_id": "<G-EXISTING-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "aed7e635bb4a3f4111a5f93f581b5511180d2c374b3bb1b6a3cfc27838d5ce60",
+        "uid": 6,
+        "uidvalidity": 32,
+        "unread": false
+      },
+      {
+        "fixture": "G-FLAGS",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-A",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:14+08:00",
+        "rfc_message_id": "<G-FLAGS-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "bc66af942e25c7aa49633ad8ab84da599d590d8ddf157b426f5c6974e9ef30ca",
+        "uid": 19,
+        "uidvalidity": 30,
+        "unread": false
+      },
+      {
+        "fixture": "G-MULTI",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-B",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:29+08:00",
+        "rfc_message_id": "<G-MULTI-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "b5a650bd5484f4927c22d50e30643413d634e3ee02c5d8b38511333e8c4010d5",
+        "uid": 9,
+        "uidvalidity": 31,
+        "unread": false
+      },
+      {
+        "fixture": "G-MULTI",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-Other",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:31+08:00",
+        "rfc_message_id": "<G-MULTI-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "b5a650bd5484f4927c22d50e30643413d634e3ee02c5d8b38511333e8c4010d5",
+        "uid": 5,
+        "uidvalidity": 33,
+        "unread": false
+      },
+      {
+        "fixture": "G-MULTI",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-Target",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:34+08:00",
+        "rfc_message_id": "<G-MULTI-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "b5a650bd5484f4927c22d50e30643413d634e3ee02c5d8b38511333e8c4010d5",
+        "uid": 7,
+        "uidvalidity": 32,
+        "unread": false
+      },
+      {
+        "fixture": "G-RULE",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-B",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:36+08:00",
+        "rfc_message_id": "<G-RULE-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "206b8cf1806954ff5402e3b2ff5bdcfac52606b6ab39b24202a5674d5a700b65",
+        "uid": 10,
+        "uidvalidity": 31,
+        "unread": false
+      },
+      {
+        "fixture": "G-RULE",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-Target",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:38+08:00",
+        "rfc_message_id": "<G-RULE-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "206b8cf1806954ff5402e3b2ff5bdcfac52606b6ab39b24202a5674d5a700b65",
+        "uid": 8,
+        "uidvalidity": 32,
+        "unread": false
+      },
+      {
+        "fixture": "G-STAR",
+        "flagged": true,
+        "flags_known": true,
+        "folder": "MailAuto-QA-A",
+        "identity_matches": true,
+        "indexed_flagged": true,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:44+08:00",
+        "rfc_message_id": "<G-STAR-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "0b688f34f253e2b9709956dd58faf493fdaad329c5361fff83eed516cb1cf651",
+        "uid": 18,
+        "uidvalidity": 30,
+        "unread": false
+      },
+      {
+        "fixture": "G-STAR",
+        "flagged": true,
+        "flags_known": true,
+        "folder": "MailAuto-QA-B",
+        "identity_matches": true,
+        "indexed_flagged": true,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": false,
+        "observed_at": "2026-11-17T13:01:46+08:00",
+        "rfc_message_id": "<G-STAR-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "0b688f34f253e2b9709956dd58faf493fdaad329c5361fff83eed516cb1cf651",
+        "uid": 12,
+        "uidvalidity": 31,
+        "unread": false
+      },
+      {
+        "fixture": "G-UNREAD",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-A",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": true,
+        "observed_at": "2026-11-17T13:01:48+08:00",
+        "rfc_message_id": "<G-UNREAD-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "1e409ed5a21e56342695caee27c528eaa82033797e9682c05e9af0bc4cbe8fe1",
+        "uid": 17,
+        "uidvalidity": 30,
+        "unread": true
+      },
+      {
+        "fixture": "G-UNREAD",
+        "flagged": false,
+        "flags_known": true,
+        "folder": "MailAuto-QA-B",
+        "identity_matches": true,
+        "indexed_flagged": false,
+        "indexed_flags_match_remote": true,
+        "indexed_unread": true,
+        "observed_at": "2026-11-17T13:01:50+08:00",
+        "rfc_message_id": "<G-UNREAD-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>",
+        "stable_id_sha256": "1e409ed5a21e56342695caee27c528eaa82033797e9682c05e9af0bc4cbe8fe1",
+        "uid": 11,
+        "uidvalidity": 31,
+        "unread": true
+      }
+    ],
+    "mail_writes": 0,
+    "sync_executed": false,
+    "private_body_reads": 0,
+    "local_index_updated": false,
+    "evidence": [
+      {
+        "path": ".planning/final-remediation/gmail-metadata-live.json",
+        "sha256": "1d7ff3eb639f0f5521d5c24274ffbc50ba0e64f8a318fc495805bef5a3fcafac"
+      },
+      {
+        "path": ".planning/final-remediation/gmail-metadata-run.exit",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      }
+    ],
+    "observation": "12 members / 6 stable logical QA messages. G-UNREAD remains unread in A and B; G-STAR remains flagged in A and B; all other QA members are read and unflagged. All indexed flags match remote."
+  },
+  "before_state": {
+    "observed_at": "2026-11-17T12:53:59.379419+08:00",
+    "operation_states": {
+      "completed": 24,
+      "needs_verification": 3
+    },
+    "accounts": [
+      {
+        "account_id": "8ANos4T4IYVh7en4gv2uRQEk",
+        "provider": "google",
+        "folders": [
+          "MailAuto-QA-A",
+          "MailAuto-QA-B",
+          "MailAuto-QA-Target",
+          "MailAuto-QA-Other"
+        ],
+        "identity_sha256": "71e30244876500ddd692a44542e7e80b840ea8d2db6dc8931bd9dca1895fa918",
+        "generation": 4,
+        "config_version": 2,
+        "status": "connected",
+        "scope": "https://www.googleapis.com/auth/userinfo.email openid https://mail.google.com/"
+      },
+      {
+        "account_id": "Pid4sNkGbUCWDnBAXsbNyk9u",
+        "provider": "microsoft",
+        "folders": [],
+        "identity_sha256": "d50e7b003854d2acff0a46aa51ce47e688a8c03b6ba4a57c980a46abf0c7887c",
+        "generation": 5,
+        "config_version": 1,
+        "status": "connected",
+        "scope": "https://outlook.office.com/IMAP.AccessAsUser.All"
+      }
+    ],
+    "disabled": {
+      "writes_enabled": 0,
+      "enabled_tasks": 0,
+      "enabled_policies": 0,
+      "manual_keep_blocks": 0,
+      "manual_resolutions": 0
+    },
+    "runtime": {
+      "pid": 85404,
+      "binary_sha256": "f3220fdda3fc3815ebeb7dddbac96ffa117969111816adcca3c21a9636a2c8e5",
+      "readyz": {
+        "schema": 15,
+        "status": "ready",
+        "version": "0.10.4"
+      }
+    },
+    "evidence": [
+      {
+        "path": ".planning/final-remediation/live-before.json",
+        "sha256": "d1f4d1d2a1d605c82a05dedf1ffd6ef2ba58e8c868e5cac174a92abb1c7b80bb"
+      },
+      {
+        "path": ".planning/final-remediation/live-before.exit",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      }
+    ]
+  },
+  "after_state": {
+    "observed_at": "2026-11-17T13:02:05.369985+08:00",
+    "operation_states": {
+      "completed": 24,
+      "needs_verification": 3
+    },
+    "accounts": [
+      {
+        "account_id": "8ANos4T4IYVh7en4gv2uRQEk",
+        "provider": "google",
+        "folders": [
+          "MailAuto-QA-A",
+          "MailAuto-QA-B",
+          "MailAuto-QA-Target",
+          "MailAuto-QA-Other"
+        ],
+        "identity_sha256": "71e30244876500ddd692a44542e7e80b840ea8d2db6dc8931bd9dca1895fa918",
+        "generation": 4,
+        "config_version": 2,
+        "status": "connected",
+        "scope": "https://www.googleapis.com/auth/userinfo.email openid https://mail.google.com/"
+      },
+      {
+        "account_id": "Pid4sNkGbUCWDnBAXsbNyk9u",
+        "provider": "microsoft",
+        "folders": [],
+        "identity_sha256": "d50e7b003854d2acff0a46aa51ce47e688a8c03b6ba4a57c980a46abf0c7887c",
+        "generation": 5,
+        "config_version": 1,
+        "status": "connected",
+        "scope": "https://outlook.office.com/IMAP.AccessAsUser.All"
+      }
+    ],
+    "disabled": {
+      "writes_enabled": 0,
+      "enabled_tasks": 0,
+      "enabled_policies": 0,
+      "manual_keep_blocks": 0,
+      "manual_resolutions": 0
+    },
+    "runtime": {
+      "pid": 85404,
+      "binary_sha256": "f3220fdda3fc3815ebeb7dddbac96ffa117969111816adcca3c21a9636a2c8e5",
+      "readyz": {
+        "schema": 15,
+        "status": "ready",
+        "version": "0.10.4"
+      }
+    },
+    "deltas_against_paired_backup": {
+      "operations": {
+        "inserted_rows": 0,
+        "deleted_rows": 0,
+        "changed_cells": [
+          {
+            "column": "updated_at",
+            "row_key_sha256": "17e6c39d1e027e6bce113261968fe886c5d50beaa3dd3282ff64cb95d9daa618"
+          },
+          {
+            "column": "updated_at",
+            "row_key_sha256": "65f4b900202a03cb320d92245211f08a066d642d91caa1ffa436b1844d48d64b"
+          },
+          {
+            "column": "updated_at",
+            "row_key_sha256": "2d3a213190fca6c403d9f352dc06c45a3f22bc37a33edad8d8011de9bcae9f67"
+          }
+        ]
+      },
+      "operation_items": {
+        "inserted_rows": 0,
+        "deleted_rows": 0,
+        "changed_cells": [
+          {
+            "column": "checked_at",
+            "row_key_sha256": "259e72a39bb652ad80ce7b86ed5cf33b132af13a8f554ca2254802c31051bf0e"
+          },
+          {
+            "column": "checked_at",
+            "row_key_sha256": "33375d79060222602b7ede09b23f5cc5707d21f2e4de2744c6947d7310971f81"
+          },
+          {
+            "column": "checked_at",
+            "row_key_sha256": "6c40e87ca1c5597bd34e08def9a388e8f53035579f246f751d899fca48d11ddb"
+          }
+        ]
+      }
+    },
+    "evidence": [
+      {
+        "path": ".planning/final-remediation/live-after.json",
+        "sha256": "da3e24028b95cfb1751cd9b63720d900afbfba13cce7f311607008672dc2e7f2"
+      },
+      {
+        "path": ".planning/final-remediation/live-after.exit",
+        "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+      }
+    ]
+  },
+  "state_assertions": {
+    "three_old_unknown_unchanged": true,
+    "queued_running_empty": true,
+    "writes_tasks_policies_automatic_sync_mcp_disabled": true,
+    "protected_business_tables_no_insert_delete": true,
+    "only_expected_deltas": "operations.updated_at and operation_items.checked_at for existing Worker; no message/flags/accounts/protection changes",
+    "runtime_pid": 85404,
+    "readyz": {
+      "status": "ready",
+      "schema": 15,
+      "version": "0.10.4"
+    }
+  },
+  "status_matrix": {
+    "outlook_official_web_qa_folder": "passed (read-only current state)",
+    "outlook_per_message_remote_flags": "passed (read-only)",
+    "gmail_official_web_single_message_G-MULTI": "passed (read-only current detail)",
+    "gmail_official_web_G-UNREAD": "search result observed; message not opened",
+    "gmail_official_web_G-EXISTING_G-FLAGS_G-STAR": "partial: remote IMAP identity/flags passed, web detail pending Chrome permission",
+    "true_outlook_provider_unknown_manual_keep": "not tested",
+    "organization_accounts": "not validated",
+    "real_mail_writes_this_round": 0
+  },
+  "uncompleted": [
+    "Gmail web single-message detail for G-EXISTING/G-FLAGS/G-STAR after user grants one Chrome remote-debugging permission",
+    "true Outlook-provider unknown manual keep",
+    "three old Gmail unknown trusted settlement",
+    "Gmail INBOX archive outside authorized four-label scope",
+    "Google Workspace/Microsoft 365 validation"
+  ],
+  "publication": "等待主代理独立验收；尚未发布部署",
+  "pushed": false,
+  "deployed": false,
+  "validation": {
+    "argv": ["python3", ".planning/final-remediation/validate_round.py"],
+    "exit_code": 0,
+    "checked": "all evidence hashes, per-message flags, 3 old unknown frozen hashes, 24/3 operation state, protected-table no-insert/delete and diagnostic-only deltas, runtime 0.10.4/schema15, source boundary, and report strings",
+    "evidence": [
+      {"path": ".planning/final-remediation/validate_round.py", "sha256": "96b93976ae8c17ad06daf983b70c361c9f078ddc4f4966cde6f7709495578c37"},
+      {"path": ".planning/final-remediation/validation-round.log", "sha256": "a1f35917d80a6f4d051d7d85a05ae65691ebe8d9792633b4898113e6b3bf2ea7"},
+      {"path": ".planning/final-remediation/validation-round.exit", "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"}
+    ]
+  },
+  "materials_commit": "local docs-only commit containing this index; exact SHA in final handoff"
+}
