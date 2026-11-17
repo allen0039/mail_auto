@@ -895,3 +895,19 @@ Outlook `RuleState` 于12:54:07–12:54:15仅以EXAMINE/UID FETCH元数据读取
 12:53:59先以SQLite backup API制作本轮配套数据库/主密钥私有备份；13:02:05再次只读核对，唯一QA PID85404、二进制摘要和readyz 0.10.4/schema15稳定。24 completed、3 needs_verification，queued/running=0；写入、任务、策略、自动同步、MCP均关闭。两份快照的账号身份/代际/config/status/scope、三条旧unknown、保护表均相同；差异只有既有Worker对三条unknown的 `operations.updated_at` 和 `operation_items.checked_at` 诊断时间，无插入/删除，messages/flags/mailboxes/folder_settings/保护表未变。没有新操作、没有新真实写入、没有new Worker，旧unknown未重放/取消/删除/结案。
 
 本轮新增机器索引 `docs/gmail-outlook-browser-readonly-evidence.json`；原始私有截图、CDP输出、metadata JSON、数据库中配套备份在 `.planning/final-remediation/`，不提交、不进入镜像。Outlook网页QA、Gmail G-MULTI单封详情和全部12成员远端只读回读通过；Gmail另三封网页详情、真实Outlook unknown人工保留、旧unknown可信处置、Gmail范围外INBOX归档和组织账号仍未完成。**等待主代理独立验收；尚未发布部署。**
+
+## 20. 单连接网页详情补证（2026-11-17）
+
+材料基线 `867dc6fe7f62eda7459b1cbfaa1b906a34579b3a`；产品源码候选 `ac29317395f21cf12a9b006e2adc2f4eec3eea60`，测试候选 `5fbbd81b70e32c5e46778f6c375fcebe24c467ee`，版本/schema仍为0.10.4/15。本轮仅补材料，没有改产品代码或迁移。使用用户已有Chrome的单个持久连接，不另建浏览器或重复OAuth；单封详情前先以只读IMAP确认测试邮件已读，未打开G-UNREAD。
+
+Gmail G-EXISTING、G-FLAGS、G-STAR单封详情分别显示合成主题、发件人和日期；Outlook M-FLAGS-02单封网页显示合成主题、发件人和日期。网页未取得四封原始头，精确RFC Message-ID仅由生产Adapter只读IMAP元数据验证，搜索词不能视为网页头证据；会话标签并集也不能代表单封成员。浏览器现有会话仅支持已附加页面的evaluate/screenshot，不能安全附加原始邮件新target而不更改运行中的连接程序；因此原始头留待主代理独立处理，不新建连接。截图和私有输出均留在 `.planning/browser-batch-20261117/`，索引及SHA见 `docs/gmail-outlook-browser-batch-evidence.json`。
+
+补充实际尝试：G-EXISTING单封“更多邮件选项”中出现唯一“显示原始邮件”菜单项；同步拦截 `window.open` 的尝试未捕获URL，随后停止该方法。AppleScript只读检查仅见原Gmail搜索tab，未发现新Gmail tab；之后现有CDP截图请求持续在途，切换并激活原Gmail tab仍未返回，未重连或反复点击，因此另外两封原始页没有尝试。Outlook截图显示自定义邮件视图设置模态框遮挡背景详情；模态框来源、是否曾保存或是否有用户未保存修改均无证据，本轮没有点击保存或取消，背景DOM不能声称无遮挡。
+
+15:58–15:59生产Adapter只读重取Gmail 12个QA成员和Outlook 3封，排除观测时间后与浏览器操作前元数据一致；G-UNREAD在A/B仍未读，G-STAR仍有星标。Outlook M-UNREAD-02远端已读但本地索引未读，自动同步关闭，未回写。命令与实际退出码列在索引，两个远端helper均退出0；不是新的写入、同步、任务或历史动作前后证明。
+
+15:59:20安全快照退出0：唯一PID85404、原候选和readyz稳定，24 completed/3 needs_verification、队列空，写入/任务/策略/自动同步/MCP关闭；身份、scope、旧unknown业务和冻结计划均不变。配套备份全库比较63表无业务行增删、60表完全一致，差异仅两账号refresh密文与旧unknown的诊断时间列；不据密文变化推断供应商轮换。首次误用较旧备份导致audits断言退出1的日志保留，改用12:53配套备份后通过；搜索加载期间零结果的安全拒绝也保留，未算作产品通过或失败。
+
+原始页尝试后的16:06:39两项安全快照再次退出0，结论相同；现有CDP截图请求仍在途，连接保留等待主代理处理。
+
+真实Outlook unknown人工保留仍未实测；其隔离fake-TCP/正式Worker组合模拟见第18节，不能代替真实结果。三条旧unknown不重放、不取消、不删除、不解除busy；Gmail INBOX范围外动作、网页原始头和组织账号仍待验。没有新增真实邮件写入、发布或部署。**等待主代理独立验收；尚未发布部署。**

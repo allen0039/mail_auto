@@ -1,0 +1,54 @@
+{
+  "date": "2026-11-17",
+  "baseline_head": "867dc6fe7f62eda7459b1cbfaa1b906a34579b3a",
+  "product_candidate": "ac29317395f21cf12a9b006e2adc2f4eec3eea60",
+  "test_candidate": "5fbbd81b70e32c5e46778f6c375fcebe24c467ee",
+  "version": "0.10.4",
+  "schema": 15,
+  "evidence_scope": "Current read-only QA observations, not historical before/after action proof or full acceptance. Private files remain uncommitted.",
+  "browser_details": {
+    "gmail": "G-EXISTING, G-FLAGS and G-STAR: subject, synthetic sender and date in single-message details; raw headers and per-message label state not obtained.",
+    "outlook": "M-FLAGS-02: subject, synthetic sender and date observed in background single-message view; an unrelated custom-view settings modal obscures it. Modal origin and whether it was previously saved are unknown; no cancel/save was clicked. Raw header not obtained.",
+    "message_identity": "Exact RFC Message-ID established independently by read-only IMAP; Gmail search query is not proof of the displayed message's original header.",
+    "unread_protection": "G-UNREAD was not opened; remote IMAP reports unread in both QA labels before and after."
+  },
+  "remote_comparison": "12 Gmail QA members and 3 Outlook QA messages match their respective pre-browser metadata after excluding observation timestamps; Outlook M-UNREAD-02 remains remote read while the disabled-sync local index is unread.",
+  "commands": [
+    {"command": ".planning/root-browser-acceptance/gmail-readonly .planning/browser-batch-20261117/gmail-after.json", "exit": 0, "result": "12 QA members, identity and flags read-only"},
+    {"command": ".planning/root-browser-acceptance/outlook-readonly .planning/browser-batch-20261117/outlook-after.json", "exit": 0, "result": "3 QA messages, identity and flags read-only"},
+    {"command": "python3 .planning/browser-batch-20261117/full_snapshot.py full-final.json", "exit": 0, "result": "63 tables, no business row insertion or deletion; 60 unchanged"},
+    {"command": "python3 .planning/root-browser-acceptance/snapshot.py ../browser-batch-20261117/after.json", "exit": 0, "result": "all safety checks passed"}
+  ],
+  "preserved_failures": [
+    "First full-table check exited 1 on audits because it used the older 11:23 backup rather than the paired 12:53 backup; failure log retained. Paired comparison passed without changing the first evidence.",
+    "Early Gmail search-row checks found zero loaded results and safely refused to click; later loaded results were uniquely read and opened. These are browser timing observations, not product tests.",
+    "G-EXISTING single-message menu contained one official Show original item; a synchronous window.open interception attempt captured no URL. AppleScript found only the existing Gmail search tab. A subsequent CDP screenshot request remained in flight even after switching and activating the existing Gmail tab. No further browser commands or reconnection attempted; G-FLAGS and G-STAR original-page attempts could not be made."
+  ],
+  "private_evidence_sha256": {
+    ".planning/browser-batch-20261117/before.json": "eeb78751274ec3b72433a97dbfe54415d15a52f2c3c6f6fe810878d2b1bbcd06",
+    ".planning/browser-batch-20261117/after.json": "9d2321812640bdf6e23068adbb1bd2ad2d329cd9535755f5db615bd631c55bc9",
+    ".planning/browser-batch-20261117/full-after.log": "0378eeccf95f6cdfc23b64403f13a4df34350738d06e1469f141080790d20256",
+    ".planning/browser-batch-20261117/full-after-paired.json": "de7159decb876154c0195f5eb224c68330dad5c34b4a6ef735b23c4a6614b22b",
+    ".planning/browser-batch-20261117/full-final.json": "8cb82415975c409d23dc19fa135b34173eba8608d104a2bf45de1c2f5f371766",
+    ".planning/browser-batch-20261117/post-attempt.json": "987836429dc19bdc101b9809fd05163168ddea6cd5df5425d9576908a096e1f7",
+    ".planning/browser-batch-20261117/full-post-attempt.json": "b7e6949524c0a334470465fc182065047f9b3ba5c45e276f959f1fe832658a3e",
+    ".planning/browser-batch-20261117/gmail-existing-original-menu.json": "ea0090263e6ce919e20da53c749dd232797eb66348cff21a6df7740bc3d7452b",
+    ".planning/browser-batch-20261117/gmail-existing-original-menu-read.json": "1f548e125a65da120af69f62d5cb905336c6d84f6adda31ab9f6c04169ec8ef8",
+    ".planning/browser-batch-20261117/gmail-existing-original-capture.json": "f5f0a91e7ec92c1e6394f4a742178aec4e796132d6e8427a6404f9a2d5d62afd",
+    ".planning/browser-batch-20261117/gmail-before.json": "9b945e43830a05cadb5652c9b5d0b7ad0a82f28501504a87629a7de6f6a9dd2f",
+    ".planning/browser-batch-20261117/gmail-after.json": "0a92c433916baa55b13fcca2b73454475d292c2a7069d9d763e71c4783d0d42c",
+    ".planning/browser-batch-20261117/outlook-before.json": "fcf9eae6b4505fd09bf0efac7c5454f7fe63adc1761d6ee71490e22918e75148",
+    ".planning/browser-batch-20261117/outlook-after.json": "b10d68688d9960cb3adab745a4465e92a9e1ccae7b091f58ea22beb938377576",
+    ".planning/browser-batch-20261117/outlook-detail.json": "6971b9bccc28faa59c4b579c202ec2b80745880cfbcf629502a3250832646c7e",
+    ".planning/browser-batch-20261117/gmail-existing-full-detail.json": "812772882968f2e8cf1caaf846d55e7ff30040d262c7effb2a95e97b023561f9",
+    ".planning/browser-batch-20261117/gmail-flags-full-detail.json": "7438b3a116183cbb1109e1822d1de5d088c9a6b7b6947402945f0fd9b0616bf6",
+    ".planning/browser-batch-20261117/gmail-star-full-detail.json": "daae8e9ce1c2ee7e97ebb91b41830a3361cc9650dfd9fb1dc6d766d92cc74808",
+    ".planning/browser-batch-20261117/gmail-existing-full-detail.png": "1ff04c0e7f69abc65964f8b7c0c9a184a22ff32ce604207d6f7ca7477c8635c9",
+    ".planning/browser-batch-20261117/gmail-flags-detail.png": "aa9abc62da2c3668a714f0fb74a65473bba3bca872c34aec7945a288a1f1a098",
+    ".planning/browser-batch-20261117/gmail-star-detail.png": "5615617933e4b77af102223db6bdd629cfbd1cf80dc5b44a58644b6b2d2f959e",
+    ".planning/browser-batch-20261117/outlook-flags.png": "95bf73118d7e769500d3b39b4a840dd128f667ffc963fece60e0605460fa101c",
+    ".planning/browser-batch-20261117/gmail-flags-click.json": "166d037a83381cbaab5fdc7072ea91997b28051b6e80cf7863bcce8b4f919c16",
+    ".planning/browser-batch-20261117/gmail-star-click.json": "166d037a83381cbaab5fdc7072ea91997b28051b6e80cf7863bcce8b4f919c16"
+  },
+  "not_completed": ["Gmail and Outlook webpage raw headers", "Outlook real unknown manual resolution", "three historical unknown operations safe resolution", "Gmail INBOX action evidence outside authorized QA scope", "organization accounts", "complete independent reacceptance and release"]
+}

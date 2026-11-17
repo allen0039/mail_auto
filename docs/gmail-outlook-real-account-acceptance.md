@@ -393,3 +393,13 @@ FR-01继续保守拒绝：三份v2计划只在重建generation2/config2时匹配
 Chrome提示“要允许远程调试吗？”是每次新DevTools连接的外部应用安全确认，不是Mail Auto授权失败。没有开启全局Apple事件JavaScript、关闭CSP/Trusted Types、创建新浏览器/profile或绕过限制。剩余网页详情需要一个最小的“允许一次”会话，或者由本人提供仅QA的脱敏截图/单封详情；不要求重复OAuth授权。
 
 前后只读快照均为24 completed/3 needs_verification、空队列、写入/任务/自动同步/MCP关闭；唯一PID85404、0.10.4/schema15；旧unknown和保护业务表不变，差异仅既有Worker的诊断时间列。没有新增真实写入、没有运行任务、没有结案旧unknown、没有修改主代理独立报告。完整脱敏索引 `docs/gmail-outlook-browser-readonly-evidence.json`；**等待主代理独立验收；尚未发布部署。**
+
+### 8.11 既有Chrome单连接详情补证（2026-11-17）
+
+在同一持久连接中，已读Gmail G-EXISTING、G-FLAGS、G-STAR分别取得单封详情：合成发件人 `Mail Auto QA <qa@example.invalid>`，主题分别为 `[MA-QA-8f8ee80-SVC2]` 加对应夹具名，日期分别为11月16日23:43、23:44、23:43。Outlook已读M-FLAGS-02网页显示合成发件人、主题及11月16日21:23。网页详情未取得原始头或可靠单封标签；只读IMAP独立确认精确RFC Message-ID及成员，不把搜索词、会话标题或会话标签并集当单封原始头/成员证明。G-UNREAD没有打开。
+
+15:58–15:59只读远端回读的Gmail 12个成员和Outlook 3封，除观测时间外与本轮打开前元数据一致；G-UNREAD两成员保持未读，G-STAR保持星标。Outlook M-UNREAD-02远端已读而索引未读的既有差异仍在，未执行同步。15:59安全快照确认24 completed/3 needs_verification、空队列、相关写入和自动功能关闭；三条旧unknown身份和冻结计划未变。63表比较无业务增删，60表原样，仅OAuth refresh密文和旧unknown诊断时间变化。首次较旧备份比较失败及搜索未加载时的安全拒绝均保留，不覆盖旧证据。具体命令、退出码、私有证据SHA及限制见 `docs/gmail-outlook-browser-batch-evidence.json`。
+
+此项为真实账号**当前只读网页补证**，不是原始头验证、历史操作前后网页证据或整体验收通过。真实Outlook unknown人工保留、三条历史unknown的可信结案、Gmail INBOX范围外动作、组织账号和独立复验仍待完成；本轮没有真实写入或部署。**等待主代理独立验收；尚未发布部署。**
+
+追加限制：G-EXISTING官方单封菜单中的“显示原始邮件”已实际尝试，但同步拦截未捕获URL，AppleScript未发现新Gmail tab；随后唯一CDP连接的截图请求未返回，故未对另外两封尝试原始页，也未重连。Outlook详情处于自定义邮件视图设置模态框背景；模态框来源、是否保存及未保存改动未知，没有点击保存或取消。16:06:39两项只读安全快照退出0，业务及保护状态仍符合上述边界。
