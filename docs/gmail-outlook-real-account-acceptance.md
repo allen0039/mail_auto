@@ -308,6 +308,6 @@ MS-PERSONAL-01 仍 connected/generation4，成功授权审计最近为 19:34:39�
 
 Outlook授权和IMAP连接通过。针对官方网页仅直接进入 `https://outlook.live.com/mail/`；页面报 `TrustedTypePolicy` 的default policy已存在及TrustedHTML赋值错误，点击网页官方“Refresh the application”后仍失败。没有打开收件箱或任何邮件，故QA文件夹及测试邮件的网页端前后状态本轮无法确认；不推断登录故障或账号当前不可用。已有索引显示此前授权范围为全部可读取目录、Outlook索引130条，其中QA目录成员6条、QA主题前缀记录7条；本轮未触发同步，不能把旧索引说成当前网页状态。
 
-人工保留方面只读计数 `manual_keep_blocks=0`、`manual_resolutions=0`，没有真实人工保留夹具。本轮不伪造记录、不人工结案；此项未验证。真实刷新令牌供应商调用路径本轮未单独标记为通过；只读诊断可能走现有OAuthManager访问凭据/刷新路径，不能据此替代供应商刷新证据。组织Google Workspace/Microsoft 365仍未验证。
+人工保留方面只读计数 `manual_keep_blocks=0`、`manual_resolutions=0`，没有真实人工保留夹具。本轮不伪造记录、不人工结案；此项未验证。源码边界为：Gmail标签是同一逻辑邮件，“保留两份”在服务端明确拒绝；Outlook普通IMAP账号只有在源/目标为不同位置、Message-ID与主题/发件人/时间/大小等冻结元数据吻合、远端DuplicateVerifier确认字节摘要/大小/flags一致且不存在冲突操作时，才可人工保留结案。本轮没有Outlook unknown夹具，因此该路径没有实测。真实刷新令牌供应商调用路径本轮未单独标记为通过；只读诊断可能走现有OAuthManager访问凭据/刷新路径，不能据此替代供应商刷新证据。组织Google Workspace/Microsoft 365仍未验证。
 
 脱敏详细证据 `.planning/real-account-followup/summary.json`、`audit-before-web.json`、`current-gmail-unknown-remote.json`；只读IMAP Go helper源码/二进制留在同一私有planning目录，不纳入源码镜像。未读取私人邮件正文；未执行Sync、写入、任务或自动同步。**本轮部分只读账号验收通过；Outlook网页对照、真实人工保留、unknown安全结案路径及其余真实操作矩阵仍未完成，等待主代理独立审计，尚未发布部署。**
