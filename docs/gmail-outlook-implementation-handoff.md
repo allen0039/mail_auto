@@ -708,3 +708,11 @@ Gmail Chrome搜索结果与SVC2前缀/本地索引不一致，尚无逐动作官
 回退先停服务并保留配套快照；同schema仅可回到包含Gmail持久fence/安全撤销拒绝修复的候选，不混跑新旧worker，不自动重放三个unknown。新增sessionStorage结果只是非敏感界面提示，不是授权/业务记录；旧版忽略它，必要时在受保护管理页面关闭提示/退出。跨schema14回退仍恢复升级前数据库及配套主密钥，不修改user_version。
 
 主代理复验入口：审查893e781→ac29317的17路径差异与源码摘要，重跑scope/已连接失败重授权消息测试、默认UI/真实重载及正向成功清错负例、原四反例；读取最终门禁、镜像blob校验和真实QA只读边界证据。交接材料提交不扩大源码候选范围，不能由协作者自称独立通过。最终仍是**等待主代理独立验收；尚未发布部署。**
+
+### 16.7 原账号重授权后只读复核（2026-11-17）
+
+用户确认两服务商均对原账号重新授权。实施者只读审计确认原绑定身份摘要匹配、generation Google3/Microsoft5、应用配置版本2/1，精确回调及官方IMAP scope符合预期；当前state已消费。两家在本地管理UI连接诊断均通过TCP/TLS/OAuth IMAP/LIST，19/13目录。详细时间、摘要和证据见 `docs/gmail-outlook-real-account-acceptance.md` 8.7及 `.planning/real-account-followup/`。
+
+三条Gmail unknown通过受限四QA标签IMAP只读身份/成员检查，当前仍在各自源、目标及QA附加标签；原操作 `needs_verification` / `remote_state_unknown` / `recovery_account_changed`、冻结计划摘要不变。没有Reconcile、手动结案、写入或队列执行。人工保留表计数为0，不能声称人工保留通过。
+
+Outlook官方网页尝试并刷新后仍因Trusted Types报错，未打开收件箱/邮件；网页QA目录状态待验，不推断账号登录故障。Mail Auto旧索引仅显示此前范围全部可读文件夹、130条（含6条QA目录成员、7条QA主题前缀记录），本轮未同步。Google网页对照亦未执行。供应商真实refresh路径本轮不单独声称通过，组织账号仍未验证。真实账号整体验收仍未完成；等待主代理独立审计；尚未发布部署。
