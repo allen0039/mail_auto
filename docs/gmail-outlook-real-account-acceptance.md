@@ -311,3 +311,54 @@ Outlook授权和IMAP连接通过。针对官方网页仅直接进入 `https://ou
 人工保留方面只读计数 `manual_keep_blocks=0`、`manual_resolutions=0`，没有真实人工保留夹具。本轮不伪造记录、不人工结案；此项未验证。源码边界为：Gmail标签是同一逻辑邮件，“保留两份”在服务端明确拒绝；Outlook普通IMAP账号只有在源/目标为不同位置、Message-ID与主题/发件人/时间/大小等冻结元数据吻合、远端DuplicateVerifier确认字节摘要/大小/flags一致且不存在冲突操作时，才可人工保留结案。本轮没有Outlook unknown夹具，因此该路径没有实测。Gmail专用只读helper明确记录fresh OAuthManager真实refresh获取凭据成功；Microsoft只读连接使用新建OAuthManager后IMAP成功，但没有单独保留refresh响应/轮换字段，故不宣称refresh token发生轮换。凭据及响应正文均未记录。组织Google Workspace/Microsoft 365仍未验证。
 
 脱敏详细证据 `.planning/real-account-followup/summary.json`、`audit-before-web.json`、`current-gmail-unknown-remote.json`；只读IMAP Go helper源码/二进制留在同一私有planning目录，不纳入源码镜像。未读取私人邮件正文；未执行Sync、写入、任务或自动同步。**本轮部分只读账号验收通过；Outlook网页对照、真实人工保留、unknown安全结案路径及其余真实操作矩阵仍未完成，等待主代理独立审计，尚未发布部署。**
+
+### 8.8 最终补证：fresh-manager、逐封保护及安全拒绝（2026-11-17）
+
+本节不覆盖8.7的失败或历史观察。任务入口为 `docs/gmail-outlook-final-remediation-task.md`；起始HEAD `92d3b7326e9c467522817a409ab9d1f2afbc3534`，产品候选仍为 `ac29317395f21cf12a9b006e2adc2f4eec3eea60`、0.10.4/schema15，没有产品代码或迁移变更。实际命令、退出码、叶子计数、证据SHA256及最终快照汇总于 `docs/gmail-outlook-final-remediation-evidence.json`；原始私有证据在 `.planning/final-remediation/`，不提交或放入镜像。
+
+#### 8.8.1 已真实通过与逐封证据
+
+- **真实refresh而非改过期时间**：11:42:04–11:42:09(+08)，独立helper进程为每账号显式新建 `mailoauth.Manager`，无access-token缓存，调用正式 `CredentialForRoute`。成功路径必须实际完成提供商refresh grant及既有加密CAS写回，随后同一Manager作为生产 `Adapter.DiagnoseRoute` 的AuthSource，TLS、SASL **XOAUTH2**和只读LIST通过。MS-PERSONAL-01返回13目录，Google返回19目录；两者主体/tenant、generation(5/3)、应用版本(1/2)、scope及connected状态保持不变。未修改过期时间、未打印token/响应、未声明refresh token轮换。此为新helper真实刷新与登录证据，不冒称运行服务的缓存刷新或又一次服务重启。
+- **正式Service保护预览**：11:41:39，活动数据库以mode=ro/query_only打开，调用现有Gmail QA任务的 `Service.PreviewTask`，不保存任务/策略、不调用RunTask。SVC2 G-STAR与G-UNREAD在A/B标签各有一条预览，共4成员、2逻辑邮件；不是4封独立邮件，也不是新任务run的保护总数。
+
+| 精确SVC2夹具 | 稳定ID SHA256 | 预览/远端成员 | 正式预览原始原因 | 本轮远端flags |
+| --- | --- | --- | --- | --- |
+| G-STAR | `0b688f34f253e2b9709956dd58faf493fdaad329c5361fff83eed516cb1cf651` | MailAuto-QA-A、B | `Gmail 其他标签视图受保护：保留星标邮件`，status=protected、action=keep | 已读、星标、flags_known=true |
+| G-UNREAD | `1e409ed5a21e56342695caee27c528eaa82033797e9682c05e9af0bc4cbe8fe1` | MailAuto-QA-A、B | `Gmail 其他标签视图受保护：保留未读邮件`，status=protected、action=keep | 未读、非星标、flags_known=true |
+
+11:47:12–11:47:57以生产 `Adapter.RuleState` 对六封现有SVC2合成邮件的12个已知QA成员只读EXAMINE/UID FETCH元数据，身份及flags均与索引一致；只涉及四个既有QA标签，不调用Sync、不发布索引、不读正文。STAR/UNREAD各两个成员均与上述预览对应；UNREAD没有在网页打开，没有隐含Seen写入。MULTI为B/Target/Other，EXISTING为Target/Other，RULE为B/Target，FLAGS为A；这些是当前成员，不补造历史动作前后状态。
+
+#### 8.8.2 Gmail网页身份与能力边界
+
+较早同任务在用户既有Chrome中，精确RFC Message-ID搜索并查看G-MULTI、G-RULE单封原始邮件页；续接记录保存了原始主题/Message-ID及permmsgid十进制字符串，但没有留存那次完整原始头或截图。本轮仅整理已取得观察并与原IMAP证据及上述当前RuleState回读交叉计算，**不是重新打开网页完成全部网页验收**：
+
+| 夹具 / 精确Message-ID | 观察到的网页permmsgid尾号（字符串） | SHA256与X-GM-MSGID |
+| --- | --- | --- |
+| G-MULTI / `<G-MULTI-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>` | `1882030162988661164` | `b5a650bd5484f4927c22d50e30643413d634e3ee02c5d8b38511333e8c4010d5`，一致 |
+| G-RULE / `<G-RULE-8f8ee80-SVC2-20261116@mailauto-qa.example.invalid>` | `1882030167238756650` | `206b8cf1806954ff5402e3b2ff5bdcfac52606b6ab39b24202a5674d5a700b65`，一致 |
+
+不能把会话聚合的旧标题或会话标签并集当成单封状态；成员关系采用逐封稳定ID回读。另三封已读样本只有初步单封详情观察，精确原始头证据未补齐；UNREAD网页未打开，保留只读IMAP证据及网页限制。
+
+活动只读库调用正式 `NewPlan`：QA源归档、Trash、恢复及7个SPECIAL-USE目标移动均返回 `gmail_action_unsupported`，没有生成计划；对一条现有已完成QA普通move调用 `UndoPlan`，返回 `gmail_undo_unsupported`，没有反向计划。未调用三条真实unknown的结案/核验方法。Gmail“保留两份”另外在临时SQLite、现有正式夹具与核心Worker路径的补充overlay测试中证实 `PreviewManualKeep` 返回 `gmail_keep_both_unsupported`，原模拟unknown及计划不变、无第二次move/FinishMove；这是**模拟拒绝通过**，不是现有真实unknown的人工结案，也不是已纳入默认门禁的新产品测试。INBOX不在四QA标签范围，成功归档只引用正式协议模拟回归，不增加真实范围。
+
+#### 8.8.3 人工保留与网页阻塞
+
+现有正式Go race定向回归59叶子通过、0失败/跳过（13个顶层测试），涵盖人工保留原子/幂等/永久保护、变化证据拒绝、并发/预排队冲突、重启/重索引、生产network.Manager直连/代理身份变化，以及IMAP完整BODY.PEEK[]、flags/UIDVALIDITY/断线等fail-closed协议检查；另补充Gmail保留两份overlay为1/0/0，不与59或历史全量642累计。
+
+Outlook真实unknown人工保留仍**未实测**。安全隔离设计：新临时SQLite/Vault、纯合成账号及唯一测试Worker；正式Service/Worker发起一次受控COPY，由本地fake IMAP确定性省略可信COPYUID或丢失最终确认，保留源；之后正式Preview/Resolve只做完整原文PEEK及身份/flags复核，检查双份保护、审计和任务计数原子提交、预备计划拒绝及重启后持久性。不得复制真实token、在现有QA库SQL造unknown或破坏真实连接。现有Service核心Worker夹具与fake协议测试已实际执行；**新的fake-TCP+后台Worker组合端到端夹具只完成设计，没有实现或冒称运行，更没有真实Outlook供应商结案结果**。是否另做隔离真实供应商测试由主代理决定。
+
+用户随后明确只使用其现有Chrome：已正常关闭先前独立Puppeteer/Chrome，不再使用或创建独立profile，保留旧失败证据。既有Chrome157.0.8103.79有Gmail/MailAuto标签，没有Outlook邮件标签；AppleScript JavaScript执行关闭，返回error12，未开启设置或绕过策略。不会为了网页阻塞中止其他验证。
+
+**USER-ACTION-REQUIRED**：本人在正在使用的Chrome打开Outlook官方页面，进入原绑定个人账号现有 `MailAuto-QA` 目录；如需登录由本人完成。无需聊天提供密码/token/secret；不要求重复OAuth授权。其余网页逐动作对照仍待验。
+
+#### 8.8.4 最终安全终态及不能忽略的时间戳差异
+
+11:23:46先通过SQLite backup API制作一致数据库及配套主密钥私有备份，目录0700、db/key0600；运行库读取使用mode=ro而非immutable。后续及最终实时快照确认唯一PID85404/原候选二进制，ready/0.10.4/schema15，24 completed、3 needs_verification、queued/running=0，写入、两个任务、自动策略、自动同步及MCP均关闭；两主体/scope/代际、四QA标签、三份冻结计划SHA及稳定身份未变。最终采样时间见机器证据，不将本节较早时间冒称最后时刻。
+
+加强配套备份全表比对时首次断言退出1：三条unknown的 `operations.updated_at` 和对应 `operation_items.checked_at` 随现有唯一Worker周期保守拒绝而前进。逐行检查仅这六个单元格不同；`reconcileNextOperation`领取时更新updated_at，当前指纹不符在密码/远端调用前拒绝，`recordRecovery`写回原recovery code/detail及checked_at。未由helper调用Reconcile、未新增Worker、未进行provider邮件写入，原state/error/recovery、取消标记、源目标映射、其他时间列和冻结计划均严格相同。
+
+保留首次失败日志。最终验证**不声称原表逐字一致**：机器索引明确列出这两列逐记录旧/新值、raw-table-matches=false，并严格比较其余所有列；accounts/messages/mailboxes/folder_settings/mail_rules/automation_tasks/automation_policies/operation_plans/automation_claims/manual_keep_blocks/manual_resolutions原表摘要均一致。生产OAuthManager正常加密refresh CAS写回是另行授权的凭据维护，不当作业务变更，也不据密文变化推断供应商轮换。
+
+额外全库逐列审计退出0：63个用户表schema/主键集合一致，无插入/删除；60表原表完全一致。仅上述两列各3个诊断单元格及两账号 `mail_oauth_accounts.refresh` 加密CAS密文列变化；所有其他列（含其他时间字段）相同。敏感值不输出，只记录变化列名、行键hash及值hash，详见 `database-column-diff.json` 与机器索引。此项不是凭据轮换证明。
+
+FR-01继续保守拒绝：三份v2计划只在重建generation2/config2时匹配，当前为3/2；冻结设置版本1/3/9对当前18，旧计划没有独立稳定主体/tenant快照，不能凭同邮箱地址或当前标签并存放宽。三条未知操作不取消、不删除、不重放、不解除busy。新增真实写入/操作/run/邮件均为0；没有推送、发布标签、镜像发布、部署或生产清理。**部分真实只读补证与模拟/能力拒绝通过；真实账号整体验收未完成。等待主代理独立验收；尚未发布部署。**
