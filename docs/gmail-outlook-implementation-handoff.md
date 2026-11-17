@@ -711,8 +711,8 @@ Gmail Chrome搜索结果与SVC2前缀/本地索引不一致，尚无逐动作官
 
 ### 16.7 原账号重授权后只读复核（2026-11-17）
 
-用户确认两服务商均对原账号重新授权。实施者只读审计确认原绑定身份摘要匹配、generation Google3/Microsoft5、应用配置版本2/1，精确回调及官方IMAP scope符合预期；当前state已消费。两家在本地管理UI连接诊断均通过TCP/TLS/OAuth IMAP/LIST，19/13目录。详细时间、摘要和证据见 `docs/gmail-outlook-real-account-acceptance.md` 8.7及 `.planning/real-account-followup/`。
+用户确认两服务商均对原账号重新授权。实施者只读审计确认原绑定身份摘要匹配、generation Google3/Microsoft5、应用配置版本2/1，精确回调及官方IMAP scope符合预期（Google Gmail+OIDC identity，Microsoft仅Outlook IMAP委托scope）；当前state已消费。Gmail helper明确记录fresh manager实际refresh成功；Microsoft fresh manager IMAP认证成功，但未记录是否收到refresh token轮换。两家在本地管理UI连接诊断均通过TCP/TLS/OAuth IMAP/LIST，19/13目录。详细时间、摘要和证据见 `docs/gmail-outlook-real-account-acceptance.md` 8.7及 `.planning/real-account-followup/`。
 
 三条Gmail unknown通过受限四QA标签IMAP只读身份/成员检查，当前仍在各自源、目标及QA附加标签；原操作 `needs_verification` / `remote_state_unknown` / `recovery_account_changed`、冻结计划摘要不变。没有Reconcile、手动结案、写入或队列执行。人工保留表计数为0，不能声称人工保留通过。源码边界是Gmail标签视图拒绝“保留两份”；Outlook只有在冻结元数据匹配、远端重复内容校验通过且无冲突操作时方能结案，但本轮没有Outlook unknown夹具，未实测。
 
-Outlook官方网页尝试并刷新后仍因Trusted Types报错，未打开收件箱/邮件；网页QA目录状态待验，不推断账号登录故障。Mail Auto旧索引仅显示此前范围全部可读文件夹、130条（含6条QA目录成员、7条QA主题前缀记录），本轮未同步。Google网页对照亦未执行。供应商真实refresh路径本轮不单独声称通过，组织账号仍未验证。真实账号整体验收仍未完成；等待主代理独立审计；尚未发布部署。
+Outlook官方网页尝试并刷新后仍因Trusted Types报错，未打开收件箱/邮件；网页QA目录状态待验，不推断账号登录故障。Mail Auto旧索引仅显示此前范围全部可读文件夹、130条（含6条QA目录成员、7条QA主题前缀记录），本轮未同步。Google网页对照亦未执行。Google供应商真实refresh通过helper显式证据；Microsoft refresh-token轮换未单独确认，组织账号仍未验证。真实账号整体验收仍未完成；等待主代理独立审计；尚未发布部署。
