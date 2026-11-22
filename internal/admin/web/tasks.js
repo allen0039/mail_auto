@@ -57,6 +57,8 @@
     policy_expired: () => "整理授权已到期",
     policy_admin_changed: () => "管理员账号变更后，整理授权需要重新保存",
     source_not_synced: (i) => `整理授权的源目录「${folderLabel(i.target)}」不在该邮箱的同步文件夹中（运行前会检查授权的全部源目录）：请恢复同步该目录，或从整理授权中移除`,
+    unsupported_provider: () => "此邮箱不再支持连接，无法运行整理任务",
+    mail_password_missing: () => "邮箱缺少登录凭据，请在邮箱配置中补填密码",
     source_not_readable: (i) => `当前身份无权读取整理授权的源目录「${folderLabel(i.target)}」`,
     rules_changed: () => "绑定的规则已修改、停用或有更高优先级规则加入，请编辑任务重新确认规则",
     writes_disabled: () => "未打开“允许整理原邮箱”写入开关",

@@ -138,7 +138,7 @@ func (s *Service) superviseAutomatic(ctx context.Context, r *automaticRunner, re
 			}
 			wanted := map[string]Account{}
 			for _, a := range accounts {
-				if a.OAuth != nil && a.OAuth.Status != "connected" && a.OAuth.Status != "network_error" {
+				if a.connectionError() != nil {
 					continue
 				}
 				wanted[a.ID] = a

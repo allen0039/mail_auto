@@ -20,7 +20,6 @@ import (
 	"mail-auto/internal/config"
 	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
-	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"mail-auto/internal/telegram"
 	"mail-auto/internal/version"
@@ -193,10 +192,6 @@ func (s *Server) Handler() http.Handler {
 			s.oauthPublic(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/mail-oauth/") {
-			s.mailOAuthCallback(w, r)
-			return
-		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			s.api(w, r)
 			return
@@ -347,9 +342,6 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "请先修改初始用户名和密码")
 		return
 	}
-	if s.mailOAuthAPI(w, r, session) {
-		return
-	}
 	if s.networkAPI(w, r) {
 		return
 	}
@@ -414,8 +406,16 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, e.Error())
 			return
 		}
-		a, e := s.Mail.Create(in)
+		a, e := s.Mail.CreateContext(r.Context(), in)
 		if e != nil {
+			var safe interface {
+				PublicMessage() string
+				OperationErrorCode() string
+			}
+			if errors.As(e, &safe) || errors.Is(e, mail.ErrCapability) || errors.Is(e, mail.ErrAccountInput) || errors.Is(e, mail.ErrInput) || errors.Is(e, mail.ErrBusy) || errors.Is(e, network.ErrConfig) {
+				operationError(w, e)
+				return
+			}
 			fail(w, 422, "保存失败：检查外部 secret 文件是否可读，以及邮箱数量是否超过 10 个")
 			return
 		}
@@ -451,10 +451,6 @@ func operationError(w http.ResponseWriter, e error) {
 // operationStatus maps a service error to its HTTP status, message and the
 // sentinel's stable code ("unknown" when none matches).
 func operationStatus(e error) (int, string, string) {
-	var oauthError *mailoauth.Error
-	if errors.As(e, &oauthError) {
-		return 422, oauthError.Error(), oauthError.Code
-	}
 	switch {
 	case errors.Is(e, mail.ErrDailyLimit):
 		return 429, "已达到今天的自动整理上限，请明天继续或由管理员调整额度", "daily_limit_reached"
@@ -477,6 +473,13 @@ func operationStatus(e error) (int, string, string) {
 	case errors.Is(e, mail.ErrBusy):
 		return 409, e.Error(), "busy"
 	}
+	var safe interface {
+		PublicMessage() string
+		OperationErrorCode() string
+	}
+	if errors.As(e, &safe) {
+		return 422, safe.PublicMessage(), safe.OperationErrorCode()
+	}
 	return 422, "操作未完成。请检查邮箱授权码、IMAP 服务、允许的文件夹、网络和凭据密钥，然后重试；部分文件夹可能已同步", "unknown"
 }
 func (s *Server) account(w http.ResponseWriter, r *http.Request) {
@@ -487,7 +490,7 @@ func (s *Server) account(w http.ResponseWriter, r *http.Request) {
 		if !decode(w, r, &in) {
 			return
 		}
-		a, e := s.Mail.Update(id, in)
+		a, e := s.Mail.UpdateContext(r.Context(), id, in)
 		if e != nil {
 			if errors.Is(e, mail.ErrAccountInput) {
 				fail(w, 400, e.Error())

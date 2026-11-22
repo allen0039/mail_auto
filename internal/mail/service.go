@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"mail-auto/internal/credentials"
-	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"mail-auto/internal/store"
 )
@@ -52,8 +51,6 @@ type Service struct {
 	epoch                 map[string]uint64
 	automatic             *automaticRunner
 	revision              atomic.Uint64
-	oauthOnce             sync.Once
-	oauth                 *mailoauth.Manager
 }
 type AccountInput struct {
 	Name       string          `json:"name"`
@@ -69,7 +66,7 @@ type AccountInput struct {
 
 var ErrLabelInput = errors.New("标签配置无效")
 
-var Providers = map[string][]string{"qq": {"imap.qq.com"}, "netease": {"imap.163.com", "imap.126.com", "imap.yeah.net"}, "icloud": {"imap.mail.me.com"}, "google": {"imap.gmail.com"}, "microsoft": {"outlook.office365.com"}}
+var Providers = map[string][]string{"qq": {"imap.qq.com"}, "netease": {"imap.163.com", "imap.126.com", "imap.yeah.net"}, "icloud": {"imap.mail.me.com"}, "google": {"imap.gmail.com"}}
 
 const accountColumns = "id,name,provider,username,host,port,folders,secret,secret_file,created_at"
 
@@ -180,6 +177,15 @@ func (s *Service) holdAutomatic(id string) func() {
 func ValidateAccount(a *AccountInput) error {
 	return validateAccount(a, false)
 }
+func normalizeGmailPassword(password string) string {
+	return strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || r == '\u00a0' {
+			return -1
+		}
+		return r
+	}, password)
+}
+
 func validateAccount(a *AccountInput, keepCredential bool) error {
 	a.Name = strings.TrimSpace(a.Name)
 	a.Username = strings.TrimSpace(a.Username)
@@ -189,7 +195,7 @@ func validateAccount(a *AccountInput, keepCredential bool) error {
 	}
 	hosts, ok := Providers[a.Provider]
 	if !ok {
-		return errors.New("支持 QQ、网易、iCloud、Gmail 和 Outlook")
+		return errors.New("仅支持 QQ、网易、iCloud 和 Gmail")
 	}
 	if a.Host == "" {
 		a.Host = hosts[0]
@@ -219,12 +225,22 @@ func validateAccount(a *AccountInput, keepCredential bool) error {
 		}
 		seen[f] = true
 	}
-	if mailoauth.IsProvider(a.Provider) {
-		if a.Password != "" || a.SecretFile != "" || a.Port != 993 || strings.ContainsAny(a.Username, "\x01") || !strings.Contains(a.Username, "@") {
-			return errors.New("请使用 Gmail / Outlook 官方 OAuth 和 IMAPS 993；填写邮箱地址，不填写密码或 secret 文件")
+	if strings.ContainsAny(a.Password, "\r\n\x00") {
+		return errors.New("授权码或应用专用密码包含无效字符")
+	}
+	switch a.Provider {
+	case "google":
+		a.Password = normalizeGmailPassword(a.Password)
+		if a.Host != "imap.gmail.com" || a.Port != 993 || a.SecretFile != "" || strings.ContainsAny(a.Username, "\x01") || !strings.Contains(a.Username, "@") {
+			return errors.New("请通过 imap.gmail.com:993（IMAPS）使用 Gmail 邮箱地址与 Google 应用专用密码")
 		}
-	} else if (a.Password != "" && a.SecretFile != "") || (!keepCredential && a.Password == "" && a.SecretFile == "") {
-		return errors.New("授权码和外部 secret 文件须且仅填写一项")
+		if !keepCredential && a.Password == "" {
+			return errors.New("请填写 Google 应用专用密码")
+		}
+	default:
+		if (a.Password != "" && a.SecretFile != "") || (!keepCredential && a.Password == "" && a.SecretFile == "") {
+			return errors.New("授权码和外部 secret 文件须且仅填写一项")
+		}
 	}
 	if len(a.Password) > 4096 {
 		return errors.New("授权码过长")
@@ -238,9 +254,53 @@ func validateAccount(a *AccountInput, keepCredential bool) error {
 	}
 	return nil
 }
+
+func (s *Service) verifyPasswordAccount(ctx context.Context, account Account, password string) error {
+	if s.Remote == nil {
+		return nil
+	}
+	if s.Network != nil {
+		if remote, ok := s.Remote.(interface {
+			DiagnoseRoute(context.Context, Account, string, network.Route) ([]string, error)
+		}); ok {
+			policy := account.Proxy
+			if policy.Mode == "" {
+				policy.Mode = "inherit"
+			}
+			route, err := s.Network.ResolvePolicy(policy)
+			if err != nil {
+				return err
+			}
+			_, err = remote.DiagnoseRoute(ctx, account, password, route)
+			return err
+		}
+	}
+	_, err := s.Remote.Folders(ctx, account, password)
+	return err
+}
+
 func (s *Service) Create(a AccountInput) (Account, error) {
+	ctx := s.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.CreateContext(ctx, a)
+}
+
+func (s *Service) CreateContext(ctx context.Context, a AccountInput) (Account, error) {
 	if e := ValidateAccount(&a); e != nil {
 		return Account{}, e
+	}
+	if a.Provider == "google" {
+		candidate := Account{Provider: "google", Username: a.Username, Host: "imap.gmail.com", Port: 993}
+		if a.Proxy != nil {
+			candidate.Proxy = *a.Proxy
+		} else {
+			candidate.Proxy = network.Policy{Mode: "inherit"}
+		}
+		if e := s.verifyPasswordAccount(ctx, candidate, a.Password); e != nil {
+			return Account{}, e
+		}
 	}
 	id := credentials.Random(18)
 	cipher := []byte(nil)
@@ -249,7 +309,7 @@ func (s *Service) Create(a AccountInput) (Account, error) {
 		if _, e = credentials.ExternalSecret(s.SecretDir, a.SecretFile); e != nil {
 			return Account{}, e
 		}
-	} else if !mailoauth.IsProvider(a.Provider) {
+	} else {
 		cipher, e = s.Vault.Encrypt(a.Password, "account:"+id)
 		if e != nil {
 			return Account{}, e
@@ -263,27 +323,14 @@ func (s *Service) Create(a AccountInput) (Account, error) {
 	}
 	defer tx.Rollback()
 	var n int
-	if e = tx.QueryRow("SELECT count(*) FROM accounts a LEFT JOIN mail_oauth_accounts o ON o.account_id=a.id WHERE o.account_id IS NULL OR o.subject<>''").Scan(&n); e != nil {
+	if e = tx.QueryRow("SELECT count(*) FROM accounts WHERE provider IN ('qq','netease','icloud','google')").Scan(&n); e != nil {
 		return Account{}, e
 	}
-	if n >= 10 && !mailoauth.IsProvider(a.Provider) {
+	if n >= 10 {
 		return Account{}, errors.New("首版最多支持 10 个邮箱")
-	}
-	if mailoauth.IsProvider(a.Provider) {
-		if e = tx.QueryRow("SELECT count(*) FROM mail_oauth_accounts WHERE subject=''").Scan(&n); e != nil {
-			return Account{}, e
-		}
-		if n >= 10 {
-			return Account{}, errors.New("待授权邮箱最多 10 个，请完成授权或移除不再需要的待授权邮箱")
-		}
 	}
 	if _, e = tx.Exec("INSERT INTO accounts("+accountColumns+") VALUES(?,?,?,?,?,?,?,?,?,?)", id, a.Name, a.Provider, a.Username, a.Host, a.Port, string(folders), cipher, a.SecretFile, now); e != nil {
 		return Account{}, e
-	}
-	if mailoauth.IsProvider(a.Provider) {
-		if _, e = tx.Exec("INSERT INTO mail_oauth_accounts(account_id,provider,login,config_version) VALUES(?,?,?,COALESCE((SELECT version FROM mail_oauth_apps WHERE provider=?),0))", id, a.Provider, a.Username, a.Provider); e != nil {
-			return Account{}, e
-		}
 	}
 	if a.Proxy != nil {
 		if e = network.SetAccount(tx, id, *a.Proxy); e != nil {
@@ -300,9 +347,17 @@ func (s *Service) Create(a AccountInput) (Account, error) {
 	return s.Account(id)
 }
 
-// Update keeps the account identity and existing credential unless a replacement
-// is supplied. Index changes and the audit entry commit with the configuration.
 func (s *Service) Update(id string, in AccountInput) (Account, error) {
+	ctx := s.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.UpdateContext(ctx, id, in)
+}
+
+// UpdateContext keeps the account identity and existing credential unless a replacement
+// is supplied. Index changes and the audit entry commit with the configuration.
+func (s *Service) UpdateContext(ctx context.Context, id string, in AccountInput) (Account, error) {
 	if e := validateAccount(&in, true); e != nil {
 		return Account{}, fmt.Errorf("%w: %v", ErrAccountInput, e)
 	}
@@ -315,9 +370,27 @@ func (s *Service) Update(id string, in AccountInput) (Account, error) {
 	if e != nil {
 		return Account{}, e
 	}
-	if (mailoauth.IsProvider(old.Provider) || mailoauth.IsProvider(in.Provider)) && (old.Provider != in.Provider || old.Username != in.Username || old.Host != in.Host || old.Port != in.Port) {
-		return Account{}, fmt.Errorf("%w: OAuth 邮箱身份不能修改，请删除后重新添加；原账号可重新授权", ErrAccountInput)
+	if _, supported := Providers[old.Provider]; !supported {
+		return Account{}, fmt.Errorf("%w: 已停止支持此邮箱，不能重新配置", ErrAccountInput)
 	}
+	if old.Provider != in.Provider && (old.Provider == "google" || in.Provider == "google") {
+		return Account{}, fmt.Errorf("%w: 不能直接更改 Gmail 服务商类型", ErrAccountInput)
+	}
+	if old.Provider == "google" {
+		if old.Username != in.Username && in.Password == "" {
+			return Account{}, fmt.Errorf("%w: 修改 Gmail 邮箱地址时请填写对应的应用专用密码", ErrAccountInput)
+		}
+		if in.Password != "" {
+			candidate := Account{ID: id, Provider: "google", Username: in.Username, Host: "imap.gmail.com", Port: 993, Proxy: old.Proxy}
+			if in.Proxy != nil {
+				candidate.Proxy = *in.Proxy
+			}
+			if e = s.verifyPasswordAccount(ctx, candidate, in.Password); e != nil {
+				return Account{}, e
+			}
+		}
+	}
+	credentialChanged := in.Password != "" || in.SecretFile != ""
 	cipher, secretFile := old.Secret, old.SecretFile
 	if in.Password != "" {
 		cipher, e = s.Vault.Encrypt(in.Password, "account:"+id)
@@ -376,11 +449,16 @@ func (s *Service) Update(id string, in AccountInput) (Account, error) {
 	if e = tx.Commit(); e != nil {
 		return Account{}, e
 	}
+	if credentialChanged || identityChanged {
+		s.credentialsChanged(id)
+	} else {
+		s.wakeAutomatic()
+	}
 	s.revision.Add(1)
 	s.Store.RequestReclaim()
-	s.wakeAutomatic()
 	return s.Account(id)
 }
+
 func scanAccount(row interface{ Scan(...any) error }) (Account, error) {
 	var a Account
 	var folders string
@@ -391,9 +469,14 @@ func scanAccount(row interface{ Scan(...any) error }) (Account, error) {
 	if e = json.Unmarshal([]byte(folders), &a.Folders); e != nil {
 		return a, e
 	}
-	a.CredentialSource = "encrypted"
-	if a.SecretFile != "" {
+	if _, supported := Providers[a.Provider]; !supported {
+		a.CredentialSource = "unsupported"
+	} else if a.SecretFile != "" {
 		a.CredentialSource = "external"
+	} else if len(a.Secret) == 0 {
+		a.CredentialSource = "missing"
+	} else {
+		a.CredentialSource = "encrypted"
 	}
 	return a, nil
 }
@@ -440,9 +523,18 @@ func (s *Service) Account(id string) (Account, error) {
 	}
 	return account, err
 }
+func (a Account) connectionError() *recoveryBlock {
+	switch a.CredentialSource {
+	case "unsupported":
+		return &recoveryBlock{"unsupported_provider", "已停止支持此邮箱；可查看现有邮件索引，不再连接服务器", ErrCapability}
+	case "missing":
+		return &recoveryBlock{"mail_password_missing", "邮箱缺少登录凭据，请在邮箱配置中填写授权码或应用专用密码", ErrCapability}
+	}
+	return nil
+}
 func (s *Service) password(a Account) (string, error) {
-	if mailoauth.IsProvider(a.Provider) {
-		return "", nil
+	if err := a.connectionError(); err != nil {
+		return "", err
 	}
 	if a.SecretFile != "" {
 		return credentials.ExternalSecret(s.SecretDir, a.SecretFile)
@@ -472,10 +564,9 @@ func (s *Service) Delete(id string) error {
 		return e
 	}
 	if e = tx.Commit(); e == nil {
-		s.OAuthManager().Invalidate(id)
+		s.credentialsChanged(id)
 		s.revision.Add(1)
 		s.Store.RequestReclaim()
-		s.wakeAutomatic()
 	}
 	return e
 }

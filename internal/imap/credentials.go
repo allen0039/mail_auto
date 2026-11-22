@@ -1,29 +1,15 @@
 package imap
 
 import (
-	"errors"
-	"fmt"
+	"mail-auto/internal/credentials"
 	"mail-auto/internal/mail"
 	"strconv"
-	"strings"
 )
 
-type xoauth2 struct{ username, token string }
-
-func (auth *xoauth2) Start() (string, []byte, error) {
-	if auth.username == "" || auth.token == "" || strings.ContainsAny(auth.username+auth.token, "\x00\x01\r\n") {
-		return "", nil, errors.New("invalid XOAUTH2 credential")
-	}
-	return "XOAUTH2", []byte("user=" + auth.username + "\x01auth=Bearer " + auth.token + "\x01\x01"), nil
-}
-func (auth *xoauth2) Next([]byte) ([]byte, error) { return []byte{}, nil }
-
 func accountAuthKey(account mail.Account) string {
-	if account.OAuth == nil {
-		return "password"
-	}
-	return fmt.Sprintf("%d:%d", account.OAuth.Generation, account.OAuth.ConfigVersion)
+	return credentials.Digest(string(account.Secret) + "\x00" + account.SecretFile + "\x00" + account.Username + "\x00" + account.Host + "\x00" + strconv.Itoa(account.Port))
 }
+
 func (adapter *Adapter) InvalidateCredentials(id string) {
 	if adapter.pool == nil {
 		return

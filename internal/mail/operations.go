@@ -129,7 +129,7 @@ func reconcileSchedule(o Operation, now time.Time) (string, int64) {
 }
 
 func accountIdentity(a Account) string {
-	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, a.OAuth, a.Proxy})
+	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, nil, a.Proxy})
 	h := sha256.Sum256(raw)
 	return "v2:" + hex.EncodeToString(h[:])
 }
@@ -139,12 +139,12 @@ func recoveryIdentityMatches(a Account, frozen string) bool {
 	if frozen == current {
 		return true
 	}
-	previous, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, a.OAuth})
+	previous, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders, a.NetworkRevision, nil})
 	previousDigest := sha256.Sum256(previous)
 	if frozen == hex.EncodeToString(previousDigest[:]) {
 		return true
 	}
-	if a.OAuth != nil || (a.NetworkRevision != "" && a.NetworkRevision != "direct") {
+	if a.NetworkRevision != "" && a.NetworkRevision != "direct" {
 		return false
 	}
 	raw, _ := json.Marshal([]any{a.Provider, a.Username, a.Host, a.Port, a.Folders})

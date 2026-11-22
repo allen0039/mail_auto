@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.6 — 2026-11-22
+
+- 删除 Gmail 和 Outlook 的邮箱 OAuth 路由、客户端、前端、配置文件导入导出及构建参数；Outlook 不再提供接入。MCP 客户端授权不变。
+- Gmail 仅使用 Google 应用专用密码；标签目录映射、稳定邮件 ID、分类与保护逻辑保留。旧 Gmail 邮箱需补填应用专用密码后同步。
+- Schema 17 原子移除旧邮箱 OAuth 表，同时迁移 Gmail 文件夹用途分类。保留邮箱索引、规则、任务及其他邮箱凭据；已有 Outlook 记录仅保留本地索引，不再连接或运行整理。
+- 运行镜像保持静态二进制和 distroless 非 root；移除构建期 OAuth 注入，排除测试夹具。
+
+## 0.10.5 — 2026-11-18（历史候选，已被替代）
+
+- 解耦“邮箱服务商（provider）”与“认证方式（authentication）”：不再根据 `google` / `microsoft` 强制推断 OAuth2；IMAP 认证按账号认证方式分流，Gmail 标签能力（`X-GM-EXT-1`、`X-GM-MSGID`、`X-GM-LABELS` 跨标签去重与安全限制）继续按 `google` 服务商保留。
+- Gmail 新接入改为“邮箱地址 + Google 应用专用密码”直连 `imap.gmail.com:993`（严格 TLS 校验证书，不接受自定义主机或明文），支持粘贴带空格的 16 位分组密码，前端不回显，更新留空保留旧密码；保存、轮换密码或迁移前先完成 IMAP 与 `X-GM-EXT-1` 校验再宣告已连接，替换失败保留原可用凭据，成功后使旧连接池和自动同步会话失效；区分凭据被拒与网络/TLS 失败，不泄露原始凭据。
+- 移除 Gmail OAuth 登录；启动时清除 Google OAuth 配置、授权状态和绑定，保留邮箱、目录、规则及任务。旧 OAuth 账号需在编辑配置中补填应用专用密码。Outlook 授权不变。
+- 个人 Outlook / Hotmail / Live 改为公共客户端 Device Authorization Grant（authority `consumers`，scope 保留 `openid email profile offline_access https://outlook.office.com/IMAP.AccessAsUser.All`，不使用 `client_secret` 或 Graph `Mail.Read`）：普通部署者无需配置 Client ID、Client Secret、公网域名或回调地址；点击「连接 Outlook」在后台申请设备码并轮询（遵守 `interval`、`slow_down`、过期、拒绝、取消与重启），`device_code` / token 不进入浏览器；仅在 OIDC 身份验证与 XOAUTH2 IMAP 均成功后才绑定并显示「已连接」，原页面自动刷新状态。提供构建注入点 `MICROSOFT_PUBLIC_CLIENT_ID`（`-ldflags`），当前源码未内置真实 Client ID，真实 Outlook 验收/发布处于阻塞状态。
+- 老 Outlook Web OAuth 账号不混用新公共 Client ID，支持同一账号就地通过设备码重新授权切换，中途取消或登录错号保持原连接不变。
+- 数据库 schema 15 → 16：`mail_oauth_accounts` 原子新增 `flow` 与 `client_id` 列；旧二进制不能打开 schema 16，回退须恢复升级前数据库快照与配套 `master.key`。
+
 ## 0.10.4 — 2026-11-17（开发候选，尚未发布）
 
 - 补充默认 Go 回归：隔离 loopback TCP IMAP、全新 SQLite/Vault 和正式 Service/后台 Worker 联合验证人工保留；覆盖 COPY 确认丢失/缺映射、完整 PEEK、原子回滚、并发确认、跨任务/排队冲突及重启重索引永久保护。本项仅测试与材料新增，不改变运行时能力、版本或 schema，不代表真实 Outlook 人工保留验收通过。

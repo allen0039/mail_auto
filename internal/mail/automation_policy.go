@@ -257,6 +257,9 @@ func (s *Service) authorizedAutomation(a Access, id string) (Access, AutomationP
 	if e != nil {
 		return a, p, e
 	}
+	if unavailable := account.connectionError(); unavailable != nil {
+		return a, p, unavailable
+	}
 	if issues := grantSourceIssues(a, account, p); len(issues) > 0 {
 		return a, p, issues[0].asError()
 	}

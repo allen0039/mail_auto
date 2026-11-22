@@ -100,8 +100,12 @@ func (s *Service) StartSync(id string) (SyncJob, error) {
 			s.wg.Done()
 		}
 	}()
-	if _, e := s.Account(id); e != nil {
+	account, e := s.Account(id)
+	if e != nil {
 		return SyncJob{}, e
+	}
+	if unavailable := account.connectionError(); unavailable != nil {
+		return SyncJob{}, unavailable
 	}
 	job := SyncJob{AccountID: id, State: "queued", StartedAt: time.Now().Unix()}
 	if e := s.saveJob(ctx, &job); e != nil {

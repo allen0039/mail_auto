@@ -3,7 +3,6 @@ package imap
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -17,75 +16,6 @@ import (
 	"github.com/emersion/go-imap/client"
 	"mail-auto/internal/mail"
 )
-
-func TestXOAUTH2WireAndChallenge(t *testing.T) {
-	for _, mode := range []string{"google", "microsoft", "challenge", "disconnect", "bad_username"} {
-		t.Run(mode, func(t *testing.T) {
-			auth := &xoauth2{username: "fixture@example.test", token: "fixture-access"}
-			if mode == "bad_username" {
-				auth.username = "injected\x01user"
-				if _, _, err := auth.Start(); err == nil {
-					t.Fatal("SASL injection")
-				}
-				return
-			}
-			left, right := net.Pipe()
-			left.SetDeadline(time.Now().Add(3 * time.Second))
-			defer left.Close()
-			done := make(chan error, 1)
-			go func() {
-				defer right.Close()
-				fmt.Fprint(right, "* OK [CAPABILITY IMAP4rev1 AUTH=XOAUTH2] fixture\r\n")
-				reader := bufio.NewReader(right)
-				line, err := reader.ReadString('\n')
-				if err != nil {
-					done <- err
-					return
-				}
-				fields := strings.Fields(line)
-				if len(fields) < 3 || fields[1] != "AUTHENTICATE" || fields[2] != "XOAUTH2" {
-					done <- errors.New("wrong SASL mechanism")
-					return
-				}
-				fmt.Fprint(right, "+ \r\n")
-				wire, err := reader.ReadString('\n')
-				decoded, decodeErr := base64.StdEncoding.DecodeString(strings.TrimSpace(wire))
-				if err != nil || decodeErr != nil || string(decoded) != "user=fixture@example.test\x01auth=Bearer fixture-access\x01\x01" {
-					done <- errors.New("incorrect XOAUTH2 frame")
-					return
-				}
-				if mode == "disconnect" {
-					done <- nil
-					return
-				}
-				if mode == "challenge" {
-					fmt.Fprintf(right, "+ %s\r\n", base64.StdEncoding.EncodeToString([]byte(`{"status":"401","sensitive":"fixture"}`)))
-					answer, _ := reader.ReadString('\n')
-					if strings.TrimSpace(answer) != "" {
-						done <- errors.New("SASL error was not acknowledged with empty response")
-						return
-					}
-					fmt.Fprintf(right, "%s NO authentication failed\r\n", fields[0])
-				} else {
-					fmt.Fprintf(right, "%s OK authenticated\r\n", fields[0])
-				}
-				done <- nil
-			}()
-			imapClient, err := client.New(left)
-			if err != nil {
-				t.Fatal(err)
-			}
-			imapClient.ErrorLog = log.New(io.Discard, "", 0)
-			err = imapClient.Authenticate(auth)
-			if (err == nil) != (mode == "google" || mode == "microsoft") {
-				t.Fatal("SASL result", err)
-			}
-			if err = <-done; err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
 
 type gmailFixture struct {
 	mu     sync.Mutex

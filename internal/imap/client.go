@@ -19,7 +19,6 @@ import (
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message/charset"
 	"mail-auto/internal/mail"
-	"mail-auto/internal/mailoauth"
 	mailmime "mail-auto/internal/mime"
 	"mail-auto/internal/network"
 	"mail-auto/internal/version"
@@ -112,30 +111,19 @@ type connection struct {
 	gmail      bool
 }
 
+type gmailCapabilityError struct{}
+
+func (*gmailCapabilityError) Error() string {
+	return "Gmail IMAP 未提供所需的 X-GM-EXT-1 能力，请确认连接到官方 imap.gmail.com"
+}
+func (*gmailCapabilityError) PublicMessage() string {
+	return "Gmail IMAP 未提供所需的 X-GM-EXT-1 能力，请确认连接到官方 imap.gmail.com"
+}
+func (*gmailCapabilityError) Unwrap() error { return mail.ErrCapability }
+
 func dialRoute(ctx context.Context, a mail.Account, password string, route network.Route) (*connection, error) {
 	initCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	var credential mailoauth.Credential
-	if mailoauth.IsProvider(a.Provider) {
-		if a.AuthSource == nil {
-			return nil, mailoauth.Failure("oauth_pending")
-		}
-		var err error
-		credential, err = a.AuthSource.Credential(initCtx, a.ID, route.Key)
-		if err != nil {
-			return nil, err
-		}
-		if source, ok := a.AuthSource.(interface {
-			ValidateGeneration(string, int64, int64) error
-		}); ok && a.OAuth != nil {
-			if err = source.ValidateGeneration(a.ID, a.OAuth.Generation, a.OAuth.ConfigVersion); err != nil {
-				return nil, err
-			}
-		}
-		if credential.Mechanism != "XOAUTH2" {
-			return nil, mailoauth.Failure("oauth_imap_denied")
-		}
-	}
 	raw, e := route.DialTLS(initCtx, net.JoinHostPort(a.Host, strconv.Itoa(a.Port)), a.Host)
 	if e != nil {
 		cancel()
@@ -171,23 +159,17 @@ func dialRoute(ctx context.Context, a mail.Account, password string, route netwo
 		}
 	}
 	conn.resetBudget()
-	if mailoauth.IsProvider(a.Provider) {
-		e = c.Authenticate(&xoauth2{username: credential.Username, token: credential.Token})
-	} else {
-		e = c.Login(a.Username, password)
-	}
-	if e != nil {
+	if e = c.Login(a.Username, password); e != nil {
 		err := remoteFailure(conn, "邮箱登录", e)
 		conn.close()
-		if mailoauth.IsProvider(a.Provider) {
-			var transient *remoteError
-			if errors.As(err, &transient) && transient.retryable {
-				return nil, err
+		var remote *remoteError
+		if errors.As(err, &remote) && !remote.retryable && remote.OperationErrorCode() == "provider_error" {
+			remote.code = "credentials_rejected"
+			if a.Provider == "google" {
+				remote.reason = "邮箱地址或应用专用密码被 Gmail 服务器拒绝（非网络/TLS 故障）；请确认已开启两步验证且账号允许应用专用密码，请勿输入 Google 登录密码"
+			} else {
+				remote.reason = "用户名或授权码被服务器拒绝（非网络/TLS 故障），请检查邮箱地址、授权码和 IMAP 开关"
 			}
-			if source, ok := a.AuthSource.(interface{ AuthenticationFailed(string, string) }); ok {
-				source.AuthenticationFailed(a.ID, credential.Token)
-			}
-			return nil, mailoauth.Failure("oauth_imap_denied")
 		}
 		return nil, err
 	}
@@ -201,7 +183,7 @@ func dialRoute(ctx context.Context, a mail.Account, password string, route netwo
 		}
 		if !conn.gmail {
 			conn.close()
-			return nil, mail.ErrCapability
+			return nil, &gmailCapabilityError{}
 		}
 	}
 	return conn, nil

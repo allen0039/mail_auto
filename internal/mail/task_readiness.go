@@ -189,6 +189,9 @@ func (s *Service) TaskReadiness(a Access, account string) ([]TaskReadiness, erro
 		add := func(code, area, target string, blocking bool) {
 			r.Issues = append(r.Issues, TaskIssue{Code: code, Area: area, Target: target, Blocking: blocking})
 		}
+		if unavailable := acc.connectionError(); unavailable != nil {
+			add(unavailable.OperationErrorCode(), "account", "", true)
+		}
 		// Check what enabling (or a run of an enabled task) would require.
 		check := t
 		if check.Trigger != "manual" {

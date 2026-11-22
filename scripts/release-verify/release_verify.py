@@ -188,6 +188,10 @@ def schema_matches(version, before, after):
         return before in (13, 14) and after == 14
     if version in ("0.10.0", "0.10.1", "0.10.2", "0.10.3", "0.10.4"):
         return before in (14, 15) and after == 15
+    if version == "0.10.5":
+        return before in (15, 16) and after == 16
+    if version == "0.10.6":
+        return before in (14, 15, 16, 17) and after == 17
     return before == after
 
 

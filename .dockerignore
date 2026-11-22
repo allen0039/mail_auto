@@ -8,3 +8,4 @@
 !Dockerfile
 !THIRD_PARTY_NOTICES.txt
 **/*_test.go
+**/testdata/

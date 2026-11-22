@@ -19,13 +19,12 @@ Go 编写的个人多邮箱工作台：IMAP 自动同步、原邮箱文件夹分
 - MCP 默认关闭。「核验记录与 MCP」页面可保存公开 HTTPS 地址和开关、检测连接并复制 Codex / ChatGPT 配置，见 [MCP 接入指南](docs/mcp-setup.md)。
 - 远端写入支持原生 MOVE + UIDPLUS，也支持 UIDPLUS 的确认复制后定向移除兼容路径；支持在原邮箱创建文件夹，归档与回收站独立可选。
 - 「网络与代理」支持 HTTP、HTTPS、SOCKS5，全局默认直连，邮箱、TG 与 Agent 可独立覆盖，代理失败不自动直连，见 [代理配置](docs/network-proxy.md)。
-- 支持 QQ、网易（163 / 126 / yeah.net）、iCloud 的 IMAPS 接入；新增 Gmail / 个人 Outlook 官方 OAuth 开发候选，真实账号验收待完成。Gmail 分类操作标签成员关系，支持普通标签分类、INBOX 归档和标记；回收站、恢复、特殊目录移动及“保留两份”服务端拒绝，详见 [接入及能力边界](docs/gmail-outlook-setup.md)。各服务商的真实账号验证情况见 [配置文档](docs/configuration.md#邮箱接入)，历史证据见 `docs/acceptance-*.md` 与 [历史记录](docs/archive/)。
+- 支持 QQ、网易（163 / 126 / yeah.net）、iCloud 和 Gmail 的 IMAPS 接入。Gmail 使用 Google 应用专用密码，支持普通标签分类、INBOX 归档和标记；回收站、恢复、特殊目录移动及“保留两份”由服务端安全拒绝。详见 [Gmail 接入与能力边界](docs/gmail-setup.md)；各服务商验收情况见 [配置文档](docs/configuration.md#邮箱接入)。
 
 ## 快速开始
 
-镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前开发候选版本为 `0.10.4`、schema 15，尚待独立验收和真实账号验证，**没有发布该版本标签或镜像**。候选 Compose 的 `allen0039/mail-auto:0.10.4` 仅供验收通过后的发布使用；现有生产 `latest` 未更新。镜像支持 Linux amd64 / arm64。运行时、界面与 MCP 统一读取版本号。schema 15 增加 Gmail / Outlook OAuth 与 Gmail 消息身份，保留原有授权码、外部 secret、任务和人工保留保护。旧二进制不能打开 schema 15；回退必须恢复升级前数据库和配套主密钥，见[接入与回退说明](docs/gmail-outlook-setup.md)。
+镜像：[`allen0039/mail-auto`](https://hub.docker.com/r/allen0039/mail-auto)。当前版本为 `0.10.6`（schema 17），镜像面向 Linux amd64 / arm64，运行时仅包含非 root distroless 基础镜像、静态二进制和许可证。旧版数据库升级和回退见 [迁移说明](docs/gmail-setup.md#数据库迁移与回退)。
 
-Google / Microsoft OAuth 应用各注册一次即可供多个自用实例和邮箱复用；支持[导出并在部署时自动载入](docs/oauth-app-reuse.md)，添加邮箱时分别官方登录授权。新域名仍须登记精确回调，镜像不包含通用客户端密钥。
 
 在运行 Docker 的主机执行：
 

@@ -27,7 +27,6 @@ type Config struct {
 	AutomaticSync       bool   `yaml:"automatic_sync"`
 	SyncIntervalSeconds int    `yaml:"sync_interval_seconds"`
 	MCPEnabled          bool   `yaml:"mcp_enabled"`
-	MailOAuthAppsFile   string `yaml:"mail_oauth_apps_file"`
 }
 
 func Load(args []string) (Config, []string, error) {
@@ -71,7 +70,6 @@ func Load(args []string) (Config, []string, error) {
 	fs.BoolVar(&c.AutomaticSync, "automatic-sync", c.AutomaticSync, "automatically reconcile mailbox changes")
 	fs.IntVar(&c.SyncIntervalSeconds, "sync-interval-seconds", c.SyncIntervalSeconds, "seconds between completed automatic folder checks (5..3600)")
 	fs.BoolVar(&c.MCPEnabled, "mcp-enabled", c.MCPEnabled, "enable authenticated MCP and OAuth at an HTTPS public_url")
-	fs.StringVar(&c.MailOAuthAppsFile, "mail-oauth-apps-file", c.MailOAuthAppsFile, "protected Google/Microsoft application deployment file")
 	if e := fs.Parse(args); e != nil {
 		return c, nil, e
 	}
@@ -96,9 +94,6 @@ func Load(args []string) (Config, []string, error) {
 	}
 	if c.MCPEnabled && !strings.HasPrefix(c.PublicURL, "https://") {
 		return c, nil, errors.New("mcp_enabled requires an HTTPS public_url")
-	}
-	if c.MailOAuthAppsFile != "" && !strings.HasPrefix(c.PublicURL, "https://") {
-		return c, nil, errors.New("mail_oauth_apps_file requires an HTTPS public_url")
 	}
 	var e error
 	c.DataDir, e = filepath.Abs(c.DataDir)

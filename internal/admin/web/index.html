@@ -120,7 +120,7 @@
             <rect x="34" y="104" width="64" height="8" rx="4" class="story-mail-line"></rect>
           </svg>
         </div>
-        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.10.4</span></p>
+        <p class="story-foot">自托管 · TLS 连接邮箱 · 凭据加密存储 · <span class="app-version-label">v0.10.6</span></p>
       </section>
 
       <section class="auth-form-area">
@@ -195,7 +195,7 @@
             <span class="wordmark-badge" aria-hidden="true"><svg class="icon-sm"><use href="#icon-accounts"></use></svg></span>
             <span>Mail Auto</span>
           </a>
-          <span class="workspace-label app-version-label">v0.10.4</span>
+          <span class="workspace-label app-version-label">v0.10.6</span>
         </div>
 
         <nav class="sidebar-nav-container" aria-label="主导航">
@@ -295,7 +295,6 @@
               <svg class="icon-sm" aria-hidden="true"><use href="#icon-sync"></use></svg>
               <span>同步邮箱</span>
             </button>
-            <button id="mail-oauth-settings" class="secondary">邮箱授权应用</button>
             <button id="add-account" class="primary">
               <svg class="icon-sm" aria-hidden="true"><use href="#icon-plus"></use></svg>
               <span>添加邮箱</span>
@@ -1050,7 +1049,7 @@
             </article>
 
             <article class="panel system-card">
-              <h2>Mail Auto <span class="app-version-label">v0.10.4</span></h2>
+              <h2>Mail Auto <span class="app-version-label">v0.10.6</span></h2>
               <p class="muted small">Go 编写的个人多邮箱工作台，支持 IMAP 自动同步、原邮箱文件夹受控整理与 MCP 挂载接入。</p>
               <dl class="system-details-dl">
                 <div class="system-details-row"><dt class="muted">数据保存</dt><dd id="retention-value">全部历史邮件元数据</dd></div>
@@ -1088,27 +1087,29 @@
           </button>
         </header>
 
-        <p class="muted small">Gmail / Outlook 使用官方 OAuth 登录；QQ / 网易 / iCloud 先开启 IMAP 并生成专用授权码。</p>
+        <p class="muted small">QQ / 网易 / iCloud 使用邮箱授权码；Gmail 使用 Google 应用专用密码。</p>
         <p id="account-edit-note" class="info-strip margin-t-10" hidden>
           修改邮箱地址、服务商、主机或端口会重建本地索引。原始邮件不受影响。
         </p>
 
         <label class="margin-t-16">
           邮箱地址
-          <input name="username" type="email" autocomplete="off" maxlength="254" placeholder="name@163.com" required />
-          <small id="account-provider-note" aria-live="polite">支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud。</small>
+          <input name="username" type="email" autocomplete="off" maxlength="254" placeholder="name@example.com" required />
+          <small id="account-provider-note" aria-live="polite">支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud、Gmail。</small>
         </label>
 
         <label id="password-label" class="margin-t-12">
-          授权码 / 应用专用密码
+          <span id="account-password-label-text">授权码 / 应用专用密码</span>
           <input name="password" type="password" autocomplete="new-password" maxlength="4096" />
           <small id="account-password-hint">保存后加密存储，不会明文回显；切勿填写邮箱网页登录密码。</small>
         </label>
 
-        <div id="account-oauth-note" class="info-strip margin-t-12" hidden>
-          <p>保存待授权邮箱后进入服务商官方登录。请授权此处填写的本人邮箱。OAuth 应用须先配置固定 HTTPS 回调地址。</p>
-          <p>Gmail 当前支持普通标签分类、INBOX 归档和标记；移动/归档撤销缺少操作前标签证据，服务端拒绝。回收站、恢复及“保留两份”尚未验证，服务端拒绝。Google Workspace / Microsoft 365 未验证。</p>
-          <button type="button" id="account-oauth-config" class="secondary">配置邮箱授权应用</button>
+        <div id="account-gmail-note" class="info-strip margin-t-12" hidden>
+          <div>
+            <p>需开启两步验证，且账号策略允许应用专用密码；请勿输入 Google 登录密码。</p>
+            <p><a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">前往 Google 账号获取应用专用密码</a>（支持直接粘贴分组显示的 16 位密码）</p>
+            <p class="muted small">Gmail 当前支持标记、普通标签分类和 INBOX 归档；移动/归档撤销缺少操作前标签证据，服务端拒绝。回收站、恢复及“保留两份”尚未验证，服务端拒绝。</p>
+          </div>
         </div>
 
         <label class="margin-t-12">
@@ -1126,8 +1127,7 @@
                 <option value="qq">QQ 邮箱</option>
                 <option value="netease">网易邮箱 (163/126/yeah)</option>
                 <option value="icloud">iCloud 邮箱</option>
-                <option value="google">Gmail（官方 OAuth）</option>
-                <option value="microsoft">Outlook / Hotmail / Live（官方 OAuth）</option>
+                <option value="google">Gmail（应用专用密码）</option>
               </select>
             </label>
             <label>
@@ -1156,7 +1156,6 @@
           <label class="margin-t-12">
             授权方式
             <select id="credential-mode">
-              <option value="oauth2" hidden>官方 OAuth 登录授权</option>
               <option value="keep" hidden>保留当前授权（无需重新输入）</option>
               <option value="password" selected>输入授权码 / 应用专用密码</option>
               <option value="external">使用外部 secret 文件</option>
@@ -1178,23 +1177,6 @@
           <button type="button" class="secondary" data-close="account-dialog">取消</button>
           <button type="submit" class="primary">加密保存邮箱</button>
         </footer>
-      </form>
-    </dialog>
-
-    <dialog id="mail-oauth-dialog" aria-labelledby="mail-oauth-title">
-      <form id="mail-oauth-form">
-        <header class="dialog-head"><h2 id="mail-oauth-title">邮箱授权应用</h2><button type="button" class="icon-button" data-close="mail-oauth-dialog" aria-label="关闭邮箱授权应用">×</button></header>
-        <p class="muted small">每个服务商注册一次 Web 应用，可供多个邮箱和自用实例复用；添加邮箱时分别登录授权。支持部署时自动载入已有应用配置，无需重新创建。新域名须在服务商登记精确回调。密钥加密保存，留空保留；不会回显。授权独立于 MCP 开关。</p>
-        <label class="margin-t-12">服务商<select id="mail-oauth-provider" data-guard-ignore><option value="google">Google Gmail</option><option value="microsoft">Microsoft Outlook</option></select></label>
-        <label class="margin-t-12">Client ID<input name="client_id" autocomplete="off" maxlength="512" required /></label>
-        <label class="margin-t-12">Client secret<input name="client_secret" type="password" autocomplete="new-password" maxlength="8192" /><small>仅在新建或轮换密钥时填写；请勿发到聊天中。</small></label>
-        <label class="margin-t-12">固定 HTTPS origin<input name="origin" type="url" placeholder="https://mail.example.com" required /><small>只填 origin，不带路径；不能使用动态 Host。</small></label>
-        <label class="margin-t-12">Microsoft 支持的账号类型<select name="authority"><option value="consumers">个人 Microsoft 账号</option><option value="common">个人账号 + 组织账号（组织未验证）</option></select></label>
-        <label class="margin-t-12">Microsoft 密钥到期日期（可选）<input name="secret_expires_date" type="date" /></label>
-        <p id="mail-oauth-callback" class="info-strip margin-t-12"></p>
-        <p class="muted small">Google 外部应用处于 Testing 且请求邮件权限时，refresh token 通常七天到期；Production 不保证免验证或永久有效。Gmail IMAP 的全邮件权限比本产品操作范围宽；本产品不提供发信和永久删除。Microsoft 请添加 IMAP.AccessAsUser.All 委托权限及 offline_access；Graph token 不能用于 IMAP。</p>
-        <p id="mail-oauth-error" class="form-error" role="alert"></p>
-        <footer class="dialog-actions"><button type="button" class="secondary" data-close="mail-oauth-dialog">关闭</button><button type="submit" class="primary">加密保存应用</button></footer>
       </form>
     </dialog>
 

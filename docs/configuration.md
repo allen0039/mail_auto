@@ -1,6 +1,6 @@
 # 配置与邮箱接入
 
-0.10.4 候选支持独立于 MCP 的“邮箱授权应用”设置及[跨自用实例的应用复用](oauth-app-reuse.md)。Gmail / Outlook 使用 OAuth Code + PKCE、IMAPS XOAUTH2，client secret 和 refresh token 由既有 Vault 加密。应用注册、精确 HTTPS 回调、个人/组织账号区别、Gmail 受限操作、Google Testing 七天限制、缺邮件scope排查、持久回调提示及升级/回退见 [接入说明](gmail-outlook-setup.md)。真实账号验收待完成，候选尚未发布部署。
+邮箱连接不需要注册 OAuth 应用或配置授权回调；Gmail 使用应用专用密码。Outlook 不再支持接入。升级及回退见 [Gmail 接入与迁移](gmail-setup.md)。
 
 同步提示“文件夹不在此邮箱的 IMAP 可读取列表中”时，先在同一个官方邮箱核对目录已经保存在服务器，再在“邮箱连接 → 连接诊断 → 查看 IMAP 文件夹完整路径”中复制原始完整路径到允许文件夹。嵌套目录须包含父目录；不猜测或自动补前缀。认证成功不保证指定目录存在，系统不会自动创建目录或扩大为全邮箱同步。LIST 不可用时仍显示原始的脱敏连接错误，不误报缺失。
 
@@ -25,14 +25,13 @@ CLI 示例：`mail-auto --config /etc/mail-auto/config.yaml serve`。本地管�
 | key_dir | `./keys` | 独立密钥目录，与数据目录分开 |
 | secret_dir | `/run/secrets` | 外部只读授权码目录 |
 | public_url | 空 | 浏览器访问的精确 Origin，如 `https://mail.example.com`；不含路径 |
-| mail_oauth_apps_file | 空 | 可选受保护应用部署文件；需 HTTPS public_url，启动时原子载入并加密；重复配置不作废授权，详见[应用复用](oauth-app-reuse.md) |
 | secure_cookie | `false` | HTTPS 部署需设为 true；HTTPS public_url 会自动启用 |
 | session_hours | `12` | 正常会话寿命，1–168 小时 |
 | automatic_sync | `true` | 后台自动同步；CLI `--automatic-sync=false` 可关闭 |
 | sync_interval_seconds | `30` | 每轮全部文件夹完成后的等待秒数，5–3600；CLI `--sync-interval-seconds` |
 | retention_days | `0` | 兼容旧配置；接受 0–3650，但不再按日期过滤/删除邮件元数据，始终保留全历史 |
 
-未知字段、额外 YAML 文档、无效 Origin、相同数据/密钥目录均报错。CLI 可覆盖 listen、data-dir、key-dir、secret-dir、public-url、secure-cookie、automatic-sync、sync-interval-seconds、mail-oauth-apps-file；不读取环境变量。启动和每小时仅清理过期会话与超过 90 天的审计记录，不会因邮件年代较早而删除索引。
+未知字段、额外 YAML 文档、无效 Origin、相同数据/密钥目录均报错。CLI 可覆盖 listen、data-dir、key-dir、secret-dir、public-url、secure-cookie、automatic-sync、sync-interval-seconds；不读取环境变量。启动和每小时仅清理过期会话与超过 90 天的审计记录，不会因邮件年代较早而删除索引。
 
 ## 邮箱接入
 
@@ -43,6 +42,7 @@ CLI 示例：`mail-auto --config /etc/mail-auto/config.yaml serve`。本地管�
 | QQ | `imap.qq.com` | 默认 993/TLS，可自定义端口；开启 IMAP，通常使用客户端授权码 | 未验证 |
 | 网易 | `imap.163.com`、`imap.126.com`、`imap.yeah.net` | 默认 993/TLS，可自定义端口；开启 IMAP，通常使用客户端授权码；支持能力协商后的 ID | 单个 163 账号 13 个文件夹、1,730 条元数据完整同步已验证 |
 | iCloud | `imap.mail.me.com` | 默认 993/TLS，可自定义端口；通常需要 Apple 应用专用密码 | 未验证 |
+| Gmail | `imap.gmail.com` | 固定 993/TLS，使用 Google 应用专用密码；校验 `X-GM-EXT-1` | 新认证方式待真实验收 |
 
 真实写入验证（历史记录）：网易 163 已完成固定规则任务的真实分类移动验证；QQ 和 iCloud 仍待专用测试邮件验证。曾用于验证的 TestFlight 清理任务当时没有符合条件的候选，不作为“移入已删除”真实写入的验证。各版本细节见 `docs/acceptance-*.md`。
 

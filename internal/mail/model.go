@@ -2,33 +2,30 @@ package mail
 
 import (
 	"context"
-	"mail-auto/internal/mailoauth"
 	"mail-auto/internal/network"
 	"time"
 )
 
 type Account struct {
-	ID               string             `json:"id"`
-	Name             string             `json:"name"`
-	Provider         string             `json:"provider"`
-	Username         string             `json:"username"`
-	Host             string             `json:"host"`
-	Port             int                `json:"port"`
-	Folders          []string           `json:"folders"`
-	SyncedFolders    []string           `json:"synced_folders"`
-	SecretFile       string             `json:"secret_file,omitempty"`
-	CredentialSource string             `json:"credential_source"`
-	CreatedAt        int64              `json:"created_at"`
-	Secret           []byte             `json:"-"`
-	Proxy            network.Policy     `json:"proxy"`
-	NetworkRevision  string             `json:"network_revision"`
-	NetworkLabel     string             `json:"network_label"`
-	Authentication   string             `json:"authentication"`
-	OAuth            *mailoauth.Account `json:"oauth,omitempty"`
-	AuthSource       mailoauth.Source   `json:"-"`
-	UniqueMessages   int                `json:"unique_messages"`
-	MessageEntries   int                `json:"message_entries"`
+	ID               string         `json:"id"`
+	Name             string         `json:"name"`
+	Provider         string         `json:"provider"`
+	Username         string         `json:"username"`
+	Host             string         `json:"host"`
+	Port             int            `json:"port"`
+	Folders          []string       `json:"folders"`
+	SyncedFolders    []string       `json:"synced_folders"`
+	SecretFile       string         `json:"secret_file,omitempty"`
+	CredentialSource string         `json:"credential_source"`
+	CreatedAt        int64          `json:"created_at"`
+	Secret           []byte         `json:"-"`
+	Proxy            network.Policy `json:"proxy"`
+	NetworkRevision  string         `json:"network_revision"`
+	NetworkLabel     string         `json:"network_label"`
+	UniqueMessages   int            `json:"unique_messages"`
+	MessageEntries   int            `json:"message_entries"`
 }
+
 type Message struct {
 	Ref             string  `json:"ref"`
 	AccountID       string  `json:"account_id"`

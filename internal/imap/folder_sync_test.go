@@ -96,7 +96,7 @@ func TestSyncFolderUnavailableDiagnostics(t *testing.T) {
 		for _, mode := range []string{"missing", "nested", "noselect", "listed_rejected", "list_failed"} {
 			t.Run(path+"/"+mode, func(t *testing.T) {
 				adapter, trace, _ := folderSyncFixture(t, mode)
-				account := mail.Account{ID: "fixture", Provider: "microsoft"}
+				account := mail.Account{ID: "fixture", Provider: "icloud"}
 				emitted := 0
 				emit := func(mail.Snapshot) error { emitted++; return nil }
 				var err error

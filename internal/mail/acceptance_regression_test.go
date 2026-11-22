@@ -85,7 +85,7 @@ func schema14RecoveryFixture(t *testing.T) (*Service, *organizerRemote, Access) 
 }
 
 func TestSchema14PersistedRecoveryUpgrade(t *testing.T) {
-	for _, scenario := range []string{"unchanged", "identity", "folders", "network", "oauth", "permission", "cleanup", "queued"} {
+	for _, scenario := range []string{"unchanged", "identity", "folders", "network", "provider", "permission", "cleanup", "queued"} {
 		t.Run(scenario, func(t *testing.T) {
 			service, remote, access := schema14RecoveryFixture(t)
 			var original string
@@ -99,9 +99,8 @@ func TestSchema14PersistedRecoveryUpgrade(t *testing.T) {
 				mustExec(t, service, "UPDATE accounts SET folders='[\"INBOX\"]' WHERE id='qa-legacy'")
 			case "network":
 				setRegressionProxy(t, service, "qa-legacy")
-			case "oauth":
+			case "provider":
 				mustExec(t, service, "UPDATE accounts SET provider='google',host='imap.gmail.com' WHERE id='qa-legacy'")
-				mustExec(t, service, "INSERT INTO mail_oauth_accounts(account_id,provider,login,config_version,status) VALUES('qa-legacy','google','fixture@gmail.com',0,'connected')")
 			case "permission":
 				mustExec(t, service, "UPDATE admin SET version=version+1")
 			case "cleanup":
@@ -239,7 +238,7 @@ func reopenRegressionService(t *testing.T, service *Service) *Service {
 func TestGmailClaimAIAfterSourceRemoved(t *testing.T) {
 	service, admin, message, alias := gmailServiceFixture(t)
 	mustExec(t, service, "INSERT INTO mailboxes(account_id,name,uidvalidity,synced_at) VALUES(?,'QA',7,1)", message.AccountID)
-	mustExec(t, service, "INSERT INTO mail_oauth_folder_roles(account_id,name,role) VALUES(?,'QA','')", message.AccountID)
+	mustExec(t, service, "INSERT INTO gmail_folder_roles(account_id,name,role) VALUES(?,'QA','')", message.AccountID)
 	policy := defaultPolicy(message.AccountID)
 	policy.Enabled, policy.Mode, policy.IncludeHistory, policy.StableSeconds = true, "execute", true, 0
 	policy.Since = 0
@@ -449,7 +448,7 @@ func TestUnversionedCandidateRecoveryIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous, err := json.Marshal([]any{account.Provider, account.Username, account.Host, account.Port, account.Folders, account.NetworkRevision, account.OAuth})
+	previous, err := json.Marshal([]any{account.Provider, account.Username, account.Host, account.Port, account.Folders, account.NetworkRevision, nil})
 	if err != nil {
 		t.Fatal(err)
 	}

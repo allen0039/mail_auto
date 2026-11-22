@@ -14,9 +14,7 @@ const state = {
   version: "",
   network: null,
 };
-let mailOAuthStartGeneration = 0;
 let accountRefreshGeneration = 0;
-let mailOAuthCallbackResult = null;
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -215,7 +213,7 @@ const date = (value) =>
 function folderLabel(folder) {
   return String(folder).toLowerCase() === "inbox" ? "收件箱" : folder;
 }
-const providerNames = { qq: "QQ 邮箱", netease: "网易邮箱", icloud: "iCloud", google: "Gmail", microsoft: "Outlook" };
+const providerNames = { qq: "QQ 邮箱", netease: "网易邮箱", icloud: "iCloud", google: "Gmail" };
 let noticeTimer;
 let syncPollTimer;
 function notify(message, error = false) {
@@ -320,7 +318,6 @@ async function refresh() {
   state.accounts = accounts;
   state.status = status;
   state.network = network;
-  const callbackChanged = reconcileMailOAuthCallback();
 
   if (status.version) {
     state.version = status.version;
@@ -359,7 +356,7 @@ async function refresh() {
   if (accounts.some((a) => a.id === old)) $("#account-filter").value = old;
   updateFolderFilter();
 
-  if (callbackChanged || accountsChanged || !$("#account-list").children.length) {
+  if (accountsChanged || !$("#account-list").children.length) {
     renderAccounts();
   } else {
     updateAccountCardStatuses();
@@ -383,10 +380,16 @@ async function refresh() {
 }
 
 function getAccountStatus(account, autoItem, automaticEnabled) {
-  if (account?.oauth && account.oauth.status !== "connected") {
-    const labels = {configuration_missing: "未配置授权应用", pending: "待授权", reauthorize: "需要重新授权", network_error: "网络失败"};
-    const permissions = ["oauth_scope_missing", "oauth_imap_denied"].includes(account.oauth.error_code);
-    return {label: permissions ? "权限受限" : labels[account.oauth.status] || "待连接", badgeClass: "badge badge-warning", dotClass: "status-dot status-dot-amber", modeText: "官方 OAuth · IMAPS", checkedText: "请通过官方页面授权本人邮箱", error: account.oauth.error_code ? mailOAuthMessage(account.oauth.error_code) : ""};
+  if (["unsupported", "missing"].includes(account?.credential_source)) {
+    const unsupported = account.credential_source === "unsupported";
+    return {
+      label: unsupported ? "已停止支持" : "待填写密码",
+      badgeClass: "badge badge-warning",
+      dotClass: "status-dot status-dot-amber",
+      modeText: "未连接",
+      checkedText: unsupported ? "仅保留历史邮件索引" : "请编辑配置并填写应用专用密码",
+      error: "",
+    };
   }
   if (autoItem && automaticEnabled) {
     const labels = {
@@ -433,6 +436,17 @@ function getAccountStatus(account, autoItem, automaticEnabled) {
       dotClass: "status-dot status-dot-green",
       modeText: "手动同步模式",
       checkedText: "索引已就绪",
+      error: "",
+    };
+  }
+
+  if (account?.provider === "google" && account.credential_source === "encrypted") {
+    return {
+      label: "凭据已验证 · 待同步",
+      badgeClass: "badge badge-success",
+      dotClass: "status-dot status-dot-green",
+      modeText: "应用专用密码 · IMAPS",
+      checkedText: "等待首次同步",
       error: "",
     };
   }
@@ -679,7 +693,6 @@ const viewAliases = { rules: ["automation", "#auto-rules"], tasks: ["automation"
 const paneOf = (view) => viewAliases[view]?.[0] || view;
 
 async function showView(view) {
-  mailOAuthStartGeneration++;
   const section = viewAliases[view]?.[1];
   view = paneOf(view);
   state.view = view;
@@ -728,7 +741,7 @@ async function search() {
   if (!state.accounts.length) {
     list.innerHTML = empty(
       "工作台已就绪，接入你的第一个邮箱",
-      "支持 QQ、网易和 iCloud。添加邮箱后自动同步来信，在这里开始浏览。",
+      "支持 QQ、网易、iCloud、Gmail。添加邮箱后自动同步来信，在这里开始浏览。",
       "add",
     );
     $("#pagination").hidden = true;
@@ -795,18 +808,22 @@ async function search() {
 }
 
 function renderAccounts() {
-  reconcileMailOAuthCallback();
   const autoMap = Object.fromEntries((state.status.automatic?.accounts || []).map((a) => [a.account_id, a]));
   $("#account-list").innerHTML = state.accounts.length
     ? state.accounts
         .map((a) => {
           const autoItem = autoMap[a.id];
           const st = getAccountStatus(a, autoItem, state.status.automatic?.enabled);
-
+          const icon = a.provider === "icloud" ? "iC" : a.provider === "qq" ? "QQ" : a.provider === "google" ? "GM" : "易";
+          const unsupported = a.credential_source === "unsupported";
+          const missingPassword = a.credential_source === "missing";
+          const credText = unsupported || missingPassword ? "未配置登录凭据"
+            : a.provider === "google" ? "应用专用密码 · 本地加密保存"
+            : a.credential_source === "external" ? `外部 secret · ${esc(a.secret_file)}` : "本地加密保存";
           return `
             <article class="panel account-card" data-account="${esc(a.id)}">
               <header>
-                <span class="account-icon">${esc(a.provider === "icloud" ? "iC" : a.provider === "qq" ? "QQ" : "易")}</span>
+                <span class="account-icon">${esc(icon)}</span>
                 <div>
                   <h3>${esc(a.name)}</h3>
                   <span class="email">${esc(a.username)}</span>
@@ -819,15 +836,13 @@ function renderAccounts() {
                 <div><dt>网络出口</dt><dd>${esc(a.network_label || "直连")}${a.proxy?.mode === "inherit" ? " · 跟随全局" : ""}</dd></div>
                 <div><dt>允许文件夹</dt><dd>${a.folders.length ? a.folders.map((f) => esc(folderLabel(f))).join(" / ") : "全部可读取文件夹"}</dd></div>
                 ${a.provider === "google" ? `<div><dt>Gmail 统计</dt><dd>${number(a.unique_messages)} 封唯一邮件 · ${number(a.message_entries)} 个标签/文件夹条目</dd></div>` : ""}
-                <div><dt>凭据加密</dt><dd>${a.authentication === "oauth2" ? "官方 OAuth · refresh token 加密保存" : a.credential_source === "external" ? `外部 secret · ${esc(a.secret_file)}` : "本地加密保存"}</dd></div>
+                <div><dt>凭据加密</dt><dd>${credText}</dd></div>
               </dl>
+              ${st.error ? `<p class="form-error">${esc(st.error)}</p>` : ""}
               <p class="automatic-account muted small" aria-live="polite"></p>
-              ${mailOAuthCallbackNotice(a)}
               <div class="account-actions">
-                ${a.authentication === "oauth2" ? '<button class="primary" data-action="oauth">官方登录 / 重新授权</button><button class="secondary" data-action="oauth-disconnect">断开本地授权</button>' : ""}
-                <button class="secondary" data-action="edit">编辑配置</button>
-                <button class="secondary" data-action="diagnose">连接诊断</button>
-                <button class="secondary" data-action="sync">同步邮件</button>
+                ${unsupported ? "" : '<button class="secondary" data-action="edit">编辑配置</button>'}
+                ${unsupported || missingPassword ? "" : '<button class="secondary" data-action="diagnose">连接诊断</button><button class="secondary" data-action="sync">同步邮件</button>'}
                 <button class="danger" data-action="delete">移除连接</button>
               </div>
               <div class="diagnosis" hidden></div>
@@ -844,8 +859,10 @@ function renderAccounts() {
 
 async function syncAll(button) {
   if (!state.accounts.length) { openAccount(); return; }
+  const accounts = state.accounts.filter((account) => !["unsupported", "missing"].includes(account.credential_source));
+  if (!accounts.length) { notify("没有可同步的邮箱，请先配置登录凭据。", true); return; }
   await busy(button, "提交同步…", async () => {
-    for (const account of state.accounts) {
+    for (const account of accounts) {
       await api(`/api/accounts/${account.id}/sync`, {method: "POST", body: "{}"});
     }
     await refresh();
@@ -885,7 +902,6 @@ const providerHosts = {
   netease: ["imap.163.com", "imap.126.com", "imap.yeah.net"],
   icloud: ["imap.mail.me.com"],
   google: ["imap.gmail.com"],
-  microsoft: ["outlook.office365.com"],
 };
 const domainServers = {
   "qq.com": ["qq", "imap.qq.com"],
@@ -898,9 +914,6 @@ const domainServers = {
   "mac.com": ["icloud", "imap.mail.me.com"],
   "gmail.com": ["google", "imap.gmail.com"],
   "googlemail.com": ["google", "imap.gmail.com"],
-  "outlook.com": ["microsoft", "outlook.office365.com"],
-  "hotmail.com": ["microsoft", "outlook.office365.com"],
-  "live.com": ["microsoft", "outlook.office365.com"],
 };
 // For a new mailbox the name and server follow the address until the user
 // edits them; editing an existing mailbox never changes saved values.
@@ -925,13 +938,13 @@ function inferServer() {
   }
   if (accountAuto.name && address.includes("@")) {
     const local = address.trim().split("@")[0];
-    const label = match ? { "qq.com": "QQ", "foxmail.com": "Foxmail", "163.com": "163", "126.com": "126", "yeah.net": "yeah", "icloud.com": "iCloud", "me.com": "iCloud", "mac.com": "iCloud" }[domain] : domain;
+    const label = match ? { "qq.com": "QQ", "foxmail.com": "Foxmail", "163.com": "163", "126.com": "126", "yeah.net": "yeah", "icloud.com": "iCloud", "me.com": "iCloud", "mac.com": "iCloud", "gmail.com": "Gmail", "googlemail.com": "Gmail" }[domain] : domain;
     form.elements.name.value = `${label} · ${local}`.slice(0, 80);
   }
-  if (!domain) note.textContent = "支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud。";
+  if (!domain) note.textContent = "支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud、Gmail。";
   else if (match) note.textContent = `已识别：${providerNames[match[0]]} · ${form.elements.host.value}:${form.elements.port.value}`;
   else if (accountAuto.server)
-    note.textContent = "无法根据域名识别服务商。目前支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud；若是这些服务的自定义域名，请在“高级设置”中选择服务商与主机。";
+    note.textContent = "无法根据域名识别服务商。目前支持 QQ / Foxmail、网易 163 / 126 / yeah.net、iCloud、Gmail；自定义域名请在“高级设置”中选择服务商与主机。";
   else note.textContent = `使用高级设置中的服务器：${form.elements.host.value}:${form.elements.port.value}`;
   accountSummary();
   updateCredentialMode();
@@ -954,21 +967,46 @@ function accountSummary() {
 }
 
 function updateCredentialMode() {
-  const form = $("#account-form"), oauth = ["google", "microsoft"].includes(form.elements.provider.value);
+  const form = $("#account-form");
+  const provider = form.elements.provider.value;
+  const isGmailPassword = provider === "google";
   const select = $("#credential-mode");
-  if (oauth) select.value = "oauth2";
-  else if (select.value === "oauth2") select.value = state.editingAccount ? "keep" : "password";
-  select.disabled = oauth;
-  select.querySelector('[value="oauth2"]').hidden = !oauth;
-  $("#account-oauth-note").hidden = !oauth;
+  const submitBtn = $('button[type=submit]', form);
+  if (isGmailPassword) {
+    if (submitBtn) submitBtn.textContent = state.editingAccount ? "保存修改" : "验证并连接 Gmail";
+    const existing = state.accounts.find((account) => account.id === state.editingAccount);
+    const needsPassword = !state.editingAccount || existing?.credential_source === "missing";
+    select.value = needsPassword ? "password" : "keep";
+    select.disabled = true;
+    $("#account-gmail-note").hidden = false;
+    $("#password-label").hidden = false;
+    $("#external-option").hidden = true;
+    $("#account-password-label-text").textContent = "Google 应用专用密码";
+    $("#account-password-hint").textContent = !needsPassword
+      ? "填写新的应用专用密码将先验证连接再替换；留空则保留当前密码，不会回显。"
+      : "支持直接粘贴分组显示的 16 位密码；保存前将先连接 Gmail 验证，不会回显。";
+    form.elements.password.required = needsPassword;
+    form.elements.secret_file.required = false;
+    form.elements.secret_file.value = "";
+    form.elements.port.value = 993;
+    form.elements.port.readOnly = true;
+    return;
+  }
+  if (submitBtn) submitBtn.textContent = state.editingAccount ? "保存修改" : "加密保存邮箱";
+  select.disabled = false;
+  $("#account-gmail-note").hidden = true;
+  $("#account-password-label-text").textContent = "授权码 / 应用专用密码";
+  $("#account-password-hint").textContent = state.editingAccount
+    ? "填写新授权码以替换当前授权；留空则保留当前授权。保存后不会回显。"
+    : "保存后不会回显；不要填写邮箱网页登录密码。";
   const mode = select.value;
   $("#external-option").hidden = mode !== "external";
   $("#password-label").hidden = mode !== "password";
   form.elements.password.required = mode === "password" && !state.editingAccount;
   form.elements.secret_file.required = mode === "external";
+  form.elements.port.readOnly = false;
   if (mode !== "password") form.elements.password.value = "";
   if (mode !== "external") form.elements.secret_file.value = "";
-  if (oauth) form.elements.port.value = 993;
 }
 
 function openAccount(account = null) {
@@ -1135,7 +1173,6 @@ $("#credentials-form").addEventListener("submit", async (e) => {
       form.reset();
       state.view = "dashboard";
       state.accounts = [];
-      clearMailOAuthCallback();
       accountRefreshGeneration++;
       state.offset = 0;
       await checkSession();
@@ -1153,7 +1190,6 @@ async function logout() {
     await api("/api/logout", { method: "POST", body: "{}" });
     hideDialogs();
     state.accounts = [];
-    clearMailOAuthCallback();
     accountRefreshGeneration++;
     state.offset = 0;
     state.view = "dashboard";
@@ -1247,8 +1283,11 @@ $("#account-form").addEventListener("submit", async (e) => {
         card.classList.add("just-saved");
         setTimeout(() => card.classList.remove("just-saved"), 4000);
       }
-      notify(editingID ? "邮箱配置已更新；连接与同步状态见该邮箱卡片" : "邮箱已保存；后台自动同步会开始读取，状态见该邮箱卡片，可点“连接诊断”检查");
-      if (!editingID && saved?.authentication === "oauth2") await startMailOAuth(saved.id);
+      if (saved?.provider === "google" && (!editingID || data.password)) {
+        notify("Gmail 应用专用密码验证通过并已连接；后台将开始同步文件夹");
+      } else {
+        notify(editingID ? "邮箱配置已更新；连接与同步状态见该邮箱卡片" : "邮箱已保存；后台自动同步会开始读取，状态见该邮箱卡片，可点“连接诊断”检查");
+      }
     });
   } catch (err) {
     // Closed (maybe reopened for another mailbox) meanwhile: the error belongs
@@ -1269,18 +1308,8 @@ $("#account-list").addEventListener("click", async (e) => {
     id = card.dataset.account,
     account = state.accounts.find((a) => a.id === id);
   try {
-    if (button.dataset.action === "oauth-dismiss") {
-      if (mailOAuthCallbackResult?.accountID === id) clearMailOAuthCallback();
-      renderAccounts();
-    } else if (button.dataset.action === "edit") {
+    if (button.dataset.action === "edit") {
       openAccount(account);
-    } else if (button.dataset.action === "oauth") {
-      await busy(button, "准备授权…", () => startMailOAuth(id));
-    } else if (button.dataset.action === "oauth-disconnect") {
-      if (!confirm("断开本地授权会停止此邮箱同步。服务商侧授权请在服务商安全页面撤销。")) return;
-      await api(`/api/accounts/${encodeURIComponent(id)}/oauth-disconnect`, {method: "POST", body: "{}"});
-      await refresh();
-      await showView("accounts");
     } else if (button.dataset.action === "delete") {
       if (
         !confirm(
@@ -1321,204 +1350,6 @@ $("#account-list").addEventListener("click", async (e) => {
     notify(err.message, true);
   }
 });
-
-function mailOAuthMessage(code) {
-  return Object.hasOwn(mailOAuthMessages, code) ? mailOAuthMessages[code] : "邮箱授权未完成，请检查应用配置并重新发起";
-}
-
-const mailOAuthMessages = Object.freeze({
-  ok: "邮箱官方授权完成，请查看连接和同步状态",
-  oauth_denied: "授权已取消，可重新点击官方登录",
-  oauth_state_invalid: "授权请求过期或会话变化，请重新发起",
-  oauth_config_missing: "请先配置邮箱 OAuth 应用，再发起官方授权",
-  oauth_config_changed: "应用或网络配置已变化，请重新授权",
-  oauth_identity_invalid: "服务商身份验证未通过，请重新授权并检查实例时间",
-  oauth_identity_mismatch: "登录账号与邮箱绑定不一致，请登录原账号",
-  oauth_scope_missing: "未授予 IMAP 邮件权限，请重新进入官方授权并明确同意 IMAP 邮件访问。个人 Gmail 仅同意 Google 登录或个人资料不等于授予邮件权限；Workspace / Microsoft 365 组织账号还需联系管理员检查授权策略。",
-  oauth_reauthorization_required: "邮箱授权已撤销或过期，请重新授权；Google Testing 邮件授权通常七天到期",
-  oauth_imap_denied: "OAuth 授权成功但 IMAP 登录被拒绝，请检查邮箱地址和 IMAP 开关；仅 Workspace / Microsoft 365 组织账号还需检查管理员策略",
-  oauth_gmail_capability_missing: "Gmail IMAP 缺少 X-GM-EXT-1 能力，请检查是否连接到官方 Gmail 服务器",
-  oauth_network_failed: "网络失败，请检查所选代理和服务商网络后重试",
-  oauth_rate_limited: "服务商暂时限流，请稍后重试",
-  oauth_provider_unavailable: "服务商暂时不可用，请稍后重试",
-});
-const mailOAuthResultKey = "mail-auto.oauth-result";
-
-function saveMailOAuthCallback() {
-  try {
-    if (mailOAuthCallbackResult?.provider) sessionStorage.setItem(mailOAuthResultKey, JSON.stringify(mailOAuthCallbackResult));
-    else sessionStorage.removeItem(mailOAuthResultKey);
-  } catch {}
-}
-
-function clearMailOAuthCallback() {
-  mailOAuthCallbackResult = null;
-  saveMailOAuthCallback();
-}
-
-function captureMailOAuthCallback() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("mail_oauth")) {
-    history.replaceState(null, "", window.location.pathname + window.location.hash);
-    const outcome = params.get("mail_oauth"), accountID = params.get("account");
-    clearMailOAuthCallback();
-    if (params.getAll("mail_oauth").length === 1 && params.getAll("account").length === 1 && Object.hasOwn(mailOAuthMessages, outcome) && accountID && accountID.length <= 256) {
-      mailOAuthCallbackResult = {accountID, outcome, provider: null, baseline: null};
-      state.view = "accounts";
-    }
-    return;
-  }
-  try {
-    const stored = JSON.parse(sessionStorage.getItem(mailOAuthResultKey));
-    if (stored && typeof stored.accountID === "string" && stored.accountID.length <= 256 && typeof stored.outcome === "string" && Object.hasOwn(mailOAuthMessages, stored.outcome) && ["google", "microsoft"].includes(stored.provider) && typeof stored.baseline === "string" && stored.baseline.length <= 256) {
-      mailOAuthCallbackResult = {accountID: stored.accountID, outcome: stored.outcome, provider: stored.provider, baseline: stored.baseline};
-      state.view = "accounts";
-    }
-  } catch {}
-}
-
-function mailOAuthSuccessStamp(account) {
-  const automatic = state.status.automatic?.accounts?.find((entry) => entry.account_id === account.id);
-  const job = state.status.sync_jobs?.find((entry) => entry.account_id === account.id && entry.state === "completed");
-  return JSON.stringify({generation: Number(account.oauth?.generation || 0), automaticCheckedAt: Number(automatic?.checked_at || 0), syncUpdatedAt: Number(job?.updated_at || 0), observedAt: Math.floor(Date.now() / 1000)});
-}
-
-function mailOAuthHasLaterSuccess(account, baseline) {
-  try {
-    const previous = JSON.parse(baseline);
-    if (!previous || ![previous.generation, previous.automaticCheckedAt, previous.syncUpdatedAt, previous.observedAt].every(Number.isFinite)) return false;
-    if (Number(account.oauth?.generation || 0) > previous.generation) return true;
-    const automatic = state.status.automatic?.accounts?.find((entry) => entry.account_id === account.id && !entry.error && ["watching", "waiting"].includes(entry.state));
-    const job = state.status.sync_jobs?.find((entry) => entry.account_id === account.id && entry.state === "completed");
-    return Number(automatic?.checked_at || 0) > Math.max(previous.automaticCheckedAt, previous.observedAt) || Number(job?.updated_at || 0) > Math.max(previous.syncUpdatedAt, previous.observedAt);
-  } catch {
-    return false;
-  }
-}
-
-function reconcileMailOAuthCallback() {
-  const result = mailOAuthCallbackResult;
-  if (!result) return false;
-  const account = state.accounts.find((entry) => entry.id === result.accountID && entry.authentication === "oauth2" && ["google", "microsoft"].includes(entry.provider));
-  if (!account || (result.provider && result.provider !== account.provider)) {
-    clearMailOAuthCallback();
-    return true;
-  }
-  const stamp = mailOAuthSuccessStamp(account);
-  if (result.provider && result.outcome !== "ok" && account.oauth?.status === "connected" && mailOAuthHasLaterSuccess(account, result.baseline)) {
-    clearMailOAuthCallback();
-    return true;
-  }
-  if (!result.provider) {
-    result.provider = account.provider;
-    result.baseline = stamp;
-    saveMailOAuthCallback();
-  }
-  return false;
-}
-
-function mailOAuthCallbackNotice(account) {
-  const result = mailOAuthCallbackResult;
-  if (!result || result.accountID !== account.id) return "";
-  const current = account.oauth?.status === "connected" ? "当前账号授权已连接；本次尝试的提示不会撤销已有连接。" : "当前连接状态请以上方账号状态为准。";
-  return `<section class="mail-oauth-result" role="status"><strong>本次授权回调提示（不代表当前连接状态）</strong><p>${esc(mailOAuthMessage(result.outcome))}</p><p>${esc(current)}</p><div class="account-actions"><button class="secondary" data-action="oauth">进入官方登录 / 重新授权</button><button class="secondary" data-action="oauth-dismiss">关闭本次提示</button></div></section>`;
-}
-
-async function startMailOAuth(id) {
-  if (!confirmDiscard()) return;
-  const generation = ++mailOAuthStartGeneration;
-  const editors = [...drafts].map(([form, draft]) => ({form, gen: draft.gen, session: draft.session, open: form.closest("dialog")?.open}));
-  const account = state.accounts.find((entry) => entry.id === id);
-  const response = await api(`/api/accounts/${encodeURIComponent(id)}/oauth-start`, {method: "POST", body: "{}"});
-  if (generation !== mailOAuthStartGeneration || editors.some((editor) => {
-    const draft = drafts.get(editor.form);
-    return draft.gen !== editor.gen || draft.session !== editor.session || editor.form.closest("dialog")?.open !== editor.open;
-  }) || !state.accounts.some((entry) => entry.id === id && entry.provider === account?.provider) || dirtyLabels().length) {
-    notify("邮箱或表单已变化，请重新点击授权", true);
-    return;
-  }
-  const location = new URL(response.url);
-  if (location.protocol !== "https:" || !["accounts.google.com", "login.microsoftonline.com"].includes(location.hostname)) throw new Error("服务商授权地址不在允许列表");
-  window.location.assign(location.href);
-}
-
-let mailOAuthLoad = 0;
-let mailOAuthProvider = "google";
-const mailOAuthForm = $("#mail-oauth-form");
-guardForm(mailOAuthForm, "邮箱授权应用");
-function mailOAuthCallbackText() {
-  const provider = $("#mail-oauth-provider").value;
-  const origin = mailOAuthForm.elements.origin.value.replace(/\/+$/, "");
-  $("#mail-oauth-callback").textContent = origin ? `精确回调地址：${origin}/api/mail-oauth/${provider}/callback` : "填写固定 HTTPS origin 后展示精确回调地址";
-}
-async function loadMailOAuth() {
-  const generation = ++mailOAuthLoad, provider = $("#mail-oauth-provider").value;
-  const ticket = editorTicket(mailOAuthForm);
-  try {
-    const apps = await api("/api/settings/mail-oauth");
-    if (generation !== mailOAuthLoad || editorState(ticket) !== "same") return;
-    const app = apps.find((entry) => entry.provider === provider) || {};
-    mailOAuthForm.elements.client_id.value = app.client_id || "";
-    mailOAuthForm.elements.client_secret.value = "";
-    mailOAuthForm.elements.origin.value = app.origin || "";
-    mailOAuthForm.elements.authority.value = app.authority || "consumers";
-    mailOAuthForm.elements.secret_expires_date.value = app.secret_expires ? new Date(app.secret_expires * 1000).toISOString().slice(0, 10) : "";
-    $("#mail-oauth-error").textContent = app.configured ? "应用已配置；密钥留空保留" : "尚未配置应用，请在服务商控制台注册后填写";
-    mailOAuthCallbackText();
-    markClean(mailOAuthForm);
-  } catch (error) {
-    if (generation === mailOAuthLoad && editorState(ticket) !== "closed") $("#mail-oauth-error").textContent = error.message;
-  }
-}
-function openMailOAuth(provider = "google") {
-  mailOAuthForm.reset();
-  $("#mail-oauth-provider").value = ["google", "microsoft"].includes(provider) ? provider : "google";
-  mailOAuthProvider = $("#mail-oauth-provider").value;
-  $("#mail-oauth-error").textContent = "正在读取应用配置…";
-  $("#mail-oauth-dialog").showModal();
-  mailOAuthCallbackText();
-  loadMailOAuth();
-}
-$("#mail-oauth-settings").addEventListener("click", () => openMailOAuth());
-$("#account-oauth-config").addEventListener("click", () => openMailOAuth($("#provider").value));
-$("#mail-oauth-provider").addEventListener("change", () => {
-  mailOAuthLoad++;
-  const provider = $("#mail-oauth-provider").value;
-  if (!confirmDiscard($("#mail-oauth-dialog"))) {
-    $("#mail-oauth-provider").value = mailOAuthProvider;
-    return;
-  }
-  mailOAuthProvider = provider;
-  mailOAuthForm.reset();
-  $("#mail-oauth-provider").value = provider;
-  loadMailOAuth();
-});
-mailOAuthForm.elements.origin.addEventListener("input", mailOAuthCallbackText);
-$("#mail-oauth-dialog").addEventListener("close", (event) => {
-  if (event.currentTarget.open) return;
-  mailOAuthLoad++;
-  mailOAuthForm.elements.client_secret.value = "";
-});
-mailOAuthForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const provider = $("#mail-oauth-provider").value, ticket = editorTicket(mailOAuthForm);
-  const data = Object.fromEntries(new FormData(mailOAuthForm));
-  data.secret_expires = data.secret_expires_date ? Math.floor(Date.parse(data.secret_expires_date) / 1000) : 0;
-  delete data.secret_expires_date;
-  try {
-    await busy($("button[type=submit]", mailOAuthForm), "加密保存…", async () => {
-      await api(`/api/settings/mail-oauth/${provider}`, {method: "PUT", body: JSON.stringify(data)});
-      if (editorState(ticket) !== "same") { notify(STILL_UNSAVED); return; }
-      mailOAuthForm.elements.client_secret.value = "";
-      markClean(mailOAuthForm);
-      $("#mail-oauth-error").textContent = "应用已保存；身份配置变化的邮箱须重新授权";
-    });
-  } catch (error) {
-    if (editorState(ticket) !== "closed") $("#mail-oauth-error").textContent = error.message;
-  }
-});
-
-captureMailOAuthCallback();
 
 $("#sync-all").addEventListener("click", (e) =>
   syncAll(e.currentTarget).catch((err) => notify(err.message, true)),

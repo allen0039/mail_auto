@@ -31,10 +31,10 @@ func (service *Service) gmailFolderAction(account Account, folder, action, desti
 			destination = settings.Archive
 		}
 		var sourceRole, targetRole string
-		if err := service.Store.DB.QueryRow("SELECT role FROM mail_oauth_folder_roles WHERE account_id=? AND name=?", account.ID, folder).Scan(&sourceRole); err != nil {
+		if err := service.Store.DB.QueryRow("SELECT role FROM gmail_folder_roles WHERE account_id=? AND name=?", account.ID, folder).Scan(&sourceRole); err != nil {
 			return blocked("gmail_folder_roles_missing", "请先在整理设置中探测 Gmail SPECIAL-USE 目录，再预览或执行", ErrCapability)
 		}
-		if err := service.Store.DB.QueryRow("SELECT role FROM mail_oauth_folder_roles WHERE account_id=? AND name=?", account.ID, destination).Scan(&targetRole); err != nil {
+		if err := service.Store.DB.QueryRow("SELECT role FROM gmail_folder_roles WHERE account_id=? AND name=?", account.ID, destination).Scan(&targetRole); err != nil {
 			return blocked("gmail_folder_roles_missing", "Gmail 目标目录能力尚未探测，请重新探测文件夹", ErrCapability)
 		}
 		if (sourceRole != "" && sourceRole != "inbox") || (action == "move" && targetRole != "" && targetRole != "inbox") || (action == "archive" && targetRole != "archive") {
@@ -56,7 +56,7 @@ func (service *Service) saveGmailFolderRoles(account Account, folders []FolderIn
 	if err = service.checkSnapshotIn(tx, account); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("DELETE FROM mail_oauth_folder_roles WHERE account_id=?", account.ID); err != nil {
+	if _, err = tx.Exec("DELETE FROM gmail_folder_roles WHERE account_id=?", account.ID); err != nil {
 		return err
 	}
 	for _, folder := range folders {
@@ -64,7 +64,7 @@ func (service *Service) saveGmailFolderRoles(account Account, folders []FolderIn
 		if folder.Name == "INBOX" {
 			role = "inbox"
 		}
-		if _, err = tx.Exec("INSERT INTO mail_oauth_folder_roles(account_id,name,role) VALUES(?,?,?)", account.ID, folder.Name, role); err != nil {
+		if _, err = tx.Exec("INSERT INTO gmail_folder_roles(account_id,name,role) VALUES(?,?,?)", account.ID, folder.Name, role); err != nil {
 			return err
 		}
 	}

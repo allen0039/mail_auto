@@ -1,6 +1,7 @@
 package mail
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,11 +15,10 @@ func gmailServiceFixture(t *testing.T) (*Service, Access, Message, Message) {
 	service, _, access, original := organizerFixture(t)
 	mustExec(t, service, "DELETE FROM messages WHERE ref<>?", original.Ref)
 	mustExec(t, service, "UPDATE accounts SET provider='google',host='imap.gmail.com' WHERE id=?", original.AccountID)
-	mustExec(t, service, "INSERT INTO mail_oauth_accounts(account_id,provider,login,config_version,status) VALUES(?,'google','fixture@gmail.com',0,'connected')", original.AccountID)
 	mustExec(t, service, "UPDATE messages SET gmail_message_id='18446744073709551614',metadata_version=2,flags_known=1 WHERE ref=?", original.Ref)
 	mustExec(t, service, "INSERT INTO mailboxes(account_id,name,uidvalidity,synced_at) VALUES(?,'Bills',7,1)", original.AccountID)
 	for name, role := range map[string]string{"INBOX": "inbox", "Bills": "", "Archive": "archive", "Trash": "trash"} {
-		mustExec(t, service, "INSERT INTO mail_oauth_folder_roles(account_id,name,role) VALUES(?,?,?)", original.AccountID, name, role)
+		mustExec(t, service, "INSERT INTO gmail_folder_roles(account_id,name,role) VALUES(?,?,?)", original.AccountID, name, role)
 	}
 	mustExec(t, service, "INSERT INTO messages("+messageColumns+") SELECT 'gmail-alias',account_id,'Bills',uidvalidity,99,subject,sender,sent_at,unread,size,received_at,flagged,flags_known,changed_at,metadata_version,recipients,cc,message_id,in_reply_to,thread_refs,list_id,has_attachment,gmail_message_id FROM messages WHERE ref=?", original.Ref)
 	message, err := service.Message(original.Ref)
@@ -103,12 +103,12 @@ func TestGmailFolderRolesAndStaleProbe(t *testing.T) {
 	if err = service.gmailFolderAction(account, "INBOX", "archive", "", settings); err != nil {
 		t.Fatal("localized All Mail archive blocked", err)
 	}
-	mustExec(t, service, "UPDATE mail_oauth_accounts SET generation=generation+1 WHERE account_id=?", account.ID)
+	mustExec(t, service, "UPDATE accounts SET folders='[\"INBOX\"]' WHERE id=?", account.ID)
 	if err = service.saveGmailFolderRoles(account, []FolderInfo{{Name: "stale"}}); !errors.Is(err, ErrConflict) {
 		t.Fatal("stale probe published roles", err)
 	}
 	var role string
-	if err = service.Store.DB.QueryRow("SELECT role FROM mail_oauth_folder_roles WHERE account_id=? AND name='Localized All'", account.ID).Scan(&role); err != nil || role != "archive" {
+	if err = service.Store.DB.QueryRow("SELECT role FROM gmail_folder_roles WHERE account_id=? AND name='Localized All'", account.ID).Scan(&role); err != nil || role != "archive" {
 		t.Fatal("stale probe replaced live capability state", err)
 	}
 }
@@ -151,33 +151,102 @@ func TestGmailMultiSourceRuleOrderAndProtection(t *testing.T) {
 	}
 }
 
-func TestOAuthAccountLifecycleAndLegacyCompatibility(t *testing.T) {
+type gmailVerifyRemote struct {
+	*organizerRemote
+	foldersErr error
+}
+
+func (r *gmailVerifyRemote) Folders(ctx context.Context, a Account, pw string) ([]string, error) {
+	if r.foldersErr != nil {
+		return nil, r.foldersErr
+	}
+	return r.organizerRemote.Folders(ctx, a, pw)
+}
+
+func TestGmailAppPasswordLifecycleAndLegacyCompatibility(t *testing.T) {
 	service, _, _, message := organizerFixture(t)
-	for _, provider := range []string{"google", "microsoft"} {
-		account, err := service.Create(AccountInput{Name: provider, Provider: provider, Username: "fixture@example.test"})
-		if err != nil || account.Authentication != "oauth2" || account.OAuth.Status != "configuration_missing" {
-			t.Fatal("pending account creation", err)
-		}
-		if secret, err := service.password(account); err != nil || secret != "" {
-			t.Fatal("token masqueraded as password")
-		}
-		if _, err = service.Update(account.ID, AccountInput{Name: provider, Provider: provider, Username: "other@example.test"}); !errors.Is(err, ErrAccountInput) {
-			t.Fatal("OAuth account silently replaced")
-		}
-		if _, err = service.Create(AccountInput{Name: provider, Provider: provider, Username: "fixture@example.test", Password: "password"}); err == nil {
-			t.Fatal("OAuth password accepted")
-		}
-		if err = service.Delete(account.ID); err != nil {
-			t.Fatal(err)
-		}
-		var count int
-		if err = service.Store.DB.QueryRow("SELECT count(*) FROM mail_oauth_accounts WHERE account_id=?", account.ID).Scan(&count); err != nil || count != 0 {
-			t.Fatal("OAuth account orphaned", err)
+	verifyRemote := &gmailVerifyRemote{organizerRemote: service.Remote.(*organizerRemote)}
+	service.Remote = verifyRemote
+	// Gmail requires App Password, enforces imap.gmail.com:993, strips space grouping, and rejects secret_file.
+	for _, bad := range []AccountInput{
+		{Name: "gm", Provider: "google", Username: "fixture@gmail.com"},
+		{Name: "gm", Provider: "google", Username: "fixture@gmail.com", Password: "abcd", Host: "imap.qq.com"},
+		{Name: "gm", Provider: "google", Username: "fixture@gmail.com", Password: "abcd", Port: 143},
+		{Name: "gm", Provider: "google", Username: "fixture@gmail.com", SecretFile: "gm_secret"},
+	} {
+		if _, err := service.Create(bad); err == nil {
+			t.Fatalf("unsafe Gmail input accepted: %+v", bad)
 		}
 	}
+	verifyRemote.foldersErr = errors.New("bad credentials")
+	if _, err := service.Create(AccountInput{Name: "gm", Provider: "google", Username: "fixture@gmail.com", Password: "abcd efgh ijkl mnop"}); err == nil {
+		t.Fatal("unverified Gmail account created")
+	}
+	verifyRemote.foldersErr = nil
+	gm, err := service.Create(AccountInput{Name: "gm", Provider: "google", Username: "fixture@gmail.com", Password: "abcd efgh ijkl mnop"})
+	if err != nil || gm.CredentialSource != "encrypted" || gm.Host != "imap.gmail.com" || gm.Port != 993 {
+		t.Fatalf("Gmail App Password creation failed: %+v err=%v", gm, err)
+	}
+	if pw, err := service.password(gm); err != nil || pw != "abcdefghijklmnop" {
+		t.Fatalf("grouped App Password not normalized: %q err=%v", pw, err)
+	}
+	// Password rotation failure preserves existing secret; blank password preserves existing secret.
+	verifyRemote.foldersErr = errors.New("rejected")
+	if _, err = service.Update(gm.ID, AccountInput{Name: "gm", Provider: "google", Username: "fixture@gmail.com", Password: "wrong new pass"}); err == nil {
+		t.Fatal("failed Gmail rotation succeeded")
+	}
+	verifyRemote.foldersErr = nil
+	afterFail, _ := service.Account(gm.ID)
+	if !bytes.Equal(afterFail.Secret, gm.Secret) {
+		t.Fatal("failed password rotation overwrote working credential")
+	}
+	if _, err = service.Update(gm.ID, AccountInput{Name: "gm-renamed", Provider: "google", Username: "fixture@gmail.com"}); err != nil {
+		t.Fatal(err)
+	}
+	afterRename, _ := service.Account(gm.ID)
+	if afterRename.Name != "gm-renamed" || !bytes.Equal(afterRename.Secret, gm.Secret) {
+		t.Fatal("blank update overwrote Gmail password")
+	}
+	if _, err = service.Update(gm.ID, AccountInput{Name: "gm-renamed", Provider: "google", Username: "fixture@gmail.com", Password: "qrst uvwx yzab cdef"}); err != nil {
+		t.Fatal(err)
+	}
+	rotated, _ := service.Account(gm.ID)
+	if pw, err := service.password(rotated); err != nil || pw != "qrstuvwxyzabcdef" {
+		t.Fatalf("rotated password mismatch: %q err=%v", pw, err)
+	}
+
 	legacy, err := service.Account(message.AccountID)
-	if err != nil || legacy.Authentication != "password" || legacy.OAuth != nil {
+	if err != nil || legacy.CredentialSource != "encrypted" {
 		t.Fatal("legacy auth changed", err)
+	}
+}
+
+func TestRetiredMailboxAndGmailWithoutPasswordCannotConnect(t *testing.T) {
+	service, _, message, _ := gmailServiceFixture(t)
+	mustExec(t, service, "UPDATE accounts SET secret=NULL WHERE id=?", message.AccountID)
+	account, err := service.Account(message.AccountID)
+	if err != nil || account.CredentialSource != "missing" {
+		t.Fatal("legacy Gmail should require an app password", err)
+	}
+	if _, err = service.StartSync(account.ID); !errors.Is(err, ErrCapability) {
+		t.Fatal("Gmail without credentials admitted for sync", err)
+	}
+	if _, err = service.Update(account.ID, AccountInput{Name: account.Name, Provider: account.Provider, Username: account.Username, Folders: account.Folders, Password: "abcd efgh ijkl mnop"}); err != nil {
+		t.Fatal("cannot restore legacy Gmail with an app password", err)
+	}
+	if _, err = service.Message(message.Ref); err != nil {
+		t.Fatal("existing Gmail index removed", err)
+	}
+	mustExec(t, service, "UPDATE accounts SET provider='microsoft',host='outlook.office365.com' WHERE id=?", account.ID)
+	account, err = service.Account(account.ID)
+	if err != nil || account.CredentialSource != "unsupported" {
+		t.Fatal("retired provider remains available", err)
+	}
+	if _, err = service.password(account); !errors.Is(err, ErrCapability) {
+		t.Fatal("retired provider returned stored login credentials", err)
+	}
+	if _, err = service.StartSync(account.ID); !errors.Is(err, ErrCapability) {
+		t.Fatal("retired provider admitted for sync", err)
 	}
 }
 

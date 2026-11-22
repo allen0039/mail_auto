@@ -62,7 +62,11 @@ func remoteFailure(conn *connection, operation string, err error) error {
 	var proxyErr *network.Error
 	switch {
 	case errors.As(err, &proxyErr):
-		e.reason, e.code = "网络连接失败（"+proxyErr.Stage+" / "+proxyErr.Code+"）", proxyErr.Code
+		if proxyErr.Code == "target_tls_failed" || proxyErr.Code == "proxy_tls_failed" {
+			e.reason, e.code = "TLS 证书校验或握手失败（"+proxyErr.Stage+" / "+proxyErr.Code+"）", proxyErr.Code
+		} else {
+			e.reason, e.code = "网络连接失败（"+proxyErr.Stage+" / "+proxyErr.Code+"）", proxyErr.Code
+		}
 		e.retryable = proxyErr.Retryable()
 	case errors.Is(err, errResponseLimit):
 		e.reason = "服务器响应超过 32 MiB 限制"

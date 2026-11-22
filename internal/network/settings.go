@@ -252,9 +252,6 @@ func (m *Manager) Save(in Input) (Settings, error) {
 	if _, err = tx.Exec("INSERT INTO network_settings(id,version,payload) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,payload=excluded.payload", out.Version, string(raw)); err != nil {
 		return old, err
 	}
-	if _, err = tx.Exec("UPDATE mail_oauth_accounts SET generation=generation+1"); err != nil {
-		return old, err
-	}
 	nextAgent, err := m.resolve(tx, "agent", "")
 	if err != nil {
 		return old, err
@@ -292,17 +289,7 @@ func SetAccount(tx *sql.Tx, id string, policy Policy) error {
 			return ErrConfig
 		}
 	}
-	previous := Policy{Mode: "inherit"}
-	if err = tx.QueryRow("SELECT mode,proxy_id FROM account_network WHERE account_id=?", id).Scan(&previous.Mode, &previous.ProxyID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
 	_, err = tx.Exec("INSERT INTO account_network(account_id,mode,proxy_id) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET mode=excluded.mode,proxy_id=excluded.proxy_id", id, policy.Mode, policy.ProxyID)
-	if err != nil {
-		return err
-	}
-	if previous != policy {
-		_, err = tx.Exec("UPDATE mail_oauth_accounts SET generation=generation+1 WHERE account_id=?", id)
-	}
 	return err
 }
 
@@ -363,6 +350,22 @@ func (m *Manager) resolve(q querier, scope, accountID string) (Route, error) {
 
 func (m *Manager) ProfileRoute(id string) (Route, error) {
 	return m.route(m.Store.DB, Policy{Mode: "proxy", ProxyID: id})
+}
+
+// ResolvePolicy resolves an account network policy before the account row is persisted.
+func (m *Manager) ResolvePolicy(policy Policy) (Route, error) {
+	policy, err := NormalizePolicy(policy, true)
+	if err != nil {
+		return Route{}, err
+	}
+	if policy.Mode == "inherit" {
+		settings, err := load(m.Store.DB)
+		if err != nil {
+			return Route{}, err
+		}
+		policy = settings.Global
+	}
+	return m.route(m.Store.DB, policy)
 }
 
 func (m *Manager) route(q querier, policy Policy) (Route, error) {

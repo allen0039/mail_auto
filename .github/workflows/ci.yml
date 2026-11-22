@@ -23,6 +23,11 @@ jobs:
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: release-verify fixture tests
         run: python3 -m unittest discover -s scripts/release-verify -v
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - run: docker compose config --quiet
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
@@ -30,6 +35,35 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: false
+          outputs: type=oci,dest=${{ runner.temp }}/mail-auto.oci.tar
+      - name: Report runtime image size per platform
+        shell: bash
+        run: |
+          python3 - "$RUNNER_TEMP/mail-auto.oci.tar" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          import sys
+          import tarfile
+
+          with tarfile.open(sys.argv[1]) as archive:
+              def load(path):
+                  return json.load(archive.extractfile(path))
+
+              def platform_sizes(index):
+                  for entry in index["manifests"]:
+                      platform = entry.get("platform", {})
+                      architecture = platform.get("architecture")
+                      path = "blobs/" + entry["digest"].replace(":", "/")
+                      if entry["mediaType"].endswith(("index.v1+json", "manifest.list.v2+json")):
+                          yield from platform_sizes(load(path))
+                      elif platform.get("os") == "linux" and architecture in {"amd64", "arm64"}:
+                          yield architecture, sum(layer["size"] for layer in load(path)["layers"])
+
+              sizes = dict(platform_sizes(load("index.json")))
+              if set(sizes) != {"amd64", "arm64"}:
+                  sys.exit("runtime image is missing a release platform")
+              for architecture, size in sorted(sizes.items()):
+                  print(f"- linux/{architecture}: {size:,} bytes of compressed layers")
+          PY
 
   # Admin UI checks (scripts/ui-check) on a throwaway local instance. Development
   # dependencies only: nothing here enters the runtime image (see .dockerignore).
@@ -60,7 +94,7 @@ jobs:
           # Ubuntu 24.04 blocks the unprivileged user namespaces Chrome's sandbox
           # needs for a browser outside the system package; allow them on this VM.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: UI checks (settings, model, ownership, task-editor, manual-keep, mail-oauth at 1280/375/390)
+      - name: UI checks (settings, model, ownership, task-editor, manual-keep, mail-account at 1280/375/390)
         run: scripts/ui-check/run.sh
       - name: UI gate regression (27 cases, none skipped)
         env:

@@ -1,18 +1,8 @@
 package mail
 
-import (
-	"database/sql"
-	"mail-auto/internal/mailoauth"
-)
+import "database/sql"
 
-func (service *Service) OAuthManager() *mailoauth.Manager {
-	service.oauthOnce.Do(func() {
-		service.oauth = &mailoauth.Manager{Store: service.Store, Vault: service.Vault, Network: service.Network, Changed: service.oauthChanged}
-	})
-	return service.oauth
-}
-
-func (service *Service) oauthChanged(id string) {
+func (service *Service) credentialsChanged(id string) {
 	service.mu.Lock()
 	if service.epoch == nil {
 		service.epoch = map[string]uint64{}
@@ -38,26 +28,6 @@ func (service *Service) oauthChanged(id string) {
 		remote.InvalidateCredentials(id)
 	}
 	service.wakeAutomatic()
-}
-
-func (service *Service) accountOAuth(account *Account, query interface{ QueryRow(string, ...any) *sql.Row }) error {
-	account.Authentication = "password"
-	if !mailoauth.IsProvider(account.Provider) {
-		return nil
-	}
-	account.Authentication, account.CredentialSource = "oauth2", "oauth2"
-	var auth mailoauth.Account
-	auth.ID, auth.Provider = account.ID, account.Provider
-	err := query.QueryRow("SELECT generation,config_version,status,error_code FROM mail_oauth_accounts WHERE account_id=?", account.ID).Scan(&auth.Generation, &auth.ConfigVersion, &auth.Status, &auth.ErrorCode)
-	if err != nil {
-		return err
-	}
-	account.OAuth = &auth
-	if auth.ConfigVersion == 0 {
-		account.OAuth.Status = "configuration_missing"
-	}
-	account.AuthSource = service.OAuthManager()
-	return nil
 }
 
 func (service *Service) checkSnapshot(account Account) error {
